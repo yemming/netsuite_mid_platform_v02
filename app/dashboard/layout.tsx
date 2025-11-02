@@ -17,14 +17,45 @@ export default function DashboardLayout({
 
   useEffect(() => {
     const checkUser = async () => {
-      const supabase = createClient()
-      const { data: { user }, error } = await supabase.auth.getUser()
-      if (error || !user) {
+      try {
+        const supabase = createClient()
+        
+        // 先檢查 session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        console.log('Session check:', { session: !!session, error: sessionError })
+        
+        // 再檢查 user
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        console.log('User check:', { user: !!user, email: user?.email, error: userError })
+        
+        if (userError) {
+          console.error('Auth error:', userError)
+          alert(`認證錯誤: ${userError.message}`)
+          router.push('/')
+          return
+        }
+        
+        if (!user) {
+          console.warn('No user found')
+          alert('未登入，請重新登入')
+          router.push('/')
+          return
+        }
+        
+        // 檢查郵件是否已驗證（可選，視需求決定是否要求驗證）
+        // if (user.email && !user.email_confirmed_at) {
+        //   alert('請先驗證您的電子郵件地址')
+        //   router.push('/')
+        //   return
+        // }
+        
+        setUser(user)
+        setLoading(false)
+      } catch (err: any) {
+        console.error('Check user error:', err)
+        alert(`檢查用戶時發生錯誤: ${err.message}`)
         router.push('/')
-        return
       }
-      setUser(user)
-      setLoading(false)
     }
     checkUser()
   }, [router])
