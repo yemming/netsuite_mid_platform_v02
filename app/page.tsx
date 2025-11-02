@@ -11,13 +11,32 @@ export default function Home() {
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const supabase = createClient()
+  const [supabaseError, setSupabaseError] = useState<string | null>(null)
+  
+  // 安全地創建 Supabase 客戶端
+  let supabase: ReturnType<typeof createClient> | null = null
+  try {
+    supabase = createClient()
+  } catch (err: any) {
+    console.error('Supabase 初始化錯誤:', err)
+    setSupabaseError(err.message || 'Supabase 初始化失敗')
+  }
 
   useEffect(() => {
+    if (!supabase) return
+    
     const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        router.push('/dashboard')
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser()
+        if (error) {
+          console.error('檢查用戶時發生錯誤:', error)
+          return
+        }
+        if (user) {
+          router.push('/dashboard')
+        }
+      } catch (err: any) {
+        console.error('檢查用戶失敗:', err)
       }
     }
     checkUser()
@@ -25,29 +44,58 @@ export default function Home() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (!supabase) {
+      setError('Supabase 未初始化，無法登入。請檢查環境變數設定。')
+      return
+    }
+    
     setLoading(true)
     setError(null)
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
+        const redirectUrl = typeof window !== 'undefined' 
+          ? `${window.location.origin}/dashboard`
+          : 'https://netsuite-mid-platform-v02.zeabur.app/dashboard'
+        
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/dashboard`,
+            emailRedirectTo: redirectUrl,
           },
         })
+        
         if (error) throw error
-        alert('註冊成功！請檢查您的電子郵件以驗證帳號。')
+        
+        if (data.user && !data.session) {
+          // 需要郵件驗證
+          alert('註冊成功！請檢查您的電子郵件以驗證帳號。')
+        } else if (data.session) {
+          // 直接登入成功
+          router.push('/dashboard')
+        }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         })
-        if (error) throw error
-        router.push('/dashboard')
+        
+        if (error) {
+          console.error('登入錯誤:', error)
+          throw error
+        }
+        
+        if (data.session) {
+          console.log('登入成功，session:', !!data.session)
+          router.push('/dashboard')
+        } else {
+          setError('登入失敗：無法建立 session')
+        }
       }
     } catch (error: any) {
+      console.error('認證錯誤:', error)
       setError(error.message || '發生錯誤')
     } finally {
       setLoading(false)
@@ -93,8 +141,21 @@ export default function Home() {
             />
           </div>
 
+          {supabaseError && (
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded-lg text-sm mb-4">
+              <strong>⚠️ 設定錯誤：</strong> {supabaseError}
+              <div className="mt-2 text-xs">
+                請確認 Zeabur 環境變數已正確設置：
+                <ul className="list-disc list-inside mt-1">
+                  <li>NEXT_PUBLIC_SUPABASE_URL</li>
+                  <li>NEXT_PUBLIC_SUPABASE_ANON_KEY</li>
+                </ul>
+              </div>
+            </div>
+          )}
+          
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg text-sm">
               {error}
             </div>
           )}
