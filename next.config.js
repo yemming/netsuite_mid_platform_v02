@@ -16,6 +16,8 @@ const nextConfig = {
       ],
     },
   },
+  // 確保靜態資源路徑正確
+  distDir: '.next',
 }
 
 module.exports = nextConfig

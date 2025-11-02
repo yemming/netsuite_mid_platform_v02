@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node copy-standalone-assets.js",
     "start": "node server.js",
     "start:standard": "next start",
     "lint": "next lint"
