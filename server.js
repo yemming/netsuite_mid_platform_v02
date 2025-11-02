@@ -5,6 +5,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 // 全局錯誤處理：捕獲未處理的錯誤，記錄但不立即退出
 // 這樣可以幫助診斷問題，同時不會阻止服務器運行
@@ -38,17 +39,31 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // 優雅關閉處理
-process.on('SIGTERM', () => {
+// 注意：信號處理器會在啟動服務器後更新，以轉發信號到服務器進程
+let serverProcess = null;
+
+const handleSIGTERM = () => {
   console.log('SIGTERM received, shutting down gracefully');
   isExiting = true;
-  process.exit(0);
-});
+  if (serverProcess) {
+    serverProcess.kill('SIGTERM');
+  } else {
+    process.exit(0);
+  }
+};
 
-process.on('SIGINT', () => {
+const handleSIGINT = () => {
   console.log('SIGINT received, shutting down gracefully');
   isExiting = true;
-  process.exit(0);
-});
+  if (serverProcess) {
+    serverProcess.kill('SIGINT');
+  } else {
+    process.exit(0);
+  }
+};
+
+process.on('SIGTERM', handleSIGTERM);
+process.on('SIGINT', handleSIGINT);
 
 // 監聽進程退出事件
 process.on('exit', (code) => {
@@ -142,84 +157,48 @@ try {
   console.log('========================================');
   
   // Next.js standalone server.js 是一個可執行腳本
-  // 直接 require 它應該會執行並啟動 HTTP 服務器
-  // 根據 Next.js 文檔，standalone server.js 會在 require 時自動啟動
-  console.log('Requiring Next.js standalone server.js...');
-  require('./server.js');
+  // 根據 Next.js 文檔，standalone server.js 應該直接執行
+  // 我們使用 spawn 來啟動它，確保它作為主進程運行
+  console.log('Starting Next.js standalone server process...');
   
-  console.log('========================================');
-  console.log('Next.js standalone server script executed');
-  console.log('If server started correctly, it should be listening on port', port);
-  console.log('Waiting for server to initialize...');
-  console.log('========================================');
+  // 使用 spawn 啟動 Next.js standalone server
+  // 這樣可以確保它正確啟動並監聽端口
+  serverProcess = spawn('node', ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: port,
+      WEB_PORT: port,
+      NODE_ENV: process.env.NODE_ENV || 'production',
+    },
+    stdio: 'inherit', // 轉發所有輸出到父進程
+  });
   
-  // 等待一小段時間讓服務器完全啟動
-  setTimeout(() => {
-    console.log('========================================');
-    console.log('Server startup check (5 seconds after load)');
-    console.log('Expected listening PORT:', port);
-    console.log('Process uptime:', Math.floor(process.uptime()), 'seconds');
-    console.log('Event loop active:', process._getActiveHandles().length, 'active handles');
-    console.log('Event loop requests:', process._getActiveRequests().length, 'active requests');
-    
-    // 檢查是否有監聽的服務器
-    const net = require('net');
-    const testServer = net.createServer();
-    testServer.once('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.log('✅ Port', port, 'is in use (good - server is listening)');
-      } else {
-        console.log('⚠️ Port check error:', err.code);
-      }
-    });
-    testServer.once('listening', () => {
-      console.log('⚠️ Port', port, 'is NOT in use (server may not be listening)');
-      testServer.close();
-    });
-    testServer.listen(port, () => {
-      console.log('⚠️ Port', port, 'is available (server may not be listening)');
-      testServer.close();
-    });
-    setTimeout(() => {
-      testServer.close();
-    }, 1000);
-    
-    console.log('========================================');
-  }, 5000);
+  // 處理服務器進程的事件
+  serverProcess.on('error', (error) => {
+    console.error('Failed to start server process:', error);
+    process.exit(1);
+  });
   
-  // Next.js standalone server 應該已經開始監聽端口
-  // 它會自動保持事件循環運行
-  // 添加健康檢查日誌來確認服務器運行狀態
-  
-  // 定期輸出健康檢查日誌，確保進程持續運行
-  let healthCheckInterval = setInterval(() => {
-    const uptime = Math.floor(process.uptime());
-    console.log(`[Health Check] Server is running (uptime: ${uptime}s, port: ${port})`);
-    
-    // 檢查事件循環是否活躍
-    if (process.listenerCount('exit') === 0) {
-      console.warn('[Warning] No exit listeners found');
-    }
-  }, 30000); // 每30秒輸出一次健康檢查
-  
-  // 確保在進程退出時清理間隔
-  process.on('exit', () => {
-    if (healthCheckInterval) {
-      clearInterval(healthCheckInterval);
+  serverProcess.on('exit', (code, signal) => {
+    console.error(`Server process exited with code ${code} and signal ${signal}`);
+    if (!isExiting) {
+      process.exit(code || 1);
     }
   });
   
-  // 初始健康檢查（3秒後）
-  setTimeout(() => {
-    console.log('[Health Check] Server is still running after 3 seconds');
-  }, 3000);
+  console.log('========================================');
+  console.log('Next.js standalone server process started');
+  console.log('Server process PID:', serverProcess.pid);
+  console.log('Server should be starting and listening on port', port);
+  console.log('Waiting for server to initialize...');
+  console.log('========================================');
   
-  // 10秒後再次檢查
-  setTimeout(() => {
-    console.log('[Health Check] Server is still running after 10 seconds');
-  }, 10000);
-  
-  console.log('Next.js standalone server startup complete. Waiting for requests...');
+  // 主進程等待服務器進程
+  // Next.js standalone server 會在自己的進程中運行並處理所有請求
+  // 我們只需要確保主進程不會退出，直到服務器進程退出
+  console.log('Next.js standalone server process started successfully.');
+  console.log('Main process will wait for server process to exit.');
   
 } catch (error) {
   console.error('========================================');
