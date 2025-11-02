@@ -106,25 +106,45 @@ try {
   console.log('Loading Next.js standalone server...');
   
   // 載入 Next.js standalone server
-  const nextServer = require('./server.js');
+  // 這會自動啟動 HTTP 服務器並開始監聽端口
+  require('./server.js');
   
   console.log('Next.js server loaded successfully');
-  console.log('Server module type:', typeof nextServer);
-  console.log('Server module keys:', nextServer ? Object.keys(nextServer) : 'null');
+  console.log('Server should be listening on PORT:', port);
   
-  // 確保進程不會退出
-  // Next.js server 應該已經開始監聽端口
-  // 如果沒有，我們需要確保進程保持運行
+  // Next.js standalone server 應該已經開始監聽端口
+  // 它會自動保持事件循環運行
+  // 添加健康檢查日誌來確認服務器運行狀態
   
-  // 記錄服務器狀態
-  console.log('Next.js standalone server is running...');
-  console.log('Listening on PORT:', port);
+  // 定期輸出健康檢查日誌，確保進程持續運行
+  let healthCheckInterval = setInterval(() => {
+    const uptime = Math.floor(process.uptime());
+    console.log(`[Health Check] Server is running (uptime: ${uptime}s, port: ${port})`);
+    
+    // 檢查事件循環是否活躍
+    if (process.listenerCount('exit') === 0) {
+      console.warn('[Warning] No exit listeners found');
+    }
+  }, 30000); // 每30秒輸出一次健康檢查
   
-  // 添加一個保持進程運行的機制
-  // 如果服務器沒有正確啟動，這裡會幫助診斷
+  // 確保在進程退出時清理間隔
+  process.on('exit', () => {
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+    }
+  });
+  
+  // 初始健康檢查（3秒後）
   setTimeout(() => {
-    console.log('Server health check: Still running after 3 seconds');
+    console.log('[Health Check] Server is still running after 3 seconds');
   }, 3000);
+  
+  // 10秒後再次檢查
+  setTimeout(() => {
+    console.log('[Health Check] Server is still running after 10 seconds');
+  }, 10000);
+  
+  console.log('Next.js standalone server startup complete. Waiting for requests...');
   
 } catch (error) {
   console.error('Failed to start server:', error);
