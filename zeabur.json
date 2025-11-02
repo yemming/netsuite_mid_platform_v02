@@ -4,7 +4,12 @@
     "installCommand": "npm install"
   },
   "deploy": {
-    "startCommand": "node .next/standalone/server.js"
+    "startCommand": "node .next/standalone/server.js",
+    "healthcheck": {
+      "path": "/",
+      "interval": 30,
+      "timeout": 10
+    }
   }
 }
 
