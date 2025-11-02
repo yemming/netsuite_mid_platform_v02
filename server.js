@@ -8,19 +8,25 @@ const path = require('path');
 
 const standalonePath = path.join(__dirname, '.next', 'standalone', 'server.js');
 
-// 處理 PORT 環境變數（支援 Zeabur 的 ${WEB_PORT} 格式）
+// 處理 PORT 環境變數（Zeabur 會自動設置 PORT 或 WEB_PORT）
+// 優先順序：PORT > WEB_PORT > 3000
 let port = process.env.PORT || process.env.WEB_PORT || '3000';
-// 如果 PORT 包含 ${WEB_PORT}，嘗試從環境中解析
-if (port.includes('${WEB_PORT}')) {
+
+// 如果 PORT 包含變數引用格式（如 ${WEB_PORT}），嘗試解析
+if (typeof port === 'string' && port.includes('$')) {
+  // 嘗試從實際的 WEB_PORT 環境變數獲取
   port = process.env.WEB_PORT || '3000';
+  console.warn('PORT contains variable reference, using WEB_PORT instead:', port);
 }
-// 移除任何 ${} 格式的變數引用
-port = port.replace(/\$\{[^}]+\}/g, process.env.WEB_PORT || '3000');
+
+// 確保 port 是數字字串
+port = String(port).trim();
 
 console.log('Starting Next.js standalone server...');
 console.log('Standalone path:', standalonePath);
+console.log('Container working directory:', path.join(__dirname, '.next', 'standalone'));
 console.log('Using PORT:', port);
-console.log('Environment variables:', {
+console.log('All PORT-related env vars:', {
   PORT: process.env.PORT,
   WEB_PORT: process.env.WEB_PORT,
   NODE_ENV: process.env.NODE_ENV,
