@@ -18,7 +18,16 @@ export default function DashboardLayout({
   useEffect(() => {
     const checkUser = async () => {
       try {
-        const supabase = createClient()
+        // 安全地創建 Supabase 客戶端
+        let supabase
+        try {
+          supabase = createClient()
+        } catch (clientError: any) {
+          console.error('無法初始化 Supabase 客戶端:', clientError)
+          alert('應用程式設定錯誤，請聯繫管理員')
+          setLoading(false)
+          return
+        }
         
         // 先檢查 session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession()
@@ -30,15 +39,16 @@ export default function DashboardLayout({
         
         if (userError) {
           console.error('Auth error:', userError)
-          alert(`認證錯誤: ${userError.message}`)
+          // 不要顯示 alert，直接重定向
           router.push('/')
+          setLoading(false)
           return
         }
         
         if (!user) {
           console.warn('No user found')
-          alert('未登入，請重新登入')
           router.push('/')
+          setLoading(false)
           return
         }
         
@@ -53,17 +63,24 @@ export default function DashboardLayout({
         setLoading(false)
       } catch (err: any) {
         console.error('Check user error:', err)
-        alert(`檢查用戶時發生錯誤: ${err.message}`)
+        // 不要顯示 alert，直接重定向
         router.push('/')
+        setLoading(false)
       }
     }
     checkUser()
   }, [router])
 
   const handleSignOut = async () => {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/')
+    try {
+      const supabase = createClient()
+      await supabase.auth.signOut()
+    } catch (err: any) {
+      console.error('登出錯誤:', err)
+      // 即使出錯也要重定向，確保用戶被登出
+    } finally {
+      router.push('/')
+    }
   }
 
   if (loading) {

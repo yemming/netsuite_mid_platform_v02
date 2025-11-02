@@ -12,15 +12,20 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [supabaseError, setSupabaseError] = useState<string | null>(null)
+  const [supabase, setSupabase] = useState<ReturnType<typeof createClient> | null>(null)
   
-  // 安全地創建 Supabase 客戶端
-  let supabase: ReturnType<typeof createClient> | null = null
-  try {
-    supabase = createClient()
-  } catch (err: any) {
-    console.error('Supabase 初始化錯誤:', err)
-    setSupabaseError(err.message || 'Supabase 初始化失敗')
-  }
+  // 安全地創建 Supabase 客戶端（在客戶端環境中）
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    try {
+      const client = createClient()
+      setSupabase(client)
+    } catch (err: any) {
+      console.error('Supabase 初始化錯誤:', err)
+      setSupabaseError(err.message || 'Supabase 初始化失敗')
+    }
+  }, [])
 
   useEffect(() => {
     if (!supabase) return

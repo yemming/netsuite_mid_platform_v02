@@ -8,7 +8,13 @@ export async function createClient() {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Supabase 環境變數未設置: NEXT_PUBLIC_SUPABASE_URL 或 NEXT_PUBLIC_SUPABASE_ANON_KEY')
+    const missing = []
+    if (!supabaseUrl) missing.push('NEXT_PUBLIC_SUPABASE_URL')
+    if (!supabaseAnonKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY')
+    
+    console.error('Supabase 環境變數未設置:', missing.join(', '))
+    // 在服務器端，我們仍然拋出錯誤，但提供更詳細的信息
+    throw new Error(`Supabase 環境變數未設置: ${missing.join(', ')}`)
   }
 
   return createServerClient(
