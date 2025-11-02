@@ -56,25 +56,15 @@ process.on('exit', (code) => {
 });
 
 // 處理 PORT 環境變數
-// Zeabur 可能設置 PORT=${WEB_PORT}，需要正確解析
-// 注意：Zeabur 通常會設置 WEB_PORT，如果 PORT 包含變數引用，使用 WEB_PORT 的值
-let port = process.env.PORT || process.env.WEB_PORT;
+// Zeabur 配置：直接使用 8080 端口
+// 優先順序：PORT 環境變數 > WEB_PORT 環境變數 > 默認 8080
+let port = process.env.PORT || process.env.WEB_PORT || '8080';
 
-// 如果 PORT 包含 ${WEB_PORT} 或其他變數引用，嘗試解析
+// 如果 PORT 包含變數引用（如 ${WEB_PORT}），嘗試解析
 if (port && typeof port === 'string' && port.includes('$')) {
   // 嘗試從 WEB_PORT 獲取實際值
-  port = process.env.WEB_PORT;
-  if (port) {
-    console.log('PORT contains variable reference, using WEB_PORT:', port);
-  }
-}
-
-// 如果仍然沒有有效的端口，根據環境設置默認值
-// Zeabur 通常使用 8080，本地開發使用 3000
-if (!port || port.trim() === '' || port === '${WEB_PORT}') {
-  // 檢查是否在 Zeabur 環境（有 WEB_PORT 變數通常表示 Zeabur 環境）
   port = process.env.WEB_PORT || '8080';
-  console.log('Using default port:', port, '(WEB_PORT:', process.env.WEB_PORT, ')');
+  console.log('PORT contains variable reference, using WEB_PORT or default:', port);
 }
 
 // 確保 port 是有效的數字字符串
@@ -85,6 +75,12 @@ const portNum = parseInt(port, 10);
 if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
   console.error(`Invalid port number: ${port}, defaulting to 8080`);
   port = '8080';
+}
+
+// 最終確保使用 8080（Zeabur 配置要求）
+if (process.env.NODE_ENV === 'production') {
+  port = '8080';
+  console.log('Production environment detected, forcing port to 8080');
 }
 
 // 設置環境變數（確保在載入 Next.js server 之前設置）
