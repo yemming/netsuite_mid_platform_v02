@@ -85,30 +85,45 @@ export default function DashboardLayout({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">
-        <div className="text-xl text-gray-900 dark:text-gray-100">載入中...</div>
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-xl text-gray-900">載入中...</div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
+    <div className="flex h-screen bg-white">
       {/* Sidebar */}
       <Sidebar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Navbar */}
-        <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+      <div className="flex-1 flex flex-col overflow-hidden bg-white">
+        {/* Top Navbar - NetSuite Style */}
+        <nav className="bg-white shadow-sm border-b border-gray-200">
           <div className="px-6 py-4">
             <div className="flex justify-between items-center">
-              <div></div>
+              <div className="flex items-center space-x-4">
+                <span className="text-sm text-gray-500">Updated just now</span>
+                <button className="px-4 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-sm hover:bg-gray-50 transition-colors">
+                  Personalize view
+                </button>
+              </div>
               <div className="flex items-center space-x-4">
                 <ThemeToggle />
-                <span className="text-sm text-gray-600 dark:text-gray-300">{user?.email}</span>
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-[#1a3d2e] flex items-center justify-center">
+                    <span className="text-white text-xs font-semibold">
+                      {user?.email?.charAt(0).toUpperCase() || 'U'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-gray-900">{user?.email?.split('@')[0] || 'User'}</span>
+                    <span className="text-xs text-gray-500">Administrator</span>
+                  </div>
+                </div>
                 <button
                   onClick={handleSignOut}
-                  className="px-4 py-2 bg-indigo-600 dark:bg-indigo-700 text-white rounded-lg hover:bg-indigo-700 dark:hover:bg-indigo-800 transition-colors text-sm"
+                  className="px-4 py-2 bg-[#1a3d2e] text-white rounded-lg hover:bg-[#2a4d3e] transition-colors text-sm font-medium"
                 >
                   登出
                 </button>
@@ -117,8 +132,8 @@ export default function DashboardLayout({
           </div>
         </nav>
 
-        {/* Page Content */}
-        <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        {/* Page Content - White Background */}
+        <main className="flex-1 overflow-y-auto bg-white">
           {children}
         </main>
       </div>

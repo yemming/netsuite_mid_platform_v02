@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { TrendingUp, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 interface ConnectionStatus {
   connected: boolean
@@ -42,7 +43,6 @@ export default function Dashboard() {
   useEffect(() => {
     const checkSupabaseConnection = async () => {
       try {
-        // 檢查環境變數是否設定
         const hasEnvVars = 
           process.env.NEXT_PUBLIC_SUPABASE_URL && 
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -56,24 +56,19 @@ export default function Dashboard() {
           return
         }
 
-        // 測試 Supabase 連線 - 取得使用者資訊來驗證認證系統
         const { data: { user }, error: userError } = await supabase.auth.getUser()
         
         if (userError) {
           throw userError
         }
 
-        // 如果成功取得使用者，表示 Supabase 認證系統連線正常
         if (user) {
-          // 進一步測試 Supabase 服務是否可正常使用
-          // 嘗試取得 session 來確認完整連線
           const { data: { session }, error: sessionError } = await supabase.auth.getSession()
           
           if (sessionError) {
             throw sessionError
           }
 
-          // 從 Supabase URL 提取 domain name
           const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
           let domainName = ''
           try {
@@ -115,7 +110,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const checkN8nWebhook = async () => {
-      // 設定為檢查中
       setN8nStatus({
         connected: false,
         loading: true,
@@ -123,7 +117,6 @@ export default function Dashboard() {
       })
 
       try {
-        // 檢查環境變數是否設定
         const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL
         
         if (!webhookUrl) {
@@ -135,13 +128,9 @@ export default function Dashboard() {
           return
         }
 
-        console.log('測試 N8n webhook:', webhookUrl)
-
-        // 設定 10 秒超時
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-        // 先嘗試 GET 請求（因為 Postman 使用 GET 成功）
         let response: Response
         try {
           response = await fetch(webhookUrl, {
@@ -151,10 +140,7 @@ export default function Dashboard() {
             },
             signal: controller.signal
           })
-          console.log('GET 請求回應:', response.status, response.statusText)
         } catch (getError: any) {
-          // 如果 GET 失敗，嘗試 POST
-          console.log('GET 請求失敗，嘗試 POST:', getError.message)
           clearTimeout(timeoutId)
           const controller2 = new AbortController()
           const timeoutId2 = setTimeout(() => controller2.abort(), 10000)
@@ -173,27 +159,13 @@ export default function Dashboard() {
           })
           
           clearTimeout(timeoutId2)
-          console.log('POST 請求回應:', response.status, response.statusText)
         }
 
         clearTimeout(timeoutId)
 
-        // 檢查回應狀態
         if (response.ok) {
-          // 嘗試取得回應內容
           const responseText = await response.text()
-          console.log('N8n 回應內容:', responseText)
           
-          // 嘗試解析 JSON（如果有的話）
-          try {
-            const data = JSON.parse(responseText)
-            console.log('N8n 回應 JSON:', data)
-          } catch {
-            // 不是 JSON 格式也沒關係
-            console.log('N8n 回應為非 JSON 格式')
-          }
-          
-          // 從 webhook URL 提取 domain name
           let domainName = ''
           try {
             if (webhookUrl) {
@@ -211,9 +183,6 @@ export default function Dashboard() {
             companyName: domainName
           })
         } else {
-          // HTTP 狀態碼不是 2xx
-          const errorText = await response.text().catch(() => '')
-          console.error('N8n webhook 回應錯誤:', response.status, errorText)
           setN8nStatus({
             connected: false,
             loading: false,
@@ -222,13 +191,7 @@ export default function Dashboard() {
         }
       } catch (error: any) {
         console.error('N8n webhook test error:', error)
-        console.error('錯誤詳情:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        })
         
-        // 處理不同的錯誤類型
         let errorMessage = '連線失敗'
         
         if (error.name === 'TimeoutError' || error.name === 'AbortError') {
@@ -247,7 +210,6 @@ export default function Dashboard() {
       }
     }
 
-    // 當用戶登入成功後，測試 N8n webhook
     if (!loading) {
       checkN8nWebhook()
     }
@@ -255,7 +217,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const checkNetSuiteConnection = async () => {
-      // 設定為檢查中
       setNetsuiteStatus({
         connected: false,
         loading: true,
@@ -263,7 +224,6 @@ export default function Dashboard() {
       })
 
       try {
-        // 呼叫 API route 來測試 NetSuite 連線
         const response = await fetch('/api/netsuite/test', {
           method: 'GET',
           headers: {
@@ -280,15 +240,12 @@ export default function Dashboard() {
             message: result.message || '連線成功',
             companyName: result.companyName
           })
-          console.log('NetSuite 連線成功:', result.data)
-          console.log('NetSuite 公司名稱:', result.companyName)
         } else {
           setNetsuiteStatus({
             connected: false,
             loading: false,
             message: result.message || '連線失敗'
           })
-          console.error('NetSuite 連線失敗:', result.message)
         }
       } catch (error: any) {
         console.error('NetSuite connection test error:', error)
@@ -300,178 +257,197 @@ export default function Dashboard() {
       }
     }
 
-    // 當用戶登入成功後，測試 NetSuite 連線
     if (!loading) {
       checkNetSuiteConnection()
     }
   }, [loading])
 
+  // Calculate connection stats
+  const totalConnections = 3
+  const connectedCount = [supabaseStatus, n8nStatus, netsuiteStatus].filter(s => s.connected).length
+  const connectionRate = totalConnections > 0 ? (connectedCount / totalConnections) * 100 : 0
+
   return (
-    <div className="p-8">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
-          <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-4">
-            Welcome to NextJS
-          </h2>
-          <p className="text-gray-600 dark:text-gray-300 mb-6">
-            歡迎來到儀表板！這裡是您的主要控制中心。
-          </p>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-            {/* Supabase Card */}
-            <div className={`p-6 rounded-lg border-2 ${
-              supabaseStatus.connected 
-                ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-300 dark:border-indigo-700' 
-                : 'bg-gray-50 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600'
-            }`}>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className={`text-lg font-semibold ${
-                  supabaseStatus.connected ? 'text-indigo-800 dark:text-indigo-300' : 'text-gray-600 dark:text-gray-400'
-                }`}>
-                  Supabase
-                </h3>
-                <div className="flex items-center">
-                  <div className={`w-4 h-4 rounded-full ${
-                    supabaseStatus.loading 
-                      ? 'bg-yellow-400 animate-pulse' 
-                      : supabaseStatus.connected 
-                        ? 'bg-green-500 shadow-green-500/50' 
-                        : 'bg-red-500 shadow-red-500/50'
-                  } shadow-lg ring-2 ${
-                    supabaseStatus.connected 
-                      ? 'ring-green-200' 
-                      : 'ring-red-200'
-                  }`} title={
-                    supabaseStatus.loading 
-                      ? '檢查中...' 
-                      : supabaseStatus.connected 
-                        ? '已連線' 
-                        : '未連線'
-                  } />
-                </div>
-              </div>
-              
-              {/* Domain name 顯示 */}
-              {supabaseStatus.connected && supabaseStatus.companyName && (
-                <div className="mb-3">
-                  <p className={`text-base font-semibold ${
-                    supabaseStatus.connected ? 'text-indigo-900 dark:text-indigo-200' : 'text-gray-600 dark:text-gray-400'
-                  }`}>
-                    {supabaseStatus.companyName}
-                  </p>
-                </div>
-              )}
-              
-              <p className={`text-sm ${
-                supabaseStatus.connected ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'
-              }`}>
-                {supabaseStatus.message}
-              </p>
-            </div>
-            
-            {/* N8n Card */}
-            <div className={`p-6 rounded-lg border-2 ${
-              n8nStatus.connected 
-                ? 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700' 
-                : 'bg-gray-50 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600'
-            }`}>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className={`text-lg font-semibold ${
-                  n8nStatus.connected ? 'text-green-800 dark:text-green-300' : 'text-gray-600 dark:text-gray-400'
-                }`}>
-                  N8n
-                </h3>
-                <div className="flex items-center">
-                  <div className={`w-4 h-4 rounded-full ${
-                    n8nStatus.loading 
-                      ? 'bg-yellow-400 animate-pulse' 
-                      : n8nStatus.connected 
-                        ? 'bg-green-500 shadow-green-500/50' 
-                        : 'bg-red-500 shadow-red-500/50'
-                  } shadow-lg ring-2 ${
-                    n8nStatus.connected 
-                      ? 'ring-green-200' 
-                      : 'ring-red-200'
-                  }`} title={
-                    n8nStatus.loading 
-                      ? '檢查中...' 
-                      : n8nStatus.connected 
-                        ? '已連線' 
-                        : '未連線'
-                  } />
-                </div>
-              </div>
-              
-              {/* Domain name 顯示 */}
-              {n8nStatus.connected && n8nStatus.companyName && (
-                <div className="mb-3">
-                  <p className={`text-base font-semibold ${
-                    n8nStatus.connected ? 'text-green-900 dark:text-green-200' : 'text-gray-600 dark:text-gray-400'
-                  }`}>
-                    {n8nStatus.companyName}
-                  </p>
-                </div>
-              )}
-              
-              <p className={`text-sm ${
-                n8nStatus.connected ? 'text-gray-700' : 'text-gray-500'
-              }`}>
-                {n8nStatus.message}
-              </p>
-            </div>
-            
-            {/* NetSuite Card */}
-            <div className={`p-6 rounded-lg border-2 ${
-              netsuiteStatus.connected 
-                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' 
-                : 'bg-gray-50 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600'
-            }`}>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className={`text-lg font-semibold ${
-                  netsuiteStatus.connected ? 'text-blue-800 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'
-                }`}>
-                  NetSuite
-                </h3>
-                <div className="flex items-center">
-                  <div className={`w-4 h-4 rounded-full ${
-                    netsuiteStatus.loading 
-                      ? 'bg-yellow-400 animate-pulse' 
-                      : netsuiteStatus.connected 
-                        ? 'bg-green-500 shadow-green-500/50' 
-                        : 'bg-red-500 shadow-red-500/50'
-                  } shadow-lg ring-2 ${
-                    netsuiteStatus.connected 
-                      ? 'ring-green-200' 
-                      : 'ring-red-200'
-                  }`} title={
-                    netsuiteStatus.loading 
-                      ? '檢查中...' 
-                      : netsuiteStatus.connected 
-                        ? '已連線' 
-                        : '未連線'
-                  } />
-                </div>
-              </div>
-              
-              {/* 公司名稱顯示 */}
-              {netsuiteStatus.connected && netsuiteStatus.companyName && (
-                <div className="mb-3">
-                  <p className={`text-base font-semibold ${
-                    netsuiteStatus.connected ? 'text-blue-900 dark:text-blue-200' : 'text-gray-600 dark:text-gray-400'
-                  }`}>
-                    {netsuiteStatus.companyName}
-                  </p>
-                </div>
-              )}
-              
-              <p className={`text-sm ${
-                netsuiteStatus.connected ? 'text-gray-700' : 'text-gray-500'
-              }`}>
-                {netsuiteStatus.message}
-              </p>
-            </div>
+    <div className="p-6 bg-white">
+      {/* Page Header */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">儀表板</h1>
+        <p className="text-gray-500">歡迎來到您的主要控制中心</p>
+      </div>
+
+      {/* KPI Cards - NetSuite Style */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        {/* Connection Status KPI */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">連接狀態</div>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            {connectedCount}/{totalConnections}
+          </div>
+          <div className="flex items-center text-sm">
+            <span className={`font-medium ${connectionRate === 100 ? 'text-green-600' : 'text-orange-600'}`}>
+              {connectionRate === 100 ? '✓' : '⚠'} {Math.round(connectionRate)}%
+            </span>
+            <span className="text-gray-500 ml-2">已連接</span>
           </div>
         </div>
+
+        {/* System Health KPI */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">系統狀態</div>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            {connectionRate === 100 ? '正常' : '警告'}
+          </div>
+          <div className="flex items-center text-sm">
+            <span className={`font-medium ${connectionRate === 100 ? 'text-green-600' : 'text-orange-600'}`}>
+              <TrendingUp className="w-4 h-4 inline mr-1" />
+              {connectionRate === 100 ? '運行中' : '部分離線'}
+            </span>
+          </div>
+        </div>
+
+        {/* Active Services KPI */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">活躍服務</div>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            {connectedCount}
+          </div>
+          <div className="flex items-center text-sm">
+            <span className="text-gray-500">服務運行中</span>
+          </div>
+        </div>
+
+        {/* Uptime KPI */}
+        <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+          <div className="text-sm text-gray-500 mb-1">系統運行時間</div>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            99.9%
+          </div>
+          <div className="flex items-center text-sm">
+            <span className="text-green-600 font-medium">
+              <TrendingUp className="w-4 h-4 inline mr-1" />
+              ↑ 穩定
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Connection Cards - NetSuite Style */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        {/* Supabase Card */}
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Supabase</h3>
+              <div className="flex items-center">
+                {supabaseStatus.loading ? (
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                ) : supabaseStatus.connected ? (
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                ) : (
+                  <XCircle className="w-5 h-5 text-red-500" />
+                )}
+              </div>
+            </div>
+            
+            {supabaseStatus.companyName && (
+              <div className="mb-3">
+                <p className="text-base font-semibold text-gray-900">
+                  {supabaseStatus.companyName}
+                </p>
+              </div>
+            )}
+            
+            <p className={`text-sm ${
+              supabaseStatus.connected ? 'text-gray-600' : 'text-gray-500'
+            }`}>
+              {supabaseStatus.message}
+            </p>
+          </div>
+        </div>
+
+        {/* N8n Card */}
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">N8n</h3>
+              <div className="flex items-center">
+                {n8nStatus.loading ? (
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                ) : n8nStatus.connected ? (
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                ) : (
+                  <XCircle className="w-5 h-5 text-red-500" />
+                )}
+              </div>
+            </div>
+            
+            {n8nStatus.companyName && (
+              <div className="mb-3">
+                <p className="text-base font-semibold text-gray-900">
+                  {n8nStatus.companyName}
+                </p>
+              </div>
+            )}
+            
+            <p className={`text-sm ${
+              n8nStatus.connected ? 'text-gray-600' : 'text-gray-500'
+            }`}>
+              {n8nStatus.message}
+            </p>
+          </div>
+        </div>
+
+        {/* NetSuite Card */}
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">NetSuite</h3>
+              <div className="flex items-center">
+                {netsuiteStatus.loading ? (
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                ) : netsuiteStatus.connected ? (
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                ) : (
+                  <XCircle className="w-5 h-5 text-red-500" />
+                )}
+              </div>
+            </div>
+            
+            {netsuiteStatus.companyName && (
+              <div className="mb-3">
+                <p className="text-base font-semibold text-gray-900">
+                  {netsuiteStatus.companyName}
+                </p>
+              </div>
+            )}
+            
+            <p className={`text-sm ${
+              netsuiteStatus.connected ? 'text-gray-600' : 'text-gray-500'
+            }`}>
+              {netsuiteStatus.message}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions Section */}
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">快速操作</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <button className="px-4 py-3 bg-[#1a3d2e] text-white rounded-lg hover:bg-[#2a4d3e] transition-colors text-left">
+            <div className="font-semibold">查看訂單</div>
+            <div className="text-sm opacity-90">瀏覽所有訂單記錄</div>
+          </button>
+          <button className="px-4 py-3 bg-[#1a3d2e] text-white rounded-lg hover:bg-[#2a4d3e] transition-colors text-left">
+            <div className="font-semibold">執行查詢</div>
+            <div className="text-sm opacity-90">使用 SuiteQL 查詢資料</div>
+          </button>
+          <button className="px-4 py-3 bg-[#1a3d2e] text-white rounded-lg hover:bg-[#2a4d3e] transition-colors text-left">
+            <div className="font-semibold">系統設定</div>
+            <div className="text-sm opacity-90">管理系統配置</div>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
-
