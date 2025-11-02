@@ -443,13 +443,13 @@ export default function SuiteQLTablesPage() {
   }
 
   return (
-    <div className="p-8 h-screen flex flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div className="p-8 h-screen flex flex-col overflow-hidden bg-background">
       <div className="mb-4 flex-shrink-0">
         <div className="flex items-center gap-3 mb-2">
-          <Table2 className="h-8 w-8 text-indigo-600 dark:text-indigo-400" />
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">SuiteQL 查詢表</h1>
+          <Table2 className="h-8 w-8 text-[#28363F] dark:text-[#5a7885]" />
+          <h1 className="text-3xl font-bold text-foreground">SuiteQL 查詢表</h1>
         </div>
-        <p className="text-gray-600 dark:text-gray-300">
+        <p className="text-muted-foreground">
           NetSuite metadata-catalog 記錄類型對應到 SuiteQL 表格名稱的完整映射表
         </p>
       </div>
@@ -460,27 +460,27 @@ export default function SuiteQLTablesPage() {
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {/* 統計卡片 */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 flex-shrink-0">
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <div className="text-sm text-gray-600 dark:text-gray-300">總記錄類型</div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{stats.total}</div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="text-sm text-muted-foreground">總記錄類型</div>
+              <div className="text-2xl font-bold text-card-foreground">{stats.total}</div>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <div className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400" />
                 可用表格
               </div>
               <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.available}</div>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <div className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-yellow-500 dark:text-yellow-400" />
                 交易類型
               </div>
               <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.transaction}</div>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <div className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                <XCircle className="h-4 w-4 text-red-500" />
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                <XCircle className="h-4 w-4 text-red-500 dark:text-red-400" />
                 不可用
               </div>
               <div className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.unavailable}</div>
@@ -488,18 +488,18 @@ export default function SuiteQLTablesPage() {
           </div>
 
           {/* Meta record 同步按鈕 */}
-          <div className="mb-4 flex items-center gap-4 flex-shrink-0 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+          <div className="mb-4 flex items-center gap-4 flex-shrink-0 p-4 rounded-lg bg-[#28363F]/10 dark:bg-[#28363F]/20 border border-[#28363F]/30 dark:border-[#28363F]/50">
             <Button
               onClick={handleSyncMetadata}
               disabled={syncingMetadata}
               variant="default"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+              className="flex items-center gap-2 bg-[#28363F] hover:bg-[#354a56] text-white"
             >
               <RefreshCw className={`h-4 w-4 ${syncingMetadata ? 'animate-spin' : ''}`} />
               {syncingMetadata ? '同步中...' : 'Meta record 同步'}
             </Button>
             {syncInfo && syncInfo.lastSyncAt && (
-              <div className="text-sm text-blue-700 dark:text-blue-300 font-medium">
+              <div className="text-sm text-[#28363F] dark:text-[#5a7885] font-medium">
                 上次同步時間: {new Date(syncInfo.lastSyncAt).toLocaleString('zh-TW', {
                   year: 'numeric',
                   month: '2-digit',
@@ -517,7 +517,7 @@ export default function SuiteQLTablesPage() {
           {/* 搜尋框 */}
           <div className="mb-4 flex-shrink-0">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500 dark:text-gray-400" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="搜尋記錄類型或表格名稱..."
                 value={searchQuery}
@@ -528,10 +528,10 @@ export default function SuiteQLTablesPage() {
           </div>
 
           {/* 表格列表 */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-1 flex flex-col overflow-hidden min-h-0">
+          <div className="rounded-lg border border-border bg-card flex-1 flex flex-col overflow-hidden min-h-0">
             {/* 表格分頁控制 */}
             {tableTotalPages > 1 && (
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
                 <div className="flex items-center gap-3">
                   <Label htmlFor="tableRowsPerPage" className="text-sm">每頁筆數:</Label>
                   <Input
@@ -566,7 +566,7 @@ export default function SuiteQLTablesPage() {
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <span className="text-sm px-4 text-gray-700 dark:text-gray-300">
+                  <span className="text-sm px-4 text-muted-foreground">
                     第 {tableCurrentPage} / {tableTotalPages} 頁（共 {filteredTables.length} 筆）
                   </span>
                   <Button
@@ -589,15 +589,15 @@ export default function SuiteQLTablesPage() {
               </div>
             )}
             
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto bg-background">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
-                  <div className="text-gray-600 dark:text-gray-300">載入中...</div>
+                  <div className="text-muted-foreground">載入中...</div>
                 </div>
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="bg-card">
                       <TableHead>狀態</TableHead>
                       <TableHead>記錄類型</TableHead>
                       <TableHead>SuiteQL 表格名稱</TableHead>
@@ -609,7 +609,7 @@ export default function SuiteQLTablesPage() {
                   <TableBody>
                     {filteredTables.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-gray-600 dark:text-gray-300 py-8">
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                           沒有找到符合的表格
                         </TableCell>
                       </TableRow>
@@ -639,7 +639,7 @@ export default function SuiteQLTablesPage() {
                           <TableCell className="font-mono text-sm">
                             <button
                               onClick={() => handleRecordTypeClick(table)}
-                              className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                              className="text-[#28363F] dark:text-[#5a7885] hover:underline flex items-center gap-1 cursor-pointer"
                               title="點擊查詢此表格"
                             >
                               <Link2 className="h-3 w-3" />
@@ -647,16 +647,16 @@ export default function SuiteQLTablesPage() {
                             </button>
                           </TableCell>
                           <TableCell className="font-mono text-sm">
-                            <code className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-gray-900 dark:text-gray-100">{table.suiteQLTable}</code>
+                            <code className="px-2 py-1 bg-muted rounded text-foreground">{table.suiteQLTable}</code>
                           </TableCell>
                           <TableCell>
                             {table.recordCount !== undefined && table.recordCount !== null ? (
-                              <span className="text-gray-900 dark:text-gray-100">
+                              <span className="text-foreground">
                                 {table.recordCount.toLocaleString()}
                                 {table.hasMore && '+'}
                               </span>
                             ) : (
-                              <span className="text-gray-500 dark:text-gray-400">-</span>
+                              <span className="text-muted-foreground">-</span>
                             )}
                           </TableCell>
                           <TableCell>
@@ -667,7 +667,7 @@ export default function SuiteQLTablesPage() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-sm text-gray-600 dark:text-gray-300">
+                          <TableCell className="text-sm text-muted-foreground">
                             {table.note || (table.status === 'available' && '直接使用表格名稱查詢') || '-'}
                           </TableCell>
                         </TableRow>
@@ -689,7 +689,7 @@ export default function SuiteQLTablesPage() {
                   <div>
                     <CardTitle>結果</CardTitle>
                     {resultInfo && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">{resultInfo}</p>
+                      <p className="text-sm text-muted-foreground mt-2">{resultInfo}</p>
                     )}
                   </div>
                   {allResults.length > 0 && !queryLoading && (
@@ -707,21 +707,21 @@ export default function SuiteQLTablesPage() {
               <CardContent className="flex-1 flex flex-col overflow-hidden min-h-0">
                 {queryLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <div className="text-gray-600 dark:text-gray-300">執行查詢中...</div>
+                    <div className="text-muted-foreground">執行查詢中...</div>
                   </div>
                 ) : queryError ? (
                   <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 text-red-700 dark:text-red-300">
                     <strong>錯誤：</strong> {queryError}
                   </div>
                 ) : allResults.length === 0 ? (
-                  <div className="text-center text-gray-600 dark:text-gray-300 py-8">
+                  <div className="text-center text-muted-foreground py-8">
                     沒有資料可顯示
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                     {/* 分頁控制（上方） */}
                     {totalPages > 1 && (
-                      <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                      <div className="flex items-center justify-between mb-4 pb-4 border-b border-border flex-shrink-0">
                         <div className="flex items-center gap-3">
                           <Label htmlFor="rowsPerPage" className="text-sm">每頁筆數:</Label>
                           <Input
@@ -756,7 +756,7 @@ export default function SuiteQLTablesPage() {
                           >
                             <ChevronLeft className="h-4 w-4" />
                           </Button>
-                          <span className="text-sm px-4 text-gray-700 dark:text-gray-300">
+                          <span className="text-sm px-4 text-muted-foreground">
                             第 {currentPage} / {totalPages} 頁（共 {allResults.length} 筆）
                           </span>
                           <Button
@@ -780,20 +780,20 @@ export default function SuiteQLTablesPage() {
                     )}
 
                     {/* 結果表格 */}
-                    <div className="flex-1 overflow-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="flex-1 overflow-auto border border-border rounded-lg bg-background">
                       <Table>
                         <TableHeader>
-                          <TableRow>
+                          <TableRow className="bg-card">
                             {Object.keys(allResults[0] || {}).map((header) => (
                               <TableHead 
                                 key={header} 
-                                className="font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 select-none sticky top-0 bg-white dark:bg-gray-800 z-10"
+                                className="font-semibold cursor-pointer hover:bg-accent select-none sticky top-0 bg-card z-10"
                                 onClick={() => handleSort(header)}
                               >
                                 <div className="flex items-center gap-2">
                                   <span>{header}</span>
                                   {sortColumn === header && (
-                                    <span className="text-indigo-600 dark:text-indigo-400">
+                                    <span className="text-[#28363F] dark:text-[#5a7885]">
                                       {sortDirection === 'asc' ? '↑' : '↓'}
                                     </span>
                                   )}
@@ -808,7 +808,7 @@ export default function SuiteQLTablesPage() {
                               {Object.keys(allResults[0] || {}).map((header) => (
                                 <TableCell key={header} className="font-mono text-xs">
                                   {row[header] === null || row[header] === undefined
-                                    ? <span className="text-gray-500 dark:text-gray-400">null</span>
+                                    ? <span className="text-muted-foreground">null</span>
                                     : String(row[header])
                                   }
                                 </TableCell>
@@ -824,7 +824,7 @@ export default function SuiteQLTablesPage() {
             </Card>
           ) : (
             <Card className="flex-1 flex items-center justify-center">
-              <div className="text-center text-gray-600 dark:text-gray-300">
+              <div className="text-center text-muted-foreground">
                 <Table2 className="h-16 w-16 mx-auto mb-4 opacity-50" />
                 <p>點擊上方表格中的記錄類型開始查詢</p>
               </div>

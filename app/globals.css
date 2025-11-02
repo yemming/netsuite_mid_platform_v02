@@ -26,41 +26,41 @@
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
     
-    /* NetSuite Dark Ink Green */
-    --netsuite-dark-green: 150 20% 15%;
+    /* NetSuite Dark Blue-Green (#28363F) */
+    --netsuite-dark-blue-green: 203 22% 20%;
     --netsuite-light-bg: 0 0% 100%;
     --netsuite-text-dark: 0 0% 13%;
     --netsuite-text-light: 0 0% 100%;
   }
 
   .dark {
-    /* NetSuite Style - Dark Mode (Dark Ink Green background) */
-    --background: 150 20% 15%;
+    /* NetSuite Style - Dark Mode (Dark Blue-Green background #28363F) */
+    --background: 203 22% 20%;
     --foreground: 0 0% 100%;
-    --card: 150 20% 18%;
+    --card: 203 22% 23%;
     --card-foreground: 0 0% 100%;
-    --popover: 150 20% 15%;
+    --popover: 203 22% 20%;
     --popover-foreground: 0 0% 100%;
-    --primary: 150 60% 50%;
+    --primary: 203 60% 45%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 150 15% 25%;
+    --secondary: 203 18% 28%;
     --secondary-foreground: 0 0% 100%;
-    --muted: 150 15% 25%;
+    --muted: 203 18% 28%;
     --muted-foreground: 0 0% 70%;
-    --accent: 150 15% 25%;
+    --accent: 203 18% 28%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 150 15% 25%;
-    --input: 150 15% 25%;
-    --ring: 150 60% 50%;
+    --border: 203 18% 28%;
+    --input: 203 18% 28%;
+    --ring: 203 60% 45%;
   }
 }
 
 /* Custom NetSuite Colors */
 @layer utilities {
   .bg-netsuite-dark {
-    background-color: hsl(150, 20%, 15%);
+    background-color: hsl(203, 22%, 20%);
   }
   .bg-netsuite-light {
     background-color: hsl(0, 0%, 100%);
