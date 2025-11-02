@@ -112,8 +112,9 @@ export class NetSuiteAPIClient {
       let companyName = '未知公司';
       try {
         // 使用 SuiteQL 查詢公司資訊
+        // NetSuite SuiteQL 使用 FETCH FIRST n ROWS ONLY 而不是 LIMIT
         const suiteqlResult = await this.executeSuiteQL(
-          "SELECT companyname FROM companyinformation LIMIT 1"
+          "SELECT companyname FROM companyinformation FETCH FIRST 1 ROWS ONLY"
         );
         
         if (suiteqlResult.items && suiteqlResult.items.length > 0) {

@@ -78,8 +78,9 @@ async function validateSuiteQLTable(
 ): Promise<{ isValid: boolean; recordCount?: number }> {
   try {
     // 嘗試執行簡單的查詢來驗證表格是否存在
+    // COUNT(*) 查詢只會返回一行，不需要 FETCH FIRST
     const result = await netsuite.executeSuiteQL(
-      `SELECT COUNT(*) as count FROM ${tableName} LIMIT 1`,
+      `SELECT COUNT(*) as count FROM ${tableName}`,
       { fetchAll: false }
     );
     

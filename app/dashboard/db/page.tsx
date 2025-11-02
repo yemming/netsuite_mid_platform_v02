@@ -166,7 +166,8 @@ export default function SuiteQLTablesPage() {
         sqlQuery = `SELECT * FROM transaction WHERE recordtype = '${table.recordType}'`;
       } else {
         // 如果都沒有，限制數量避免拉出全部資料
-        sqlQuery = `SELECT * FROM transaction LIMIT 1000`;
+        // NetSuite SuiteQL 使用 FETCH FIRST n ROWS ONLY 而不是 LIMIT
+        sqlQuery = `SELECT * FROM transaction FETCH FIRST 1000 ROWS ONLY`;
       }
     } else {
       sqlQuery = `SELECT * FROM ${table.suiteQLTable}`;
