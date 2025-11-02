@@ -10,6 +10,7 @@ const standalonePath = path.join(__dirname, '.next', 'standalone', 'server.js');
 
 // 處理 PORT 環境變數（Zeabur 會自動設置 PORT 或 WEB_PORT）
 // 優先順序：PORT > WEB_PORT > 3000
+// 注意：Zeabur 網路設定中的容器連接埠必須與這裡的端口一致
 let port = process.env.PORT || process.env.WEB_PORT || '3000';
 
 // 如果 PORT 包含變數引用格式（如 ${WEB_PORT}），嘗試解析
@@ -35,7 +36,7 @@ console.log('All PORT-related env vars:', {
 const server = spawn('node', [standalonePath], {
   env: {
     ...process.env,
-    NODE_ENV: 'production',
+    NODE_ENV: process.env.NODE_ENV || 'production',
     PORT: port,
     WEB_PORT: port,
   },
