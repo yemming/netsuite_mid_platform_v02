@@ -1,0 +1,10 @@
+{
+  "build": {
+    "command": "npm run build",
+    "installCommand": "npm install"
+  },
+  "deploy": {
+    "startCommand": "node .next/standalone/server.js"
+  }
+}
+
