@@ -129,14 +129,53 @@ try {
 
 // 直接載入並運行 Next.js server
 try {
+  console.log('========================================');
   console.log('Loading Next.js standalone server...');
+  console.log('========================================');
   
   // 載入 Next.js standalone server
   // 這會自動啟動 HTTP 服務器並開始監聽端口
-  require('./server.js');
+  const serverModule = require('./server.js');
   
-  console.log('Next.js server loaded successfully');
-  console.log('Server should be listening on PORT:', port);
+  console.log('========================================');
+  console.log('Next.js server module loaded');
+  console.log('Module type:', typeof serverModule);
+  console.log('Module exports:', serverModule ? Object.keys(serverModule) : 'null');
+  console.log('========================================');
+  
+  // 等待一小段時間讓服務器完全啟動
+  setTimeout(() => {
+    console.log('========================================');
+    console.log('Server startup check (5 seconds after load)');
+    console.log('Expected listening PORT:', port);
+    console.log('Process uptime:', Math.floor(process.uptime()), 'seconds');
+    console.log('Event loop active:', process._getActiveHandles().length, 'active handles');
+    console.log('Event loop requests:', process._getActiveRequests().length, 'active requests');
+    
+    // 檢查是否有監聽的服務器
+    const net = require('net');
+    const testServer = net.createServer();
+    testServer.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log('✅ Port', port, 'is in use (good - server is listening)');
+      } else {
+        console.log('⚠️ Port check error:', err.code);
+      }
+    });
+    testServer.once('listening', () => {
+      console.log('⚠️ Port', port, 'is NOT in use (server may not be listening)');
+      testServer.close();
+    });
+    testServer.listen(port, () => {
+      console.log('⚠️ Port', port, 'is available (server may not be listening)');
+      testServer.close();
+    });
+    setTimeout(() => {
+      testServer.close();
+    }, 1000);
+    
+    console.log('========================================');
+  }, 5000);
   
   // Next.js standalone server 應該已經開始監聽端口
   // 它會自動保持事件循環運行
@@ -173,10 +212,13 @@ try {
   console.log('Next.js standalone server startup complete. Waiting for requests...');
   
 } catch (error) {
-  console.error('Failed to start server:', error);
+  console.error('========================================');
+  console.error('FAILED TO START SERVER');
+  console.error('========================================');
   console.error('Error name:', error.name);
   console.error('Error message:', error.message);
   console.error('Error stack:', error.stack);
+  console.error('========================================');
   process.exit(1);
 }
 
