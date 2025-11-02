@@ -28,10 +28,20 @@ export async function middleware(request: NextRequest) {
             return request.cookies.get(name)?.value
           },
           set(name: string, value: string, options: CookieOptions) {
+            // 確保 Cookie 在 HTTPS 環境下正確設置
+            const cookieOptions: CookieOptions = {
+              ...options,
+              // 在生產環境（HTTPS）下確保 Secure
+              secure: process.env.NODE_ENV === 'production' || request.url.startsWith('https://'),
+              // 允許跨站請求（對 Supabase 很重要）
+              sameSite: 'lax' as const,
+              httpOnly: options?.httpOnly ?? false,
+            }
+            
             request.cookies.set({
               name,
               value,
-              ...options,
+              ...cookieOptions,
             })
             response = NextResponse.next({
               request: {
@@ -41,7 +51,7 @@ export async function middleware(request: NextRequest) {
             response.cookies.set({
               name,
               value,
-              ...options,
+              ...cookieOptions,
             })
           },
           remove(name: string, options: CookieOptions) {

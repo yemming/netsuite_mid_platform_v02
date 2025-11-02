@@ -27,12 +27,22 @@ export default function Home() {
     
     const checkUser = async () => {
       try {
+        // 先檢查 session
+        const { data: { session: sessionData }, error: sessionError } = await supabase.auth.getSession()
+        console.log('當前 session:', !!sessionData, '錯誤:', sessionError)
+        
+        // 再檢查 user
         const { data: { user }, error } = await supabase.auth.getUser()
+        console.log('當前用戶:', user?.email || '無', '錯誤:', error)
+        
         if (error) {
           console.error('檢查用戶時發生錯誤:', error)
-          return
+          // 如果只是 session 過期，不要阻擋
+          if (error.message?.includes('JWT')) {
+            return
+          }
         }
-        if (user) {
+        if (user && sessionData) {
           router.push('/dashboard')
         }
       } catch (err: any) {
@@ -89,9 +99,21 @@ export default function Home() {
         
         if (data.session) {
           console.log('登入成功，session:', !!data.session)
+          console.log('Session details:', {
+            access_token: !!data.session.access_token,
+            refresh_token: !!data.session.refresh_token,
+            expires_at: data.session.expires_at,
+          })
+          
+          // 等待一小段時間確保 session 已寫入 cookie
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
           router.push('/dashboard')
+          // 強制重新載入以確保 session 生效
+          router.refresh()
         } else {
-          setError('登入失敗：無法建立 session')
+          console.error('登入失敗：無法建立 session', data)
+          setError('登入失敗：無法建立 session。請檢查 Supabase 設定。')
         }
       }
     } catch (error: any) {
