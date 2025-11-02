@@ -130,17 +130,27 @@ try {
 // 直接載入並運行 Next.js server
 try {
   console.log('========================================');
-  console.log('Loading Next.js standalone server...');
+  console.log('Starting Next.js standalone server...');
   console.log('========================================');
   
-  // 載入 Next.js standalone server
-  // 這會自動啟動 HTTP 服務器並開始監聽端口
-  const serverModule = require('./server.js');
+  // 確保所有環境變數都設置好
+  // Next.js standalone server 需要 PORT 環境變數
+  console.log('Final environment check:');
+  console.log('  PORT:', process.env.PORT);
+  console.log('  NODE_ENV:', process.env.NODE_ENV);
+  console.log('  Working directory:', process.cwd());
+  console.log('========================================');
+  
+  // Next.js standalone server.js 是一個可執行腳本
+  // 直接 require 它應該會執行並啟動 HTTP 服務器
+  // 根據 Next.js 文檔，standalone server.js 會在 require 時自動啟動
+  console.log('Requiring Next.js standalone server.js...');
+  require('./server.js');
   
   console.log('========================================');
-  console.log('Next.js server module loaded');
-  console.log('Module type:', typeof serverModule);
-  console.log('Module exports:', serverModule ? Object.keys(serverModule) : 'null');
+  console.log('Next.js standalone server script executed');
+  console.log('If server started correctly, it should be listening on port', port);
+  console.log('Waiting for server to initialize...');
   console.log('========================================');
   
   // 等待一小段時間讓服務器完全啟動
