@@ -6,130 +6,321 @@ import { usePathname } from 'next/navigation'
 import { 
   LayoutDashboard, 
   ShoppingCart, 
-  Database, 
   Settings,
   Menu,
   X,
+  Terminal,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Search,
+  Home,
+  FileText,
+  Database,
+  User,
+  Share2,
+  ChevronDown as ChevronDownIcon,
+  Bell,
+  Send,
+  Gift,
+  HelpCircle
 } from 'lucide-react'
 
-const menuItems = [
+interface MenuItem {
+  name: string
+  href?: string
+  icon?: any
+  children?: MenuItem[]
+  badge?: string
+}
+
+const mainNavigation: MenuItem[] = [
   {
-    name: '儀表板',
+    name: 'Search',
+    icon: Search,
+  },
+  {
+    name: 'Home',
     href: '/dashboard',
-    icon: LayoutDashboard,
+    icon: Home,
   },
   {
-    name: '我的訂單',
-    href: '/dashboard/orders',
-    icon: ShoppingCart,
+    name: 'Meetings',
+    icon: FileText,
+    badge: 'New',
   },
   {
-    name: 'SuiteQL 查詢表',
-    href: '/dashboard/db',
+    name: 'Notion AI',
+    icon: Terminal,
+    badge: 'New',
+  },
+  {
+    name: 'Inbox',
     icon: Database,
   },
 ]
 
-const settingsItem = {
-  name: '設定',
-  href: '/dashboard/settings',
-  icon: Settings,
-}
+const privatePages: MenuItem[] = [
+  {
+    name: 'Netsuite',
+    icon: Database,
+    children: [
+      {
+        name: '生產製造分類與PLM/MES/S...',
+        icon: FileText,
+      },
+      {
+        name: 'NetSuite API 學習旅程',
+        icon: FileText,
+      },
+      {
+        name: 'NetSuite 40 分鐘快速demo',
+        icon: FileText,
+      },
+      {
+        name: 'EPM',
+        icon: FileText,
+      },
+      {
+        name: 'NetSuite Traning',
+        icon: FileText,
+      },
+      {
+        name: 'NetSuite Material',
+        icon: FileText,
+      },
+      {
+        name: 'Adv Procurement',
+        icon: FileText,
+      },
+      {
+        name: 'DDA Template',
+        icon: FileText,
+      },
+      {
+        name: 'JUSTIFICATION',
+        icon: FileText,
+      },
+      {
+        name: 'NetSuite專案',
+        icon: FileText,
+      },
+      {
+        name: "NetSuite's SuiteApp",
+        icon: FileText,
+      },
+      {
+        name: 'SRP 拆解',
+        icon: FileText,
+      },
+      {
+        name: 'NSCorp New Tool',
+        icon: FileText,
+      },
+      {
+        name: 'Netsuite Next',
+        icon: FileText,
+      },
+      {
+        name: 'NetSuite Table Schema 用法',
+        icon: FileText,
+      },
+      {
+        name: '會議記錄',
+        icon: FileText,
+      },
+    ],
+  },
+  // 實際功能頁面整合到 Private 區域
+  {
+    name: '應用程式',
+    icon: Settings,
+    children: [
+      {
+        name: '儀表板',
+        href: '/dashboard',
+        icon: LayoutDashboard,
+      },
+      {
+        name: '我的訂單',
+        href: '/dashboard/orders',
+        icon: ShoppingCart,
+      },
+      {
+        name: 'SuiteQL 查詢',
+        href: '/dashboard/query',
+        icon: Terminal,
+      },
+      {
+        name: '設定',
+        href: '/dashboard/settings',
+        icon: Settings,
+      },
+    ],
+  },
+]
 
 export default function Sidebar() {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['Netsuite', '應用程式']))
+
+  const toggleExpand = (itemName: string) => {
+    const newExpanded = new Set(expandedItems)
+    if (newExpanded.has(itemName)) {
+      newExpanded.delete(itemName)
+    } else {
+      newExpanded.add(itemName)
+    }
+    setExpandedItems(newExpanded)
+  }
+
+  const renderMenuItem = (item: MenuItem, level: number = 0) => {
+    const Icon = item.icon || FileText
+    const isActive = item.href === pathname
+    const hasChildren = item.children && item.children.length > 0
+    const isExpanded = expandedItems.has(item.name)
+    const indentLevel = level * 20
+
+    if (hasChildren) {
+      return (
+        <div key={item.name}>
+          <button
+            onClick={() => toggleExpand(item.name)}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded hover:bg-[#354a56]/50 transition-colors text-sm ${
+              isActive ? 'bg-[#3a4f5d] text-white' : 'text-gray-200 hover:text-white'
+            }`}
+            style={{ paddingLeft: `${8 + indentLevel}px` }}
+          >
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              {isExpanded ? (
+                <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              )}
+              <Icon className="w-4 h-4 flex-shrink-0 text-gray-300" />
+              <span className="truncate font-normal">{item.name}</span>
+            </div>
+          </button>
+          {isExpanded && (
+            <div className="mt-0.5">
+              {item.children!.map((child) => renderMenuItem(child, level + 1))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    const content = (
+      <div
+        className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors text-sm ${
+          isActive
+            ? 'bg-[#3a4f5d] text-white'
+            : 'text-gray-200 hover:bg-[#354a56]/50 hover:text-white'
+        }`}
+        style={{ paddingLeft: `${8 + indentLevel}px` }}
+      >
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <div className="w-3.5 h-3.5 flex-shrink-0" /> {/* Spacer for alignment */}
+          <Icon className="w-4 h-4 flex-shrink-0 text-gray-300" />
+          <span className="truncate font-normal">{item.name}</span>
+          {item.badge && (
+            <span className="ml-auto px-1.5 py-0.5 text-[10px] font-medium bg-blue-500 text-white rounded flex-shrink-0">
+              {item.badge}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+
+    if (item.href) {
+      return (
+        <Link key={item.name} href={item.href}>
+          {content}
+        </Link>
+      )
+    }
+
+    return <div key={item.name}>{content}</div>
+  }
 
   return (
     <>
-      {/* Sidebar - NetSuite Dark Blue-Green (#28363F) with subtle camouflage */}
+      {/* Sidebar - Notion style with NetSuite colors */}
       <div className={`flex flex-col h-screen bg-[#28363F] text-white transition-all duration-300 relative ${
-        isCollapsed ? 'w-0 overflow-hidden' : 'w-64'
+        isCollapsed ? 'w-0 overflow-hidden' : 'w-[240px]'
       }`}>
-        {/* Subtle Camouflage Pattern Overlay */}
-        <div className="absolute inset-0 opacity-[0.08] pointer-events-none">
-          <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <pattern id="sidebarCamouflage" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse">
-                {/* Base */}
-                <rect width="120" height="120" fill="#28363F"/>
-                
-                {/* Very faint geometric blobs */}
-                <ellipse cx="25" cy="30" rx="35" ry="25" fill="#354a56" opacity="0.15"/>
-                <ellipse cx="70" cy="20" rx="30" ry="20" fill="#3a4f5d" opacity="0.12"/>
-                <ellipse cx="50" cy="60" rx="40" ry="30" fill="#2d434f" opacity="0.18"/>
-                <ellipse cx="90" cy="80" rx="28" ry="22" fill="#354a56" opacity="0.14"/>
-                <ellipse cx="30" cy="95" rx="32" ry="24" fill="#3a4f5d" opacity="0.16"/>
-                <ellipse cx="100" cy="50" rx="25" ry="18" fill="#2d434f" opacity="0.13"/>
-                
-                {/* Subtle wavy texture lines */}
-                <path d="M 0 20 Q 40 25 80 20 T 120 20" fill="none" stroke="#4a5f6d" strokeWidth="0.5" opacity="0.1"/>
-                <path d="M 0 60 Q 45 55 90 60 T 120 60" fill="none" stroke="#5a6f7d" strokeWidth="0.5" opacity="0.08"/>
-                <path d="M 0 100 Q 35 95 70 100 T 120 100" fill="none" stroke="#3a4f5d" strokeWidth="0.5" opacity="0.12"/>
-                
-                {/* Very subtle dots */}
-                <circle cx="20" cy="25" r="2" fill="#5a6f7d" opacity="0.1"/>
-                <circle cx="85" cy="45" r="1.5" fill="#4a5f6d" opacity="0.08"/>
-                <circle cx="45" cy="85" r="1.8" fill="#5a6f7d" opacity="0.12"/>
-                <circle cx="105" cy="70" r="1.2" fill="#3a4f5d" opacity="0.09"/>
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#sidebarCamouflage)"/>
-          </svg>
-        </div>
-        
-        {/* Sidebar Content - relative to ensure it's above the pattern */}
-        <div className="relative z-10 flex flex-col h-full">
-          {/* Logo/Title with Toggle Button */}
-          <div className="p-6 border-b border-[#354a56] flex items-center justify-between">
-            <h1 className="text-xl font-bold text-white">NetSuite AI 中臺</h1>
-            <button
-              onClick={() => setIsCollapsed(true)}
-              className="p-1 rounded hover:bg-[#354a56] text-white transition-colors"
-              aria-label="隱藏側邊欄"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        {/* Sidebar Content */}
+        <div className="flex flex-col h-full overflow-hidden">
+          {/* Top Section - User & Workspace */}
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#354a56]/50">
+            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[#354a56] to-[#3a4f5d] flex items-center justify-center flex-shrink-0">
+              <User className="w-3.5 h-3.5 text-gray-300" />
+            </div>
+            <span className="text-sm font-medium text-gray-100 truncate flex-1">
+              NetSuite AI 中臺
+            </span>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button className="p-1 rounded hover:bg-[#354a56]/50 transition-colors">
+                <Share2 className="w-3.5 h-3.5 text-gray-400" />
+              </button>
+              <button 
+                onClick={() => setIsCollapsed(true)}
+                className="p-1 rounded hover:bg-[#354a56]/50 transition-colors"
+              >
+                <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400" />
+              </button>
+            </div>
           </div>
 
-          {/* Menu Items */}
-          <nav className="flex-1 p-4 space-y-1">
-            {menuItems.map((item) => {
-              const Icon = item.icon
-              const isActive = pathname === item.href
+          {/* Main Navigation */}
+          <div className="px-1.5 py-2 border-b border-[#354a56]/30">
+            {mainNavigation.map((item) => (
+              <div key={item.name}>
+                {renderMenuItem(item, 0)}
+              </div>
+            ))}
+          </div>
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-[#3a4f5d] text-white'
-                      : 'text-gray-300 hover:bg-[#354a56] hover:text-white'
-                  }`}
-                >
-                  <Icon className="w-5 h-5" />
-                  <span className="font-medium">{item.name}</span>
-                </Link>
-              )
-            })}
-          </nav>
+          {/* Scrollable Content Area */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
+            {/* Private Section */}
+            <div className="px-3 py-2">
+              {/* Private Pages */}
+              <div className="space-y-0.5">
+                {privatePages.map((item) => renderMenuItem(item, 0))}
+              </div>
+            </div>
 
-          {/* Settings at bottom */}
-          <div className="p-4 border-t border-[#354a56]">
-            <Link
-              href={settingsItem.href}
-              className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                pathname === settingsItem.href
-                  ? 'bg-[#3a4f5d] text-white'
-                  : 'text-gray-300 hover:bg-[#354a56] hover:text-white'
-              }`}
-            >
-              <Settings className="w-5 h-5" />
-              <span className="font-medium">{settingsItem.name}</span>
-            </Link>
+            {/* Empty Section */}
+            <div className="px-3 py-2">
+              <div className="px-1.5 mb-1">
+                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">
+                  No pages inside
+                </span>
+              </div>
+              <div className="px-3 py-1.5 text-sm text-gray-300 hover:text-gray-200 cursor-pointer rounded hover:bg-[#354a56]/30 transition-colors">
+                隨身小故事
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Bar */}
+          <div className="flex items-center justify-between px-3 py-2 border-t border-[#354a56]/50">
+            <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors relative">
+              <Bell className="w-4 h-4 text-gray-400" />
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-blue-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                3
+              </span>
+            </button>
+            <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors">
+              <Send className="w-4 h-4 text-gray-400" />
+            </button>
+            <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors">
+              <Gift className="w-4 h-4 text-gray-400" />
+            </button>
+            <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors">
+              <HelpCircle className="w-4 h-4 text-gray-400" />
+            </button>
           </div>
         </div>
       </div>
