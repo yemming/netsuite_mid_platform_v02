@@ -57,7 +57,7 @@ export default function NetSuiteLogo({ className = '' }: { className?: string })
       
       {/* Oracle NetSuite Text */}
       <div className="flex flex-col leading-none">
-        <span className="text-[10px] font-normal text-gray-500 tracking-[0.05em] uppercase">
+        <span className="text-xs font-normal text-gray-500 tracking-[0.05em] uppercase">
           Oracle
         </span>
         <span className="text-2xl font-semibold text-gray-800 tracking-tight">

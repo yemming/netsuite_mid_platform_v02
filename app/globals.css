@@ -77,8 +77,13 @@
   * {
     @apply border-border;
   }
+  html {
+    font-size: 14px; /* 基礎字體大小 14px */
+  }
   body {
     @apply bg-background text-foreground;
+    font-size: 14px; /* 確保基礎字體大小一致 */
+    line-height: 1.6; /* 適當的行高提升閱讀體驗 */
   }
 }
 

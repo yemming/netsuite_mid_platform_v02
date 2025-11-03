@@ -171,13 +171,13 @@ export default function DashboardLayout({
                 <ThemeToggle />
                 <div className="flex items-center space-x-2">
                   <div className="w-6 h-6 rounded-full bg-[#28363F] dark:bg-[#28363F] flex items-center justify-center">
-                    <span className="text-white text-[10px] font-semibold">
+                    <span className="text-white text-xs font-semibold">
                       {user?.email?.charAt(0).toUpperCase() || 'U'}
                     </span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-xs font-medium text-foreground leading-tight">{user?.email?.split('@')[0] || 'User'}</span>
-                    <span className="text-[10px] text-muted-foreground leading-tight">Administrator</span>
+                    <span className="text-sm font-medium text-foreground leading-tight">{user?.email?.split('@')[0] || 'User'}</span>
+                    <span className="text-xs text-muted-foreground leading-tight">Administrator</span>
                   </div>
                 </div>
                 <button

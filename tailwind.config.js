@@ -8,6 +8,17 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontSize: {
+        // 調整字體大小：基礎 14px，小字 12px
+        xs: ['0.75rem', { lineHeight: '1.125rem' }],       // 12px (小字/描述文字)
+        sm: ['0.875rem', { lineHeight: '1.25rem' }],      // 14px (中文字/用戶名等)
+        base: ['0.875rem', { lineHeight: '1.4rem' }],      // 14px (基礎字體)
+        lg: ['1rem', { lineHeight: '1.5rem' }],            // 16px
+        xl: ['1.125rem', { lineHeight: '1.75rem' }],       // 18px
+        '2xl': ['1.25rem', { lineHeight: '1.875rem' }],   // 20px
+        '3xl': ['1.5rem', { lineHeight: '2rem' }],         // 24px
+        '4xl': ['1.875rem', { lineHeight: '2.25rem' }],    // 30px
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
