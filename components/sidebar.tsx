@@ -22,7 +22,10 @@ import {
   Bell,
   Send,
   Gift,
-  HelpCircle
+  HelpCircle,
+  Receipt,
+  Cog,
+  Storefront
 } from 'lucide-react'
 
 interface MenuItem {
@@ -35,47 +38,22 @@ interface MenuItem {
 
 const mainNavigation: MenuItem[] = [
   {
-    name: 'Search',
-    icon: Search,
-  },
-  {
-    name: 'Home',
+    name: '儀表板',
     href: '/dashboard',
-    icon: Home,
+    icon: LayoutDashboard,
   },
   {
-    name: 'Meetings',
-    icon: FileText,
-    badge: 'New',
-  },
-  {
-    name: 'Notion AI',
+    name: 'SuiteQL 查詢',
+    href: '/dashboard/query',
     icon: Terminal,
-    badge: 'New',
-  },
-  {
-    name: 'Inbox',
-    icon: Database,
   },
 ]
 
 const privatePages: MenuItem[] = [
   {
-    name: 'Netsuite',
-    icon: Database,
+    name: 'NetSuite單據模擬',
+    icon: Receipt,
     children: [
-      {
-        name: '生產製造分類與PLM/MES/S...',
-        icon: FileText,
-      },
-      {
-        name: 'NetSuite API 學習旅程',
-        icon: FileText,
-      },
-      {
-        name: 'NetSuite 40 分鐘快速demo',
-        icon: FileText,
-      },
       {
         name: 'EPM',
         icon: FileText,
@@ -89,15 +67,7 @@ const privatePages: MenuItem[] = [
         icon: FileText,
       },
       {
-        name: 'Adv Procurement',
-        icon: FileText,
-      },
-      {
         name: 'DDA Template',
-        icon: FileText,
-      },
-      {
-        name: 'JUSTIFICATION',
         icon: FileText,
       },
       {
@@ -108,47 +78,17 @@ const privatePages: MenuItem[] = [
         name: "NetSuite's SuiteApp",
         icon: FileText,
       },
-      {
-        name: 'SRP 拆解',
-        icon: FileText,
-      },
-      {
-        name: 'NSCorp New Tool',
-        icon: FileText,
-      },
-      {
-        name: 'Netsuite Next',
-        icon: FileText,
-      },
-      {
-        name: 'NetSuite Table Schema 用法',
-        icon: FileText,
-      },
-      {
-        name: '會議記錄',
-        icon: FileText,
-      },
     ],
   },
   // 實際功能頁面整合到 Private 區域
   {
-    name: '應用程式',
-    icon: Settings,
+    name: 'POS單據模擬',
+    icon: Storefront,
     children: [
-      {
-        name: '儀表板',
-        href: '/dashboard',
-        icon: LayoutDashboard,
-      },
       {
         name: '我的訂單',
         href: '/dashboard/orders',
         icon: ShoppingCart,
-      },
-      {
-        name: 'SuiteQL 查詢',
-        href: '/dashboard/query',
-        icon: Terminal,
       },
       {
         name: '設定',
@@ -162,7 +102,7 @@ const privatePages: MenuItem[] = [
 export default function Sidebar() {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['Netsuite', '應用程式']))
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['NetSuite單據模擬', 'POS單據模擬']))
 
   const toggleExpand = (itemName: string) => {
     const newExpanded = new Set(expandedItems)
@@ -290,27 +230,12 @@ export default function Sidebar() {
                 {privatePages.map((item) => renderMenuItem(item, 0))}
               </div>
             </div>
-
-            {/* Empty Section */}
-            <div className="px-3 py-2">
-              <div className="px-1.5 mb-1">
-                <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">
-                  No pages inside
-                </span>
-              </div>
-              <div className="px-3 py-1.5 text-sm text-gray-300 hover:text-gray-200 cursor-pointer rounded hover:bg-[#354a56]/30 transition-colors">
-                隨身小故事
-              </div>
-            </div>
           </div>
 
           {/* Bottom Bar */}
           <div className="flex items-center justify-between px-3 py-2 border-t border-[#354a56]/50">
-            <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors relative">
-              <Bell className="w-4 h-4 text-gray-400" />
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-blue-500 text-white text-[10px] rounded-full flex items-center justify-center">
-                3
-              </span>
+            <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors">
+              <Cog className="w-4 h-4 text-gray-400" />
             </button>
             <button className="p-1.5 rounded hover:bg-[#354a56]/50 transition-colors">
               <Send className="w-4 h-4 text-gray-400" />
