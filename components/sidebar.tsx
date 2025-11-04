@@ -25,7 +25,7 @@ import {
   HelpCircle,
   Receipt,
   Cog,
-  Storefront
+  Store
 } from 'lucide-react'
 
 interface MenuItem {
@@ -83,7 +83,7 @@ const privatePages: MenuItem[] = [
   // 實際功能頁面整合到 Private 區域
   {
     name: 'POS單據模擬',
-    icon: Storefront,
+    icon: Store,
     children: [
       {
         name: '我的訂單',
