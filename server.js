@@ -71,7 +71,7 @@ process.on('exit', (code) => {
 });
 
 // 處理 PORT 環境變數
-// Zeabur 配置：直接使用 8080 端口
+// Zeabur 會自動設置 PORT 環境變數，直接使用它
 // 優先順序：PORT 環境變數 > WEB_PORT 環境變數 > 默認 8080
 let port = process.env.PORT || process.env.WEB_PORT || '8080';
 
@@ -92,13 +92,8 @@ if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
   port = '8080';
 }
 
-// 最終確保使用 8080（Zeabur 配置要求）
-if (process.env.NODE_ENV === 'production') {
-  port = '8080';
-  console.log('Production environment detected, forcing port to 8080');
-}
-
 // 設置環境變數（確保在載入 Next.js server 之前設置）
+// 使用實際解析出的 port 值，讓 Zeabur 的 PORT 環境變數生效
 process.env.PORT = port;
 process.env.WEB_PORT = port;
 process.env.NODE_ENV = process.env.NODE_ENV || 'production';
