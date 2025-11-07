@@ -55,13 +55,10 @@ export default function NetSuiteLogo({ className = '' }: { className?: string })
         <ellipse cx="28" cy="21" rx="6" ry="5" fill="#FDB515" opacity="0.3"/>
       </svg>
       
-      {/* Oracle NetSuite Text */}
+      {/* NetSuite Text */}
       <div className="flex flex-col leading-none">
-        <span className="text-xs font-normal text-gray-500 tracking-[0.05em] uppercase">
-          Oracle
-        </span>
         <span className="text-2xl font-semibold text-gray-800 tracking-tight">
-          NetSuite
+          NetSuite AI Nexus
         </span>
       </div>
     </div>

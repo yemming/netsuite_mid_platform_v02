@@ -306,23 +306,18 @@ export default function Home() {
             <p className="text-xs text-gray-500 text-center mb-3">
               By clicking on the Log In button, you understand and agree to{' '}
               <a href="#" className="text-[#0073C5] hover:underline">
-                Oracle Terms of Use
+                Terms of Use
               </a>
               {' '}and{' '}
               <a href="#" className="text-[#0073C5] hover:underline">
-                Oracle Privacy Policy
+                Privacy Policy
               </a>
             </p>
 
             {/* Footer Links */}
             <div className="mt-4 pt-4 border-t border-gray-100">
               <div className="flex flex-col items-center space-y-2 text-xs">
-                <span className="text-gray-400">© Oracle</span>
                 <div className="flex items-center space-x-3 text-[#0073C5]">
-                  <a href="#" className="hover:underline">
-                    Oracle Terms of Use for NetSuite Support Portal
-                  </a>
-                  <span className="text-gray-300">|</span>
                   <a href="#" className="hover:underline">
                     NetSuite Status
                   </a>
