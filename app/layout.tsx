@@ -6,8 +6,12 @@ import { ThemeProvider } from '@/components/theme-provider'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'NetSuite Platform V2',
-  description: 'NetSuite Platform with Next.js, Supabase, N8n Integration',
+  title: 'NetSuite AI Nexus',
+  description: 'NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration',
+  icons: {
+    icon: '/icon.svg',
+    apple: '/icon.svg',
+  },
 }
 
 export default function RootLayout({

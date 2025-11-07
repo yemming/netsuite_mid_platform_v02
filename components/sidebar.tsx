@@ -47,6 +47,11 @@ const mainNavigation: MenuItem[] = [
     href: '/dashboard/query',
     icon: Terminal,
   },
+  {
+    name: '設定',
+    href: '/dashboard/settings',
+    icon: Settings,
+  },
 ]
 
 const privatePages: MenuItem[] = [
@@ -89,11 +94,6 @@ const privatePages: MenuItem[] = [
         name: '我的訂單',
         href: '/dashboard/orders',
         icon: ShoppingCart,
-      },
-      {
-        name: '設定',
-        href: '/dashboard/settings',
-        icon: Settings,
       },
     ],
   },
@@ -221,13 +221,91 @@ export default function Sidebar() {
             ))}
           </div>
 
-          {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
-            {/* Private Section */}
-            <div className="px-3 py-2">
-              {/* Private Pages */}
-              <div className="space-y-0.5">
-                {privatePages.map((item) => renderMenuItem(item, 0))}
+          {/* Scrollable Content Area with Abstract Background */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar relative">
+            {/* Abstract Background Pattern - Fixed at bottom of scrollable area */}
+            <div className="absolute bottom-0 left-0 right-0 opacity-60 pointer-events-none" style={{ height: '120px', zIndex: 0 }}>
+              <svg 
+                width="100%" 
+                height="100%" 
+                viewBox="0 0 240 120" 
+                preserveAspectRatio="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="absolute inset-0"
+              >
+                <defs>
+                  {/* Gradients for organic shapes */}
+                  <linearGradient id="coralGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#FF6B6B" stopOpacity="0.4"/>
+                    <stop offset="100%" stopColor="#FF8E8E" stopOpacity="0.2"/>
+                  </linearGradient>
+                  <linearGradient id="mustardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#FDB515" stopOpacity="0.5"/>
+                    <stop offset="100%" stopColor="#FFD700" stopOpacity="0.3"/>
+                  </linearGradient>
+                  <linearGradient id="blueGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#4A90E2" stopOpacity="0.4"/>
+                    <stop offset="100%" stopColor="#6BA3E8" stopOpacity="0.2"/>
+                  </linearGradient>
+                  <linearGradient id="blueGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#5BA3D4" stopOpacity="0.35"/>
+                    <stop offset="100%" stopColor="#7BB8E0" stopOpacity="0.15"/>
+                  </linearGradient>
+                  <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#4ECDC4" stopOpacity="0.3"/>
+                    <stop offset="100%" stopColor="#6EDDD6" stopOpacity="0.15"/>
+                  </linearGradient>
+                  <radialGradient id="goldOutline" cx="50%" cy="50%">
+                    <stop offset="0%" stopColor="#FDB515" stopOpacity="0.6"/>
+                    <stop offset="100%" stopColor="#FDB515" stopOpacity="0"/>
+                  </radialGradient>
+                  
+                  {/* Texture patterns */}
+                  <pattern id="texture1" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+                    <path d="M0,10 Q10,0 20,10 T40,10" stroke="#FFFFFF" strokeWidth="0.5" fill="none" opacity="0.1"/>
+                  </pattern>
+                </defs>
+                
+                {/* Organic abstract shapes - Coral red */}
+                <ellipse cx="180" cy="80" rx="35" ry="25" fill="url(#coralGrad)" transform="rotate(-15 180 80)"/>
+                <path d="M160,90 Q170,70 190,75 Q210,80 200,95 Q190,110 170,105 Q150,100 160,90 Z" fill="url(#coralGrad)" opacity="0.3"/>
+                
+                {/* Mustard yellow shapes */}
+                <ellipse cx="200" cy="60" rx="28" ry="20" fill="url(#mustardGrad)" transform="rotate(25 200 60)"/>
+                <path d="M185,50 Q195,40 210,45 Q225,50 215,65 Q205,80 190,75 Q175,70 185,50 Z" fill="url(#mustardGrad)" opacity="0.4"/>
+                
+                {/* Blue shapes - various shades */}
+                <ellipse cx="170" cy="100" rx="30" ry="22" fill="url(#blueGrad1)" transform="rotate(45 170 100)"/>
+                <path d="M150,95 Q165,85 180,90 Q195,95 185,110 Q175,125 160,120 Q145,115 150,95 Z" fill="url(#blueGrad2)" opacity="0.35"/>
+                <ellipse cx="190" cy="110" rx="25" ry="18" fill="url(#tealGrad)" transform="rotate(-30 190 110)"/>
+                
+                {/* Additional smaller organic shapes */}
+                <ellipse cx="175" cy="70" rx="18" ry="12" fill="url(#blueGrad1)" opacity="0.3" transform="rotate(60 175 70)"/>
+                <ellipse cx="195" cy="90" rx="20" ry="15" fill="url(#tealGrad)" opacity="0.25" transform="rotate(-45 195 90)"/>
+                
+                {/* Hand-drawn style concentric circles/waves in background */}
+                <circle cx="210" cy="30" r="15" fill="none" stroke="#1C3A5E" strokeWidth="1.5" opacity="0.2"/>
+                <circle cx="210" cy="30" r="22" fill="none" stroke="#1C3A5E" strokeWidth="1" opacity="0.15"/>
+                <path d="M220,100 Q230,90 240,100" stroke="#1C3A5E" strokeWidth="2" fill="none" opacity="0.2" strokeLinecap="round"/>
+                <path d="M215,105 Q225,95 235,105" stroke="#1C3A5E" strokeWidth="1.5" fill="none" opacity="0.15" strokeLinecap="round"/>
+                
+                {/* Gold outline/accents */}
+                <path d="M165,85 Q175,75 185,80 Q195,85 190,100" stroke="#FDB515" strokeWidth="1.5" fill="none" opacity="0.4" strokeLinecap="round"/>
+                <ellipse cx="180" cy="95" rx="12" ry="8" fill="none" stroke="#FDB515" strokeWidth="1" opacity="0.3" transform="rotate(20 180 95)"/>
+                
+                {/* Texture overlay */}
+                <rect width="100%" height="100%" fill="url(#texture1)" opacity="0.3"/>
+              </svg>
+            </div>
+            
+            {/* Content - Above background */}
+            <div className="relative z-10 pb-32">
+              {/* Private Section */}
+              <div className="px-3 py-2">
+                {/* Private Pages */}
+                <div className="space-y-0.5">
+                  {privatePages.map((item) => renderMenuItem(item, 0))}
+                </div>
               </div>
             </div>
           </div>
