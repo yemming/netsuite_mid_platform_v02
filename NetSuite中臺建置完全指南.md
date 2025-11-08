@@ -1,0 +1,3291 @@
+# NetSuite 串接中臺建置完全指南
+## 從零到一的實戰手冊
+
+> **文檔版本**: v1.0  
+> **最後更新**: 2025-11-04  
+> **作者**: Claude x 你的團隊  
+> **適用場景**: POS、EC、WMS、MES 系統串接 NetSuite
+
+---
+
+## 📖 目錄
+
+- [1. 專案概述](#1-專案概述)
+- [2. 架構設計](#2-架構設計)
+- [3. 核心概念](#3-核心概念)
+- [4. Phase 1: Supabase 表結構建立](#4-phase-1-supabase-表結構建立)
+- [5. Phase 2: Helper Functions](#5-phase-2-helper-functions)
+- [6. Phase 3: 交易單據實作](#6-phase-3-交易單據實作)
+- [7. Phase 4: 製造業專屬（MES/WMS）](#7-phase-4-製造業專屬meswms)
+- [8. 實作時間表](#8-實作時間表)
+- [9. 常見問題與陷阱](#9-常見問題與陷阱)
+- [10. 附錄](#10-附錄)
+
+---
+
+## 1. 專案概述
+
+### 1.1 為什麼需要中台？
+
+你的業務系統（POS、EC、WMS、MES）需要與 NetSuite ERP 整合，但每次打 API 都需要：
+- 查詢 Subsidiary ID（公司別）
+- 查詢 Currency ID（幣別）
+- 查詢 Department ID（部門）
+- 查詢 Item ID（產品）
+- 查詢 Account ID（會計科目）
+- ...等等
+
+如果每個系統都直接查 NetSuite，會導致：
+- ❌ API 呼叫次數暴增
+- ❌ 效能低下
+- ❌ 開發複雜度高
+- ❌ 維護困難
+
+**中台的解決方案**：
+```
+┌──────────┐     ┌──────────────┐     ┌──────────┐
+│   POS    │────▶│  Supabase    │────▶│ NetSuite │
+│   EC     │     │  中台        │     │   API    │
+│   WMS    │     │ (Name↔ID)    │     │          │
+│   MES    │     └──────────────┘     └──────────┘
+└──────────┘
+    快速查詢          一天同步一次          單一數據源
+    本地資料          主檔資料              交易寫入
+```
+
+### 1.2 中台的核心功能
+
+1. **Name-to-ID Mapping**：業務系統使用「名稱」，NetSuite 使用「Internal ID」
+2. **資料快取**：本地快速查詢，不用每次都打 NetSuite API
+3. **資料驗證**：打單前先驗證所有欄位是否有效
+4. **交易組裝**：提供標準 API 組裝 NetSuite 交易格式
+
+### 1.3 支援的單據類型
+
+| 單據類型 | 英文名稱 | 適用系統 | 狀態 |
+|---------|---------|---------|------|
+| 銷售訂單 | Sales Order | POS, EC | ✅ 完全支援 |
+| 採購單 | Purchase Order | 採購系統 | ✅ 完全支援 |
+| 調撥單 | Transfer Order | WMS | ✅ 完全支援 |
+| 入庫單 | Item Receipt | WMS | ✅ 完全支援 |
+| 出貨單 | Item Fulfillment | WMS | ⚠️ 需要 SO ID |
+| 工單 | Work Order | MES | ✅ 需要 BOM |
+| 領料單 | Component Issue | MES | ✅ 需要 WO ID |
+| 費用報銷 | Expense Report | 報支系統 | ✅ 完全支援 |
+| 發票 | Invoice | 財務 | ⚠️ 建議從 SO 轉換 |
+| 手切傳票 | Journal Entry | 財務 | ✅ 完全支援 |
+
+---
+
+## 2. 架構設計
+
+### 2.1 技術堆疊
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  應用層                              │
+│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐   │
+│  │  POS   │  │   EC   │  │  WMS   │  │  MES   │   │
+│  └───┬────┘  └───┬────┘  └───┬────┘  └───┬────┘   │
+│      │           │            │            │        │
+└──────┼───────────┼────────────┼────────────┼────────┘
+       │           │            │            │
+       └───────────┴────────────┴────────────┘
+                   │
+        ┌──────────▼──────────────────┐
+        │    API Gateway Layer        │
+        │  (Supabase Functions)       │
+        └──────────┬──────────────────┘
+                   │
+        ┌──────────▼──────────────────┐
+        │      Supabase 中台          │
+        │  ┌──────────────────────┐   │
+        │  │  主檔資料表 (15張)   │   │
+        │  │  • Subsidiaries      │   │
+        │  │  • Items             │   │
+        │  │  • Accounts          │   │
+        │  │  • ...               │   │
+        │  └──────────────────────┘   │
+        │  ┌──────────────────────┐   │
+        │  │  Helper Functions    │   │
+        │  │  • lookup_id()       │   │
+        │  │  • validate()        │   │
+        │  └──────────────────────┘   │
+        └──────────┬──────────────────┘
+                   │
+        ┌──────────▼──────────────────┐
+        │     NetSuite ERP            │
+        │  • SuiteQL 查詢             │
+        │  • REST API 寫入            │
+        │  • 主檔同步（需自行實作）   │
+        └─────────────────────────────┘
+```
+
+### 2.2 數據流向
+
+#### 查詢流程（讀取主檔）
+```
+POS 系統
+  ↓ 查詢「台灣分公司」的 ID
+Supabase 中台
+  ↓ SELECT netsuite_internal_id FROM <accountid>_subsidiaries WHERE name = '台灣分公司'
+返回: 1
+```
+
+#### 寫入流程（建立交易）
+```
+POS 系統
+  ↓ 銷售單資料（使用名稱）
+中台 API Gateway
+  ↓ 轉換名稱為 ID
+  ↓ 驗證資料完整性
+  ↓ 組裝 NetSuite JSON
+NetSuite API
+  ↓ 建立 Sales Order
+返回: SO-12345 (Internal ID: 9999)
+  ↓ 儲存到 transaction_references
+Supabase
+```
+
+### 2.3 關鍵設計原則
+
+1. **單一資料源 (Single Source of Truth)**
+   - NetSuite = 唯一的真實資料來源
+   - Supabase = 唯讀快取層
+   - 永遠不直接修改 Supabase 主檔資料
+
+2. **Name-to-ID Mapping**
+   - 每張表必有：`netsuite_internal_id` (INTEGER) + `name` (VARCHAR)
+   - 業務系統用 name 查詢
+   - NetSuite API 用 internal_id 寫入
+
+3. **增量同步優先**
+   - 小表（<1000筆）：每日全量同步
+   - 大表（>10000筆）：增量同步 + 定期全量
+
+4. **錯誤處理與重試**
+   - 所有 API 呼叫都要有 try-catch
+   - 記錄失敗原因到 sync_logs
+   - 自動重試機制（最多3次）
+
+---
+
+## 3. 核心概念
+
+### 3.1 NetSuite Transaction 結構
+
+NetSuite 的所有交易都遵循相同結構：
+
+```
+Transaction
+├── Header (單頭)
+│   ├── subsidiary (必填)
+│   ├── currency (必填)
+│   ├── tranDate (必填)
+│   ├── entity (客戶/供應商/員工)
+│   ├── department (可選)
+│   ├── class (可選)
+│   └── location (可選)
+│
+└── Lines (單身明細)
+    ├── Line 1
+    │   ├── item (產品/服務)
+    │   ├── quantity
+    │   ├── rate
+    │   ├── amount
+    │   └── taxCode
+    ├── Line 2
+    └── ...
+```
+
+### 3.2 必填欄位邏輯
+
+NetSuite 的必填欄位有**三個層級**：
+
+1. **系統層級**：所有交易都必填
+   - `subsidiary`
+   - `currency`
+   - `tranDate`
+
+2. **Subsidiary 層級**：特定公司要求
+   - 例如：台灣子公司強制填 `department`
+
+3. **Transaction Form 層級**：特定單據格式要求
+   - 例如：銷售訂單要求填 `shipMethod`
+
+### 3.3 Segment（分段維度）
+
+NetSuite 支援多維度分析，常見的 Segment：
+
+- **Department**：部門（研發部、業務部）
+- **Class**：類別（硬體事業、軟體事業）
+- **Location**：地點（台北倉、台中倉）
+
+這些 Segment 可以在：
+- Header 層級設定（套用到所有明細）
+- Line 層級覆寫（單一明細使用不同值）
+
+---
+
+## 4. Phase 1: Supabase 表結構建立
+
+### 4.1 表命名規範
+
+所有表統一使用 NetSuite Account ID 作為前綴（例如：`td3018275_`），文件中使用 `<accountid>` 作為佔位符：
+
+```
+<accountid>_subsidiaries      (公司別)
+<accountid>_currencies        (幣別)
+<accountid>_departments       (部門)
+<accountid>_classes           (類別)
+<accountid>_locations         (地點)
+<accountid>_accounts          (會計科目)
+<accountid>_items             (產品主檔)
+<accountid>_entities_customers (客戶)
+<accountid>_entities_vendors   (供應商)
+<accountid>_entities_employees (員工)
+<accountid>_tax_codes         (稅碼)
+<accountid>_expense_categories (費用類別)
+<accountid>_terms             (付款條件)
+<accountid>_accounting_periods (會計期間)
+<accountid>_ship_methods      (運送方式)
+```
+
+**實際使用範例**：
+- 如果 NetSuite Account ID 是 `td3018275`，則表名為 `td3018275_subsidiaries`
+- 如果 NetSuite Account ID 是 `abc123`，則表名為 `abc123_subsidiaries`
+
+### 4.2 核心表結構
+
+#### 4.2.1 公司別（Subsidiaries）⭐ 最高優先級
+
+```sql
+-- ============================================
+-- 公司別（Subsidiary）
+-- 說明：NetSuite 的一切都屬於某個 Subsidiary
+-- 優先級：🔴 最高（必須最先建立）
+-- 
+-- ⚠️ 重要：此結構已根據實際 NetSuite SuiteQL 查詢結果更新
+-- ============================================
+CREATE TABLE <accountid>_subsidiaries (
+  -- 主鍵
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- NetSuite 映射
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,  -- NetSuite 的 internalId (id)
+  name VARCHAR(255) NOT NULL,                     -- 公司名稱（name）
+  legal_name VARCHAR(255),                        -- 法定名稱（legalname）
+  
+  -- 業務欄位
+  country VARCHAR(100),                           -- 國家（country）
+  base_currency_id INTEGER,                       -- 基準幣別 ID（currency）
+  is_elimination BOOLEAN DEFAULT FALSE,           -- 是否為合併排除公司（iselimination = 'T'）
+  
+  -- 階層結構
+  parent_id INTEGER,                              -- 父公司 ID（parent）
+  full_name VARCHAR(500),                         -- 完整階層名稱（fullname，如 "HEADQUARTERS : AMERICAS : US - West"）
+  
+  -- 額外資訊
+  state VARCHAR(100),                             -- 州/省（state）
+  email VARCHAR(255),                             -- 電子郵件（email）
+  fiscal_calendar_id INTEGER,                    -- 會計年度曆 ID（fiscalcalendar）
+  
+  -- 狀態與同步
+  is_active BOOLEAN DEFAULT TRUE,                -- isinactive = 'F'
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),       -- 最後同步時間
+  
+  -- 審計欄位
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引（加速查詢）
+CREATE INDEX idx_subsidiaries_internal_id ON <accountid>_subsidiaries(netsuite_internal_id);
+CREATE INDEX idx_subsidiaries_name ON <accountid>_subsidiaries(name);
+CREATE INDEX idx_subsidiaries_parent_id ON <accountid>_subsidiaries(parent_id);
+CREATE INDEX idx_subsidiaries_full_name ON <accountid>_subsidiaries(full_name);
+
+-- 註解
+COMMENT ON TABLE <accountid>_subsidiaries IS 'NetSuite 公司別主檔';
+COMMENT ON COLUMN <accountid>_subsidiaries.netsuite_internal_id IS 'NetSuite Internal ID (唯一識別碼)';
+COMMENT ON COLUMN <accountid>_subsidiaries.name IS '公司名稱（業務系統查詢用）';
+COMMENT ON COLUMN <accountid>_subsidiaries.parent_id IS '父公司 ID（支援階層式公司結構）';
+COMMENT ON COLUMN <accountid>_subsidiaries.full_name IS '完整階層名稱（如 "HEADQUARTERS : AMERICAS : US - West"）';
+COMMENT ON COLUMN <accountid>_subsidiaries.state IS '州/省代碼';
+COMMENT ON COLUMN <accountid>_subsidiaries.email IS '公司電子郵件';
+COMMENT ON COLUMN <accountid>_subsidiaries.fiscal_calendar_id IS '會計年度曆 ID';
+```
+
+**NetSuite SuiteQL 查詢範例**：
+```sql
+SELECT 
+  id, 
+  name, 
+  legalname, 
+  country, 
+  currency, 
+  parent,
+  fullname,
+  iselimination,
+  state,
+  email,
+  fiscalcalendar,
+  isinactive 
+FROM subsidiary 
+WHERE isinactive = 'F'
+```
+
+**欄位對照說明**：
+- ✅ `id` → `netsuite_internal_id`
+- ✅ `name` → `name`
+- ✅ `legalname` → `legal_name`（可能為 NULL）
+- ✅ `country` → `country`
+- ✅ `currency` → `base_currency_id`
+- ✅ `parent` → `parent_id`
+- ✅ `fullname` → `full_name`
+- ✅ `iselimination` → `is_elimination`（'T'/'F' → BOOLEAN）
+- ✅ `isinactive` → `is_active`（'F'/'T' → BOOLEAN，需反轉）
+- ✅ `state` → `state`
+- ✅ `email` → `email`
+- ✅ `fiscalcalendar` → `fiscal_calendar_id`
+
+#### 4.2.2 幣別（Currencies）
+
+```sql
+-- ============================================
+-- 幣別（Currency）
+-- 說明：所有交易都需要指定幣別
+-- 優先級：🔴 最高
+-- ============================================
+CREATE TABLE <accountid>_currencies (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  name VARCHAR(100) NOT NULL,                     -- "Taiwan Dollar"
+  symbol VARCHAR(10),                              -- "TWD"
+  
+  -- 匯率
+  exchange_rate DECIMAL(15,6),                    -- 對基準幣別的匯率
+  is_base_currency BOOLEAN DEFAULT FALSE,         -- 是否為基準幣別
+  
+  -- 狀態
+  is_active BOOLEAN DEFAULT TRUE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_currencies_internal_id ON <accountid>_currencies(netsuite_internal_id);
+CREATE INDEX idx_currencies_symbol ON <accountid>_currencies(symbol);
+
+COMMENT ON TABLE <accountid>_currencies IS 'NetSuite 幣別主檔';
+```
+
+#### 4.2.3 部門（Departments）
+
+```sql
+-- ============================================
+-- 部門（Department）
+-- 說明：組織架構的部門維度
+-- 優先級：🟡 中（依賴 Subsidiary）
+-- ============================================
+CREATE TABLE <accountid>_departments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  name VARCHAR(255) NOT NULL,                     -- "研發一部"
+  subsidiary_id INTEGER,                          -- 所屬公司
+  
+  -- 階層結構
+  parent_id INTEGER,                              -- 上層部門（支援階層式部門）
+  full_name VARCHAR(500),                         -- "總公司 : 研發處 : 研發一部"
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_departments_internal_id ON <accountid>_departments(netsuite_internal_id);
+CREATE INDEX idx_departments_name ON <accountid>_departments(name);
+CREATE INDEX idx_departments_subsidiary ON <accountid>_departments(subsidiary_id);
+
+COMMENT ON TABLE <accountid>_departments IS 'NetSuite 部門主檔';
+COMMENT ON COLUMN <accountid>_departments.full_name IS '完整階層名稱（查詢用）';
+```
+
+#### 4.2.4 類別（Classes）
+
+```sql
+-- ============================================
+-- 類別（Class）
+-- 說明：產品線/品牌/專案的分類維度
+-- 優先級：🟡 中
+-- ============================================
+CREATE TABLE <accountid>_classes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  name VARCHAR(255) NOT NULL,                     -- "硬體事業部"
+  subsidiary_id INTEGER,
+  
+  -- 階層結構
+  parent_id INTEGER,
+  full_name VARCHAR(500),
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_classes_internal_id ON <accountid>_classes(netsuite_internal_id);
+CREATE INDEX idx_classes_name ON <accountid>_classes(name);
+
+COMMENT ON TABLE <accountid>_classes IS 'NetSuite 類別主檔（產品線/品牌/專案）';
+```
+
+#### 4.2.5 地點（Locations）
+
+```sql
+-- ============================================
+-- 地點（Location）
+-- 說明：倉庫/門市/辦公室
+-- 優先級：🟡 中（WMS 必要）
+-- ============================================
+CREATE TABLE <accountid>_locations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  name VARCHAR(255) NOT NULL,                     -- "台北倉"
+  subsidiary_id INTEGER,
+  address_text TEXT,                              -- 地址
+  
+  -- 倉庫管理
+  use_bins BOOLEAN DEFAULT FALSE,                 -- 是否使用儲位管理
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_locatio<accountid>_internal_id ON <accountid>_locations(netsuite_internal_id);
+CREATE INDEX idx_locatio<accountid>_name ON <accountid>_locations(name);
+
+COMMENT ON TABLE <accountid>_locations IS 'NetSuite 地點主檔（倉庫/門市/辦公室）';
+COMMENT ON COLUMN <accountid>_locations.use_bins IS '是否啟用儲位（Bin）管理';
+```
+
+#### 4.2.6 會計科目（Accounts）⭐ 財務核心
+
+```sql
+-- ============================================
+-- 會計科目（Account）
+-- 說明：財務報表的底層邏輯
+-- 優先級：🔴 高（費用報銷、日記帳必要）
+-- ============================================
+CREATE TABLE <accountid>_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 科目資訊
+  acct_number VARCHAR(50),                        -- "6225"
+  acct_name VARCHAR(255) NOT NULL,                -- "交通費"
+  full_name VARCHAR(500),                         -- "6225 - 交通費"
+  
+  -- 科目類型
+  acct_type VARCHAR(100),                         -- Income, Expense, Asset, Liability, Equity
+  
+  -- 所屬公司
+  subsidiary_id INTEGER,
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_accounts_internal_id ON <accountid>_accounts(netsuite_internal_id);
+CREATE INDEX idx_accounts_number ON <accountid>_accounts(acct_number);
+CREATE INDEX idx_accounts_type ON <accountid>_accounts(acct_type);
+CREATE INDEX idx_accounts_full_name ON <accountid>_accounts(full_name);
+
+COMMENT ON TABLE <accountid>_accounts IS 'NetSuite 會計科目主檔';
+COMMENT ON COLUMN <accountid>_accounts.acct_type IS '科目類型：Income(收入)/Expense(費用)/Asset(資產)/Liability(負債)/Equity(權益)';
+```
+
+#### 4.2.7 產品主檔（Items）⭐ 交易核心
+
+```sql
+-- ============================================
+-- 產品/服務主檔（Item）
+-- 說明：所有交易明細的核心
+-- 優先級：🔴 最高（POS/EC/WMS 必要）
+-- ============================================
+CREATE TABLE <accountid>_items (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  item_id VARCHAR(255) NOT NULL,                  -- 料號 "ITEM-001"
+  name VARCHAR(255) NOT NULL,                     -- 顯示名稱 "可口可樂 330ml"
+  display_name VARCHAR(255),
+  
+  -- 產品類型
+  item_type VARCHAR(100),                         -- Inventory, Non-Inventory, Service, Kit, Assembly
+  
+  -- 描述
+  description TEXT,
+  sales_description TEXT,                         -- 銷售描述
+  purchase_description TEXT,                      -- 採購描述
+  
+  -- 價格與成本
+  base_price DECIMAL(15,2),                       -- 基本售價
+  cost_estimate DECIMAL(15,2),                    -- 估計成本
+  
+  -- 預設會計科目（可在交易時覆寫）
+  income_account_id INTEGER,                      -- 銷貨收入科目
+  expense_account_id INTEGER,                     -- 銷貨成本科目
+  asset_account_id INTEGER,                       -- 存貨科目
+  
+  -- 稅務
+  tax_schedule_id INTEGER,
+  
+  -- 製造業專用
+  is_assembly BOOLEAN DEFAULT FALSE,              -- 是否為組合品（需要生產）
+  build_time DECIMAL(10,2),                       -- 生產時間（小時）
+  default_build_location_id INTEGER,              -- 預設生產地點
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_items_internal_id ON <accountid>_items(netsuite_internal_id);
+CREATE INDEX idx_items_item_id ON <accountid>_items(item_id);
+CREATE INDEX idx_items_name ON <accountid>_items(name);
+CREATE INDEX idx_items_type ON <accountid>_items(item_type);
+CREATE INDEX idx_items_is_assembly ON <accountid>_items(is_assembly) WHERE is_assembly = TRUE;
+
+COMMENT ON TABLE <accountid>_items IS 'NetSuite 產品/服務主檔';
+COMMENT ON COLUMN <accountid>_items.item_type IS '產品類型：Inventory(庫存品)/Non-Inventory(非庫存品)/Service(服務)/Kit(套裝)/Assembly(組合品)';
+COMMENT ON COLUMN <accountid>_items.is_assembly IS '是否為需要生產的組合品（MES 用）';
+```
+
+#### 4.2.8 客戶主檔（Customers）
+
+```sql
+-- ============================================
+-- 客戶主檔（Customer）
+-- 說明：銷售交易的對象
+-- 優先級：🔴 高（POS/EC 必要）
+-- ============================================
+CREATE TABLE <accountid>_entities_customers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  entity_id VARCHAR(255),                         -- 客戶編號 "C-00001"
+  name VARCHAR(255) NOT NULL,                     -- 公司名稱或個人名稱
+  company_name VARCHAR(255),
+  
+  -- 聯絡資訊
+  email VARCHAR(255),
+  phone VARCHAR(100),
+  
+  -- 預設值
+  subsidiary_id INTEGER,                          -- 所屬公司
+  currency_id INTEGER,                            -- 預設幣別
+  terms_id INTEGER,                               -- 付款條件
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_customers_internal_id ON <accountid>_entities_customers(netsuite_internal_id);
+CREATE INDEX idx_customers_entity_id ON <accountid>_entities_customers(entity_id);
+CREATE INDEX idx_customers_name ON <accountid>_entities_customers(name);
+
+COMMENT ON TABLE <accountid>_entities_customers IS 'NetSuite 客戶主檔';
+```
+
+#### 4.2.9 供應商主檔（Vendors）
+
+```sql
+-- ============================================
+-- 供應商主檔（Vendor）
+-- 說明：採購交易的對象
+-- 優先級：🟡 中（採購系統必要）
+-- ============================================
+CREATE TABLE <accountid>_entities_vendors (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  entity_id VARCHAR(255),                         -- 供應商編號
+  name VARCHAR(255) NOT NULL,
+  company_name VARCHAR(255),
+  
+  -- 聯絡資訊
+  email VARCHAR(255),
+  phone VARCHAR(100),
+  
+  -- 預設值
+  subsidiary_id INTEGER,
+  currency_id INTEGER,
+  terms_id INTEGER,
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_vendors_internal_id ON <accountid>_entities_vendors(netsuite_internal_id);
+CREATE INDEX idx_vendors_entity_id ON <accountid>_entities_vendors(entity_id);
+CREATE INDEX idx_vendors_name ON <accountid>_entities_vendors(name);
+
+COMMENT ON TABLE <accountid>_entities_vendors IS 'NetSuite 供應商主檔';
+```
+
+#### 4.2.10 員工主檔（Employees）
+
+```sql
+-- ============================================
+-- 員工主檔（Employee）
+-- 說明：費用報銷的主體
+-- 優先級：🟡 中（報支系統必要）
+-- ============================================
+CREATE TABLE <accountid>_entities_employees (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  entity_id VARCHAR(255),                         -- 員工編號
+  name VARCHAR(255) NOT NULL,                     -- "王小明"
+  email VARCHAR(255),
+  
+  -- 組織關係
+  department_id INTEGER,                          -- 所屬部門
+  subsidiary_id INTEGER,                          -- 所屬公司
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_employees_internal_id ON <accountid>_entities_employees(netsuite_internal_id);
+CREATE INDEX idx_employees_name ON <accountid>_entities_employees(name);
+CREATE INDEX idx_employees_email ON <accountid>_entities_employees(email);
+
+COMMENT ON TABLE <accountid>_entities_employees IS 'NetSuite 員工主檔';
+```
+
+#### 4.2.11 稅碼（Tax Codes）
+
+```sql
+-- ============================================
+-- 稅碼（Tax Code）
+-- 說明：台灣必備的營業稅設定
+-- 優先級：🔴 高（所有銷售交易必要）
+-- ============================================
+CREATE TABLE <accountid>_tax_codes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 稅碼資訊
+  name VARCHAR(255) NOT NULL,                     -- "應稅 5%"
+  rate DECIMAL(5,2),                              -- 5.00
+  description TEXT,
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_tax_codes_internal_id ON <accountid>_tax_codes(netsuite_internal_id);
+CREATE INDEX idx_tax_codes_name ON <accountid>_tax_codes(name);
+
+COMMENT ON TABLE <accountid>_tax_codes IS 'NetSuite 稅碼主檔';
+```
+
+#### 4.2.12 費用類別（Expense Categories）
+
+```sql
+-- ============================================
+-- 費用類別（Expense Category）
+-- 說明：費用報銷的分類（Account 的易用版）
+-- 優先級：🟡 中（報支系統必要）
+-- ============================================
+CREATE TABLE <accountid>_expense_categories (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 費用資訊
+  name VARCHAR(255) NOT NULL,                     -- "交通費"
+  expense_account_id INTEGER,                     -- 對應的會計科目 ID
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_expense_categories_internal_id ON <accountid>_expense_categories(netsuite_internal_id);
+CREATE INDEX idx_expense_categories_name ON <accountid>_expense_categories(name);
+
+COMMENT ON TABLE <accountid>_expense_categories IS 'NetSuite 費用類別主檔（報支系統用）';
+```
+
+#### 4.2.13 付款條件（Terms）
+
+```sql
+-- ============================================
+-- 付款條件（Terms）
+-- 說明：客戶/供應商的付款條件
+-- 優先級：🟢 低（可延後建立）
+-- ============================================
+CREATE TABLE <accountid>_terms (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 條件資訊
+  name VARCHAR(255) NOT NULL,                     -- "Net 30"
+  days_until_net_due INTEGER,                     -- 30 天內付款
+  discount_percent DECIMAL(5,2),                  -- 提前付款折扣
+  days_until_expiry INTEGER,                      -- 折扣期限
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_terms_internal_id ON <accountid>_terms(netsuite_internal_id);
+
+COMMENT ON TABLE <accountid>_terms IS 'NetSuite 付款條件主檔';
+```
+
+#### 4.2.14 會計期間（Accounting Periods）
+
+```sql
+-- ============================================
+-- 會計期間（Accounting Period）
+-- 說明：財務過帳的期間控制
+-- 優先級：🔴 高（所有交易必要）
+-- ============================================
+CREATE TABLE <accountid>_accounting_periods (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 期間資訊
+  period_name VARCHAR(100),                       -- "Jan 2025", "FY 2025"
+  start_date DATE,
+  end_date DATE,
+  
+  -- 期間類型
+  is_quarter BOOLEAN DEFAULT FALSE,
+  is_year BOOLEAN DEFAULT FALSE,
+  is_adjustment BOOLEAN DEFAULT FALSE,            -- 是否為調整期間
+  
+  -- 狀態
+  is_closed BOOLEAN DEFAULT FALSE,                -- 是否已關閉
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_periods_internal_id ON <accountid>_accounting_periods(netsuite_internal_id);
+CREATE INDEX idx_periods_dates ON <accountid>_accounting_periods(start_date, end_date);
+
+COMMENT ON TABLE <accountid>_accounting_periods IS 'NetSuite 會計期間主檔';
+```
+
+#### 4.2.15 運送方式（Ship Methods）
+
+```sql
+-- ============================================
+-- 運送方式（Ship Method）
+-- 說明：出貨單的運送方式
+-- 優先級：🟢 低（出貨流程才需要）
+-- ============================================
+CREATE TABLE <accountid>_ship_methods (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 方式資訊
+  name VARCHAR(255) NOT NULL,                     -- "黑貓宅急便"
+  
+  -- 狀態
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_ship_methods_internal_id ON <accountid>_ship_methods(netsuite_internal_id);
+
+COMMENT ON TABLE <accountid>_ship_methods IS 'NetSuite 運送方式主檔';
+```
+
+### 4.3 製造業專屬表（MES/WMS）
+
+#### 4.3.1 配方表頭（BOM Headers）⭐ 製造核心
+
+```sql
+-- ============================================
+-- 配方表頭（BOM Header）
+-- 說明：定義成品由哪些原料組成
+-- 優先級：🔴 最高（MES 必要）
+-- ============================================
+CREATE TABLE <accountid>_bom_headers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- BOM 資訊
+  assembly_item_id INTEGER NOT NULL,              -- 成品的 Item ID
+  name VARCHAR(255),                               -- BOM 名稱
+  revision VARCHAR(50),                            -- 版本號（如 "Rev A"）
+  
+  -- 有效期間
+  is_active BOOLEAN DEFAULT TRUE,
+  effective_date DATE,                             -- 生效日期
+  obsolete_date DATE,                              -- 廢止日期
+  
+  -- 說明
+  memo TEXT,
+  
+  -- 同步
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_bom_headers_internal_id ON <accountid>_bom_headers(netsuite_internal_id);
+CREATE INDEX idx_bom_headers_assembly ON <accountid>_bom_headers(assembly_item_id);
+CREATE INDEX idx_bom_headers_active ON <accountid>_bom_headers(is_active, effective_date, obsolete_date);
+
+COMMENT ON TABLE <accountid>_bom_headers IS 'NetSuite BOM 配方表頭';
+COMMENT ON COLUMN <accountid>_bom_headers.assembly_item_id IS '成品的 netsuite_internal_id (from <accountid>_items)';
+```
+
+#### 4.3.2 配方明細（BOM Lines）
+
+```sql
+-- ============================================
+-- 配方明細（BOM Lines）
+-- 說明：BOM 的組成原料清單
+-- 優先級：🔴 最高（MES 必要）
+-- ============================================
+CREATE TABLE <accountid>_bom_lines (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- 關聯
+  bom_header_id UUID REFERENCES <accountid>_bom_headers(id),
+  netsuite_bom_id INTEGER,                         -- 對應 <accountid>_bom_headers.netsuite_internal_id
+  
+  -- 明細資訊
+  line_number INTEGER,                             -- 行號
+  component_item_id INTEGER NOT NULL,              -- 原料/零件的 Item ID
+  quantity DECIMAL(15,4) NOT NULL,                 -- 需要的數量
+  unit_of_measure VARCHAR(50),                     -- 單位
+  
+  -- 進階欄位
+  component_yield DECIMAL(5,2) DEFAULT 100.00,     -- 零件損耗率（%）
+  is_phantom BOOLEAN DEFAULT FALSE,                -- 是否為虛擬組件
+  supply_type VARCHAR(50),                         -- 'Purchase', 'Transfer', 'Phantom'
+  
+  -- 審計
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_bom_lines_header ON <accountid>_bom_lines(bom_header_id);
+CREATE INDEX idx_bom_lines_netsuite_bom ON <accountid>_bom_lines(netsuite_bom_id);
+CREATE INDEX idx_bom_lines_component ON <accountid>_bom_lines(component_item_id);
+
+COMMENT ON TABLE <accountid>_bom_lines IS 'NetSuite BOM 配方明細';
+COMMENT ON COLUMN <accountid>_bom_lines.component_item_id IS '原料的 netsuite_internal_id (from <accountid>_items)';
+COMMENT ON COLUMN <accountid>_bom_lines.component_yield IS '良率（100 = 無損耗）';
+```
+
+#### 4.3.3 工作中心（Work Centers）
+
+```sql
+-- ============================================
+-- 工作中心（Work Center）
+-- 說明：產線/機台/工作站
+-- 優先級：🟡 中（進階 MES 需要）
+-- ============================================
+CREATE TABLE <accountid>_work_centers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 基本資訊
+  name VARCHAR(255) NOT NULL,                      -- "包裝線 A"
+  location_id INTEGER,                             -- 所在地點
+  
+  -- 產能資訊
+  capacity_per_hour DECIMAL(10,2),                 -- 每小時產能
+  cost_per_hour DECIMAL(10,2),                     -- 每小時成本
+  
+  -- 狀態
+  is_active BOOLEAN DEFAULT TRUE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_work_centers_internal_id ON <accountid>_work_centers(netsuite_internal_id);
+CREATE INDEX idx_work_centers_location ON <accountid>_work_centers(location_id);
+
+COMMENT ON TABLE <accountid>_work_centers IS 'NetSuite 工作中心主檔（產線/機台）';
+```
+
+#### 4.3.4 工序表（Routings）- 選配
+
+```sql
+-- ============================================
+-- 工序主表（Routing）
+-- 說明：生產流程的工序定義
+-- 優先級：🟢 低（進階 MES 才需要）
+-- ============================================
+CREATE TABLE <accountid>_routings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- 工序資訊
+  assembly_item_id INTEGER NOT NULL,              -- 成品 ID
+  name VARCHAR(255),
+  revision VARCHAR(50),
+  
+  -- 狀態
+  is_active BOOLEAN DEFAULT TRUE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_routings_internal_id ON <accountid>_routings(netsuite_internal_id);
+CREATE INDEX idx_routings_assembly ON <accountid>_routings(assembly_item_id);
+
+-- ============================================
+-- 工序明細（Routing Steps）
+-- ============================================
+CREATE TABLE <accountid>_routing_steps (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- 關聯
+  routing_id UUID REFERENCES <accountid>_routings(id),
+  netsuite_routing_id INTEGER,
+  
+  -- 工序資訊
+  sequence_number INTEGER,                         -- 工序順序
+  operation_name VARCHAR(255),                     -- "裝罐"、"封箱"、"貼標"
+  work_center_id INTEGER,                          -- 在哪個產線做
+  
+  -- 時間
+  setup_time DECIMAL(10,2),                        -- 準備時間（分鐘）
+  run_time DECIMAL(10,2),                          -- 加工時間（分鐘/件）
+  
+  -- 審計
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_routing_steps_routing ON <accountid>_routing_steps(routing_id);
+CREATE INDEX idx_routing_steps_sequence ON <accountid>_routing_steps(sequence_number);
+
+COMMENT ON TABLE <accountid>_routings IS 'NetSuite 工序主表';
+COMMENT ON TABLE <accountid>_routing_steps IS 'NetSuite 工序明細';
+```
+
+### 4.4 輔助系統表
+
+#### 4.4.1 交易追蹤表
+
+```sql
+-- ============================================
+-- 交易追蹤表（Transaction References）
+-- 說明：記錄中台與 NetSuite 的交易對應關係
+-- 用途：追蹤 POS/EC/WMS/MES 的單據在 NetSuite 的狀態
+-- ============================================
+CREATE TABLE transaction_references (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- 來源系統
+  source_system VARCHAR(100),                      -- 'POS', 'EC', 'WMS', 'MES'
+  source_transaction_id VARCHAR(255),              -- 來源系統的單號
+  source_transaction_type VARCHAR(100),            -- 'Sale', 'Purchase', 'Transfer'
+  
+  -- NetSuite 對應
+  netsuite_record_type VARCHAR(100),               -- 'salesOrder', 'purchaseOrder', 'workOrder'
+  netsuite_internal_id INTEGER,                    -- NetSuite 返回的 Internal ID
+  netsuite_tran_id VARCHAR(100),                   -- NetSuite 的單號（如 SO-12345）
+  
+  -- 狀態追蹤
+  status VARCHAR(50),                              -- 'pending', 'success', 'failed', 'cancelled'
+  error_message TEXT,                              -- 錯誤訊息
+  retry_count INTEGER DEFAULT 0,                   -- 重試次數
+  
+  -- JSON 備份（除錯用）
+  request_payload JSONB,                           -- 發送給 NetSuite 的 JSON
+  response_payload JSONB,                          -- NetSuite 返回的 JSON
+  
+  -- 審計
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  synced_at TIMESTAMPTZ                            -- 成功同步到 NetSuite 的時間
+);
+
+CREATE INDEX idx_txn_refs_source ON transaction_references(source_system, source_transaction_id);
+CREATE INDEX idx_txn_refs_netsuite ON transaction_references(netsuite_internal_id);
+CREATE INDEX idx_txn_refs_status ON transaction_references(status);
+CREATE INDEX idx_txn_refs_created ON transaction_references(created_at DESC);
+
+COMMENT ON TABLE transaction_references IS '交易追蹤表：記錄業務系統與 NetSuite 的單據對應';
+```
+
+#### 4.4.2 工單追蹤表
+
+```sql
+-- ============================================
+-- 工單追蹤表（Work Order Tracking）
+-- 說明：追蹤工單的生產狀態
+-- 用途：MES 系統查詢工單進度
+-- ============================================
+CREATE TABLE work_order_tracking (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- 來源資訊
+  source_system VARCHAR(100),                      -- 'MES'
+  source_wo_number VARCHAR(255),                   -- MES 的工單號
+  
+  -- NetSuite 工單
+  netsuite_wo_id INTEGER,                          -- NetSuite Work Order ID
+  netsuite_wo_number VARCHAR(100),                 -- "WO-12345"
+  
+  -- 工單內容
+  assembly_item_id INTEGER,                        -- 成品 ID
+  quantity_ordered DECIMAL(15,4),                  -- 下單數量
+  quantity_completed DECIMAL(15,4) DEFAULT 0,      -- 完成數量
+  quantity_scrapped DECIMAL(15,4) DEFAULT 0,       -- 報廢數量
+  
+  -- 狀態
+  status VARCHAR(50),                              -- 'Released', 'InProgress', 'Completed', 'Closed'
+  
+  -- 地點與時間
+  location_id INTEGER,
+  start_date DATE,
+  end_date DATE,
+  actual_start_date DATE,
+  actual_end_date DATE,
+  
+  -- 審計
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_wo_tracking_source ON work_order_tracking(source_system, source_wo_number);
+CREATE INDEX idx_wo_tracking_netsuite ON work_order_tracking(netsuite_wo_id);
+CREATE INDEX idx_wo_tracking_status ON work_order_tracking(status);
+CREATE INDEX idx_wo_tracking_assembly ON work_order_tracking(assembly_item_id);
+
+COMMENT ON TABLE work_order_tracking IS '工單追蹤表：記錄 MES 工單在 NetSuite 的狀態';
+```
+
+#### 4.4.3 同步日誌表
+
+```sql
+-- ============================================
+-- 同步日誌表（Sync Logs）
+-- 說明：記錄主檔同步的執行結果
+-- 用途：監控同步狀態、除錯
+-- ============================================
+CREATE TABLE sync_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- 同步資訊
+  table_name VARCHAR(100),                         -- '<accountid>_subsidiaries', '<accountid>_items'
+  sync_type VARCHAR(50),                           -- 'full', 'incremental'
+  
+  -- 執行結果
+  sync_status VARCHAR(50),                         -- 'success', 'failed', 'partial'
+  records_processed INTEGER,                       -- 處理的筆數
+  records_inserted INTEGER,                        -- 新增的筆數
+  records_updated INTEGER,                         -- 更新的筆數
+  records_failed INTEGER,                          -- 失敗的筆數
+  
+  -- 錯誤資訊
+  error_message TEXT,
+  error_details JSONB,                             -- 詳細錯誤（JSON 格式）
+  
+  -- 時間追蹤
+  sync_started_at TIMESTAMPTZ,
+  sync_completed_at TIMESTAMPTZ,
+  duration_seconds INTEGER,                        -- 執行時間（秒）
+  
+  -- 審計
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_sync_logs_table_time ON sync_logs(table_name, created_at DESC);
+CREATE INDEX idx_sync_logs_status ON sync_logs(sync_status);
+
+COMMENT ON TABLE sync_logs IS '同步日誌表：記錄主檔同步的執行結果';
+```
+
+#### 4.4.4 監控視圖
+
+```sql
+-- ============================================
+-- 監控視圖：最後同步狀態
+-- 說明：快速查看每個表的同步健康狀態
+-- ============================================
+CREATE OR REPLACE VIEW vw_sync_status AS
+WITH latest_syncs AS (
+  SELECT 
+    table_name,
+    sync_status,
+    records_processed,
+    sync_completed_at,
+    duration_seconds,
+    ROW_NUMBER() OVER (PARTITION BY table_name ORDER BY created_at DESC) as rn
+  FROM sync_logs
+)
+SELECT 
+  table_name,
+  sync_status,
+  records_processed,
+  sync_completed_at,
+  duration_seconds,
+  CASE 
+    WHEN sync_status = 'failed' THEN '❌ 失敗'
+    WHEN sync_completed_at > NOW() - INTERVAL '25 hours' THEN '✅ 正常'
+    WHEN sync_completed_at > NOW() - INTERVAL '48 hours' THEN '⚠️ 延遲'
+    ELSE '❌ 異常'
+  END as health_status,
+  EXTRACT(EPOCH FROM (NOW() - sync_completed_at))/3600 as hours_since_sync
+FROM latest_syncs
+WHERE rn = 1
+ORDER BY table_name;
+
+COMMENT ON VIEW vw_sync_status IS '監控視圖：顯示每個表的最後同步狀態';
+
+-- 使用方式：
+-- SELECT * FROM vw_sync_status;
+```
+
+---
+
+## 5. Phase 2: Helper Functions
+
+### 5.1 Name-to-ID 查詢函數
+
+```sql
+-- ============================================
+-- 函數：通用 Name 查詢 Internal ID
+-- 用途：讓業務系統用名稱查詢 NetSuite ID
+-- 範例：SELECT lookup_netsuite_id('<accountid>_subsidiaries', '台灣分公司');
+-- ============================================
+CREATE OR REPLACE FUNCTION lookup_netsuite_id(
+  p_table_name VARCHAR,
+  p_name VARCHAR
+)
+RETURNS INTEGER AS $$
+DECLARE
+  v_id INTEGER;
+  v_query TEXT;
+BEGIN
+  -- 動態生成查詢語句
+  v_query := format(
+    'SELECT netsuite_internal_id FROM %I WHERE name = $1 AND (is_inactive = FALSE OR is_active = TRUE) LIMIT 1',
+    p_table_name
+  );
+  
+  -- 執行查詢
+  EXECUTE v_query INTO v_id USING p_name;
+  
+  -- 返回結果
+  RETURN v_id;
+  
+EXCEPTION
+  WHEN OTHERS THEN
+    -- 發生錯誤時返回 NULL
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 使用範例
+-- SELECT lookup_netsuite_id('<accountid>_subsidiaries', '台灣分公司');
+-- SELECT lookup_netsuite_id('<accountid>_departments', '研發一部');
+-- SELECT lookup_netsuite_id('<accountid>_items', '可口可樂 330ml');
+
+COMMENT ON FUNCTION lookup_netsuite_id IS '通用函數：用名稱查詢 NetSuite Internal ID';
+```
+
+### 5.2 交易驗證函數
+
+```sql
+-- ============================================
+-- 函數：驗證交易所需的組件是否都有效
+-- 用途：在建立交易前先驗證，避免 API 失敗
+-- ============================================
+CREATE OR REPLACE FUNCTION validate_transaction_components(
+  p_subsidiary_name VARCHAR,
+  p_currency_symbol VARCHAR,
+  p_customer_name VARCHAR DEFAULT NULL,
+  p_department_name VARCHAR DEFAULT NULL,
+  p_class_name VARCHAR DEFAULT NULL,
+  p_location_name VARCHAR DEFAULT NULL
+)
+RETURNS JSON AS $$
+DECLARE
+  v_errors TEXT[] := '{}';
+  v_subsidiary_id INTEGER;
+  v_currency_id INTEGER;
+  v_customer_id INTEGER;
+  v_department_id INTEGER;
+  v_class_id INTEGER;
+  v_location_id INTEGER;
+  v_result JSON;
+BEGIN
+  -- 檢查 Subsidiary（必填）
+  SELECT netsuite_internal_id INTO v_subsidiary_id 
+  FROM <accountid>_subsidiaries 
+  WHERE name = p_subsidiary_name AND is_active = TRUE;
+  
+  IF v_subsidiary_id IS NULL THEN
+    v_errors := array_append(v_errors, 'Invalid subsidiary: ' || p_subsidiary_name);
+  END IF;
+  
+  -- 檢查 Currency（必填）
+  SELECT netsuite_internal_id INTO v_currency_id
+  FROM <accountid>_currencies
+  WHERE symbol = p_currency_symbol AND is_active = TRUE;
+  
+  IF v_currency_id IS NULL THEN
+    v_errors := array_append(v_errors, 'Invalid currency: ' || p_currency_symbol);
+  END IF;
+  
+  -- 檢查 Customer（如果有提供）
+  IF p_customer_name IS NOT NULL THEN
+    SELECT netsuite_internal_id INTO v_customer_id
+    FROM <accountid>_entities_customers
+    WHERE name = p_customer_name AND is_inactive = FALSE;
+    
+    IF v_customer_id IS NULL THEN
+      v_errors := array_append(v_errors, 'Invalid customer: ' || p_customer_name);
+    END IF;
+  END IF;
+  
+  -- 檢查 Department（如果有提供）
+  IF p_department_name IS NOT NULL THEN
+    SELECT netsuite_internal_id INTO v_department_id
+    FROM <accountid>_departments
+    WHERE name = p_department_name AND is_inactive = FALSE;
+    
+    IF v_department_id IS NULL THEN
+      v_errors := array_append(v_errors, 'Invalid department: ' || p_department_name);
+    END IF;
+  END IF;
+  
+  -- 檢查 Class（如果有提供）
+  IF p_class_name IS NOT NULL THEN
+    SELECT netsuite_internal_id INTO v_class_id
+    FROM <accountid>_classes
+    WHERE name = p_class_name AND is_inactive = FALSE;
+    
+    IF v_class_id IS NULL THEN
+      v_errors := array_append(v_errors, 'Invalid class: ' || p_class_name);
+    END IF;
+  END IF;
+  
+  -- 檢查 Location（如果有提供）
+  IF p_location_name IS NOT NULL THEN
+    SELECT netsuite_internal_id INTO v_location_id
+    FROM <accountid>_locations
+    WHERE name = p_location_name AND is_inactive = FALSE;
+    
+    IF v_location_id IS NULL THEN
+      v_errors := array_append(v_errors, 'Invalid location: ' || p_location_name);
+    END IF;
+  END IF;
+  
+  -- 組合結果
+  SELECT json_build_object(
+    'is_valid', array_length(v_errors, 1) IS NULL,
+    'errors', v_errors,
+    'components', json_build_object(
+      'subsidiary_id', v_subsidiary_id,
+      'currency_id', v_currency_id,
+      'customer_id', v_customer_id,
+      'department_id', v_department_id,
+      'class_id', v_class_id,
+      'location_id', v_location_id
+    )
+  ) INTO v_result;
+  
+  RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 使用範例
+-- SELECT validate_transaction_components(
+--   '台灣分公司',
+--   'TWD',
+--   '測試客戶',
+--   '研發一部'
+-- );
+
+COMMENT ON FUNCTION validate_transaction_components IS '驗證交易組件是否都有效';
+```
+
+### 5.3 BOM 查詢函數
+
+```sql
+-- ============================================
+-- 函數：查詢 BOM 組成（給 MES 用）
+-- 用途：根據成品 ID 查詢需要哪些原料
+-- ============================================
+CREATE OR REPLACE FUNCTION get_bom_components(
+  p_assembly_item_id INTEGER,
+  p_quantity DECIMAL DEFAULT 1
+)
+RETURNS TABLE (
+  component_item_id INTEGER,
+  component_name VARCHAR,
+  required_quantity DECIMAL,
+  unit_of_measure VARCHAR
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    bl.component_item_id,
+    i.name as component_name,
+    bl.quantity * p_quantity as required_quantity,
+    bl.unit_of_measure
+  FROM <accountid>_bom_headers bh
+  JOIN <accountid>_bom_lines bl ON bl.netsuite_bom_id = bh.netsuite_internal_id
+  JOIN <accountid>_items i ON i.netsuite_internal_id = bl.component_item_id
+  WHERE bh.assembly_item_id = p_assembly_item_id
+    AND bh.is_active = TRUE
+    AND (bh.effective_date IS NULL OR bh.effective_date <= CURRENT_DATE)
+    AND (bh.obsolete_date IS NULL OR bh.obsolete_date > CURRENT_DATE)
+  ORDER BY bl.line_number;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 使用範例
+-- SELECT * FROM get_bom_components(201, 100);  -- 查詢生產 100 箱需要哪些原料
+
+COMMENT ON FUNCTION get_bom_components IS '查詢 BOM 組成：根據成品和數量計算所需原料';
+```
+
+### 5.4 傳票驗證函數（Journal Entry）
+
+```sql
+-- ============================================
+-- 函數：驗證傳票資料完整性
+-- 用途：檢查借貸平衡、會計期間是否開放、科目是否有效
+-- ============================================
+CREATE OR REPLACE FUNCTION validate_journal_entry(
+  p_subsidiary_name VARCHAR,
+  p_currency_symbol VARCHAR,
+  p_period_name VARCHAR,
+  p_tran_date DATE,
+  p_lines JSONB  -- [{ account_name, debit, credit, department_name?, class_name?, location_name?, entity_name? }]
+)
+RETURNS JSON AS $$
+DECLARE
+  v_errors TEXT[] := '{}';
+  v_subsidiary_id INTEGER;
+  v_currency_id INTEGER;
+  v_period_id INTEGER;
+  v_period_closed BOOLEAN;
+  v_total_debit DECIMAL(15,2) := 0;
+  v_total_credit DECIMAL(15,2) := 0;
+  v_line_account_id INTEGER;
+  v_line_department_id INTEGER;
+  v_line_class_id INTEGER;
+  v_line_location_id INTEGER;
+  v_line_entity_id INTEGER;
+  v_account_type VARCHAR;
+  v_account_needs_entity BOOLEAN := FALSE;
+  v_result JSON;
+  v_line JSONB;
+BEGIN
+  -- 檢查 Subsidiary（必填）
+  SELECT netsuite_internal_id INTO v_subsidiary_id 
+  FROM <accountid>_subsidiaries 
+  WHERE name = p_subsidiary_name AND is_active = TRUE;
+  
+  IF v_subsidiary_id IS NULL THEN
+    v_errors := array_append(v_errors, 'Invalid subsidiary: ' || p_subsidiary_name);
+  END IF;
+  
+  -- 檢查 Currency（必填）
+  SELECT netsuite_internal_id INTO v_currency_id
+  FROM <accountid>_currencies
+  WHERE symbol = p_currency_symbol AND is_active = TRUE;
+  
+  IF v_currency_id IS NULL THEN
+    v_errors := array_append(v_errors, 'Invalid currency: ' || p_currency_symbol);
+  END IF;
+  
+  -- 檢查會計期間（必填）
+  SELECT netsuite_internal_id, is_closed INTO v_period_id, v_period_closed
+  FROM <accountid>_accounting_periods
+  WHERE period_name = p_period_name;
+  
+  IF v_period_id IS NULL THEN
+    v_errors := array_append(v_errors, 'Invalid accounting period: ' || p_period_name);
+  ELSIF v_period_closed = TRUE THEN
+    v_errors := array_append(v_errors, 'Accounting period is closed: ' || p_period_name);
+  END IF;
+  
+  -- 檢查傳票日期是否在會計期間內
+  IF v_period_id IS NOT NULL THEN
+    DECLARE
+      v_period_start DATE;
+      v_period_end DATE;
+    BEGIN
+      SELECT start_date, end_date INTO v_period_start, v_period_end
+      FROM <accountid>_accounting_periods
+      WHERE netsuite_internal_id = v_period_id;
+      
+      IF p_tran_date < v_period_start OR p_tran_date > v_period_end THEN
+        v_errors := array_append(v_errors, 
+          format('Transaction date %s is outside period %s (%s to %s)', 
+            p_tran_date::TEXT, p_period_name, v_period_start::TEXT, v_period_end::TEXT));
+      END IF;
+    END;
+  END IF;
+  
+  -- 驗證每筆明細
+  FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines)
+  LOOP
+    DECLARE
+      v_account_name VARCHAR := v_line->>'account_name';
+      v_debit DECIMAL(15,2) := COALESCE((v_line->>'debit')::DECIMAL, 0);
+      v_credit DECIMAL(15,2) := COALESCE((v_line->>'credit')::DECIMAL, 0);
+      v_department_name VARCHAR := v_line->>'department_name';
+      v_class_name VARCHAR := v_line->>'class_name';
+      v_location_name VARCHAR := v_line->>'location_name';
+      v_entity_name VARCHAR := v_line->>'entity_name';
+    BEGIN
+      -- 檢查借貸金額
+      IF v_debit < 0 OR v_credit < 0 THEN
+        v_errors := array_append(v_errors, format('Line %s: 金額不能為負數', v_account_name));
+      END IF;
+      
+      IF v_debit > 0 AND v_credit > 0 THEN
+        v_errors := array_append(v_errors, format('Line %s: 不能同時有借方和貸方金額', v_account_name));
+      END IF;
+      
+      IF v_debit = 0 AND v_credit = 0 THEN
+        v_errors := array_append(v_errors, format('Line %s: 至少需要借方或貸方金額', v_account_name));
+      END IF;
+      
+      -- 累計借貸總額
+      v_total_debit := v_total_debit + v_debit;
+      v_total_credit := v_total_credit + v_credit;
+      
+      -- 檢查會計科目
+      SELECT netsuite_internal_id, acct_type INTO v_line_account_id, v_account_type
+      FROM <accountid>_accounts
+      WHERE (acct_name = v_account_name OR full_name = v_account_name)
+        AND is_inactive = FALSE
+        AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
+      
+      IF v_line_account_id IS NULL THEN
+        v_errors := array_append(v_errors, format('Invalid account: %s', v_account_name));
+      ELSE
+        -- 某些科目類型需要 Entity（如應收帳款需要客戶、應付帳款需要供應商）
+        IF v_account_type IN ('Accounts Receivable', 'Accounts Payable') THEN
+          v_account_needs_entity := TRUE;
+        END IF;
+      END IF;
+      
+      -- 檢查 Department（如果有提供）
+      IF v_department_name IS NOT NULL THEN
+        SELECT netsuite_internal_id INTO v_line_department_id
+        FROM <accountid>_departments
+        WHERE name = v_department_name 
+          AND is_inactive = FALSE
+          AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
+        
+        IF v_line_department_id IS NULL THEN
+          v_errors := array_append(v_errors, format('Invalid department: %s', v_department_name));
+        END IF;
+      END IF;
+      
+      -- 檢查 Class（如果有提供）
+      IF v_class_name IS NOT NULL THEN
+        SELECT netsuite_internal_id INTO v_line_class_id
+        FROM <accountid>_classes
+        WHERE name = v_class_name 
+          AND is_inactive = FALSE
+          AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
+        
+        IF v_line_class_id IS NULL THEN
+          v_errors := array_append(v_errors, format('Invalid class: %s', v_class_name));
+        END IF;
+      END IF;
+      
+      -- 檢查 Location（如果有提供）
+      IF v_location_name IS NOT NULL THEN
+        SELECT netsuite_internal_id INTO v_line_location_id
+        FROM <accountid>_locations
+        WHERE name = v_location_name 
+          AND is_inactive = FALSE
+          AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
+        
+        IF v_line_location_id IS NULL THEN
+          v_errors := array_append(v_errors, format('Invalid location: %s', v_location_name));
+        END IF;
+      END IF;
+      
+      -- 檢查 Entity（如果需要）
+      IF v_account_needs_entity AND v_entity_name IS NOT NULL THEN
+        -- 先查客戶
+        SELECT netsuite_internal_id INTO v_line_entity_id
+        FROM <accountid>_entities_customers
+        WHERE name = v_entity_name AND is_inactive = FALSE;
+        
+        -- 如果沒找到，查供應商
+        IF v_line_entity_id IS NULL THEN
+          SELECT netsuite_internal_id INTO v_line_entity_id
+          FROM <accountid>_entities_vendors
+          WHERE name = v_entity_name AND is_inactive = FALSE;
+        END IF;
+        
+        -- 如果還是沒找到，查員工
+        IF v_line_entity_id IS NULL THEN
+          SELECT netsuite_internal_id INTO v_line_entity_id
+          FROM <accountid>_entities_employees
+          WHERE name = v_entity_name AND is_inactive = FALSE;
+        END IF;
+        
+        IF v_line_entity_id IS NULL THEN
+          v_errors := array_append(v_errors, format('Invalid entity: %s', v_entity_name));
+        END IF;
+      ELSIF v_account_needs_entity AND v_entity_name IS NULL THEN
+        v_errors := array_append(v_errors, format('Account %s requires an entity (customer/vendor/employee)', v_account_name));
+      END IF;
+    END;
+  END LOOP;
+  
+  -- 檢查借貸平衡
+  IF ABS(v_total_debit - v_total_credit) > 0.01 THEN
+    v_errors := array_append(v_errors, 
+      format('借貸不平衡：借方總額 %s ≠ 貸方總額 %s (差異: %s)', 
+        v_total_debit, v_total_credit, ABS(v_total_debit - v_total_credit)));
+  END IF;
+  
+  -- 檢查至少要有兩筆明細
+  IF jsonb_array_length(p_lines) < 2 THEN
+    v_errors := array_append(v_errors, '傳票至少需要兩筆明細（一借一貸）');
+  END IF;
+  
+  -- 組合結果
+  SELECT json_build_object(
+    'is_valid', array_length(v_errors, 1) IS NULL,
+    'errors', v_errors,
+    'total_debit', v_total_debit,
+    'total_credit', v_total_credit,
+    'is_balanced', ABS(v_total_debit - v_total_credit) < 0.01,
+    'components', json_build_object(
+      'subsidiary_id', v_subsidiary_id,
+      'currency_id', v_currency_id,
+      'period_id', v_period_id
+    )
+  ) INTO v_result;
+  
+  RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 使用範例
+-- SELECT validate_journal_entry(
+--   '台灣分公司',
+--   'TWD',
+--   'Jan 2025',
+--   '2025-01-15'::DATE,
+--   '[
+--     {"account_name": "現金", "debit": 1000, "credit": 0},
+--     {"account_name": "銷貨收入", "debit": 0, "credit": 1000}
+--   ]'::JSONB
+-- );
+
+COMMENT ON FUNCTION validate_journal_entry IS '驗證傳票資料：檢查借貸平衡、會計期間、科目有效性';
+```
+
+### 5.5 領料數量驗證函數
+
+```sql
+-- ============================================
+-- 函數：驗證領料數量是否合理
+-- 用途：避免超領或重複領料
+-- ============================================
+CREATE OR REPLACE FUNCTION validate_component_issue(
+  p_work_order_id INTEGER,
+  p_component_item_id INTEGER,
+  p_quantity DECIMAL
+)
+RETURNS JSON AS $$
+DECLARE
+  v_required_qty DECIMAL;
+  v_already_issued DECIMAL;
+  v_remaining_qty DECIMAL;
+  v_result JSON;
+BEGIN
+  -- 查這個工單需要多少這個原料（從 work_order_tracking 或直接算）
+  -- 這裡簡化處理，實際應該從 NetSuite 或本地追蹤表查詢
+  
+  -- 假設已經建立了 component_issues 追蹤表
+  -- SELECT COALESCE(SUM(quantity), 0) INTO v_already_issued
+  -- FROM component_issues
+  -- WHERE work_order_id = p_work_order_id
+  --   AND component_item_id = p_component_item_id;
+  
+  v_already_issued := 0;  -- 簡化版
+  
+  -- 檢查是否超領
+  IF p_quantity < 0 THEN
+    v_result := json_build_object(
+      'is_valid', FALSE,
+      'error', '領料數量不能為負數'
+    );
+  ELSE
+    v_result := json_build_object(
+      'is_valid', TRUE
+    );
+  END IF;
+  
+  RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION validate_component_issue IS '驗證領料數量：防止超領或重複領料';
+```
+
+---
+
+## 6. Phase 3: 交易單據實作
+
+### 6.1 Sales Order（銷售訂單）- POS/EC 適用
+
+#### API Payload 範本
+
+```json
+{
+  "recordType": "salesOrder",
+  "isDynamicMode": false,
+  
+  "_comment_header": "=== 單頭必填欄位 ===",
+  "subsidiary": {
+    "id": "1"
+  },
+  "currency": {
+    "id": "1"
+  },
+  "entity": {
+    "id": "100"
+  },
+  "tranDate": "2025-11-04",
+  
+  "_comment_optional": "=== 選填欄位 ===",
+  "department": {
+    "id": "5"
+  },
+  "class": {
+    "id": "3"
+  },
+  "location": {
+    "id": "10"
+  },
+  "terms": {
+    "id": "2"
+  },
+  "shipMethod": {
+    "id": "1"
+  },
+  "memo": "POS 銷售單",
+  
+  "_comment_lines": "=== 單身明細 ===",
+  "item": {
+    "items": [
+      {
+        "item": {
+          "id": "200"
+        },
+        "quantity": 24,
+        "rate": 25.00,
+        "amount": 600.00,
+        "taxCode": {
+          "id": "1"
+        },
+        "taxRate1": 5.00,
+        "location": {
+          "id": "10"
+        }
+      }
+    ]
+  }
+}
+```
+
+#### 中台 API 範例（Supabase Function）
+
+```typescript
+// Supabase Edge Function: create-sales-order
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+serve(async (req) => {
+  try {
+    // 解析請求
+    const { 
+      subsidiary_name,
+      currency_symbol,
+      customer_name,
+      items,
+      department_name,
+      class_name,
+      location_name
+    } = await req.json()
+    
+    // 建立 Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL'),
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    )
+    
+    // 查詢 NetSuite IDs
+    const { data: validation } = await supabase
+      .rpc('validate_transaction_components', {
+        p_subsidiary_name: subsidiary_name,
+        p_currency_symbol: currency_symbol,
+        p_customer_name: customer_name,
+        p_department_name: department_name,
+        p_class_name: class_name,
+        p_location_name: location_name
+      })
+    
+    // 驗證失敗
+    if (!validation.is_valid) {
+      return new Response(
+        JSON.stringify({ error: validation.errors }),
+        { status: 400 }
+      )
+    }
+    
+    // 組裝 NetSuite payload
+    const netsuitePayload = {
+      recordType: "salesOrder",
+      subsidiary: { id: validation.components.subsidiary_id },
+      currency: { id: validation.components.currency_id },
+      entity: { id: validation.components.customer_id },
+      tranDate: new Date().toISOString().split('T')[0],
+      department: validation.components.department_id ? 
+        { id: validation.components.department_id } : undefined,
+      class: validation.components.class_id ?
+        { id: validation.components.class_id } : undefined,
+      location: validation.components.location_id ?
+        { id: validation.components.location_id } : undefined,
+      item: {
+        items: items.map(item => ({
+          item: { id: item.item_id },
+          quantity: item.quantity,
+          rate: item.rate,
+          amount: item.quantity * item.rate
+        }))
+      }
+    }
+    
+    // 呼叫 NetSuite API（這裡簡化，實際需要 OAuth 簽章）
+    const netsuiteResponse = await fetch(
+      `https://[ACCOUNT_ID].restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=xxx&deploy=1`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'OAuth ...'  // 實際需要 OAuth 1.0 簽章
+        },
+        body: JSON.stringify(netsuitePayload)
+      }
+    )
+    
+    const netsuiteResult = await netsuiteResponse.json()
+    
+    // 記錄到 transaction_references
+    await supabase
+      .from('transaction_references')
+      .insert({
+        source_system: 'POS',
+        source_transaction_id: 'POS-' + Date.now(),
+        netsuite_record_type: 'salesOrder',
+        netsuite_internal_id: netsuiteResult.id,
+        netsuite_tran_id: netsuiteResult.tranId,
+        status: 'success',
+        request_payload: netsuitePayload,
+        response_payload: netsuiteResult
+      })
+    
+    // 返回結果
+    return new Response(
+      JSON.stringify({
+        success: true,
+        netsuite_id: netsuiteResult.id,
+        netsuite_tran_id: netsuiteResult.tranId
+      }),
+      { headers: { 'Content-Type': 'application/json' } }
+    )
+    
+  } catch (error) {
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500 }
+    )
+  }
+})
+```
+
+### 6.2 Purchase Order（採購單）
+
+```json
+{
+  "recordType": "purchaseOrder",
+  "subsidiary": { "id": "1" },
+  "entity": { "id": "500" },
+  "currency": { "id": "1" },
+  "tranDate": "2025-11-04",
+  "location": { "id": "10" },
+  "terms": { "id": "2" },
+  "memo": "採購原料一批",
+  
+  "item": {
+    "items": [
+      {
+        "item": { "id": "200" },
+        "quantity": 1000,
+        "rate": 50.00,
+        "amount": 50000.00,
+        "location": { "id": "10" }
+      }
+    ]
+  }
+}
+```
+
+### 6.3 Transfer Order（調撥單）- WMS 適用
+
+```json
+{
+  "recordType": "transferOrder",
+  "subsidiary": { "id": "1" },
+  "tranDate": "2025-11-04",
+  "location": { "id": "10" },
+  "transferLocation": { "id": "11" },
+  "memo": "從台北倉調到台中倉",
+  
+  "item": {
+    "items": [
+      {
+        "item": { "id": "200" },
+        "quantity": 500
+      }
+    ]
+  }
+}
+```
+
+### 6.4 Expense Report（費用報銷）
+
+```json
+{
+  "recordType": "expenseReport",
+  "subsidiary": { "id": "1" },
+  "entity": { "id": "300" },
+  "currency": { "id": "1" },
+  "tranDate": "2025-11-04",
+  "department": { "id": "5" },
+  "memo": "出差費用報銷",
+  
+  "expense": {
+    "items": [
+      {
+        "category": { "id": "10" },
+        "amount": 500.00,
+        "taxCode": { "id": "1" },
+        "memo": "計程車費"
+      },
+      {
+        "category": { "id": "11" },
+        "amount": 1200.00,
+        "taxCode": { "id": "1" },
+        "memo": "客戶聚餐"
+      }
+    ]
+  }
+}
+```
+
+### 6.5 Item Receipt（入庫單）- WMS 適用
+
+```json
+{
+  "recordType": "itemReceipt",
+  "createdFrom": { "id": "8888" },
+  "subsidiary": { "id": "1" },
+  "entity": { "id": "500" },
+  "tranDate": "2025-11-04",
+  "location": { "id": "10" },
+  
+  "item": {
+    "items": [
+      {
+        "item": { "id": "200" },
+        "quantity": 800,
+        "location": { "id": "10" },
+        "binNumbers": "A-01-01"
+      }
+    ]
+  }
+}
+```
+
+### 6.6 Journal Entry（手切傳票）⭐ 財務核心
+
+#### 前置條件
+1. ✅ 會計科目（Accounts）必須已同步
+2. ✅ 會計期間（Accounting Periods）必須已同步且未關閉
+3. ✅ 公司別（Subsidiaries）必須已同步
+4. ✅ 幣別（Currencies）必須已同步
+5. ⚠️ 部門/類別/地點（選填，但某些公司要求必填）
+6. ⚠️ 客戶/供應商/員工（選填，但某些科目類型要求必填）
+
+#### 從 NetSuite 需要拉取的資料
+
+**必須同步的主檔**：
+- ✅ `<accountid>_accounts` - 會計科目（必填）
+- ✅ `<accountid>_accounting_periods` - 會計期間（必填）
+- ✅ `<accountid>_subsidiaries` - 公司別（必填）
+- ✅ `<accountid>_currencies` - 幣別（必填）
+
+**選填但建議同步的主檔**：
+- ⚠️ `<accountid>_departments` - 部門（某些公司要求必填）
+- ⚠️ `<accountid>_classes` - 類別（某些公司要求必填）
+- ⚠️ `<accountid>_locations` - 地點（某些公司要求必填）
+- ⚠️ `<accountid>_entities_customers` - 客戶（應收帳款科目需要）
+- ⚠️ `<accountid>_entities_vendors` - 供應商（應付帳款科目需要）
+- ⚠️ `<accountid>_entities_employees` - 員工（員工相關科目需要）
+
+#### API Payload 範本
+
+```json
+{
+  "recordType": "journalEntry",
+  "subsidiary": { "id": "1" },
+  "currency": { "id": "1" },
+  "postingPeriod": { "id": "123" },
+  "tranDate": "2025-01-15",
+  "memo": "手切傳票：調整分錄",
+  "approved": true,
+  
+  "_comment_lines": "=== 傳票明細（必須借貸平衡） ===",
+  "line": {
+    "items": [
+      {
+        "_comment": "借方：現金增加",
+        "account": { "id": "100" },
+        "debit": 1000.00,
+        "credit": 0,
+        "department": { "id": "5" },
+        "class": { "id": "3" },
+        "location": { "id": "10" },
+        "memo": "現金收入"
+      },
+      {
+        "_comment": "貸方：銷貨收入增加",
+        "account": { "id": "200" },
+        "debit": 0,
+        "credit": 1000.00,
+        "department": { "id": "5" },
+        "class": { "id": "3" },
+        "location": { "id": "10" },
+        "memo": "銷貨收入"
+      }
+    ]
+  }
+}
+```
+
+#### 特殊情況：需要 Entity 的科目
+
+某些科目類型**必須**指定 Entity（客戶/供應商/員工）：
+
+```json
+{
+  "recordType": "journalEntry",
+  "subsidiary": { "id": "1" },
+  "currency": { "id": "1" },
+  "postingPeriod": { "id": "123" },
+  "tranDate": "2025-01-15",
+  
+  "line": {
+    "items": [
+      {
+        "_comment": "應收帳款科目需要指定客戶",
+        "account": { "id": "300" },  // 應收帳款科目
+        "debit": 5000.00,
+        "credit": 0,
+        "entity": { "id": "100" },  // 客戶 ID（必填）
+        "memo": "應收帳款增加"
+      },
+      {
+        "_comment": "貸方對應科目",
+        "account": { "id": "400" },
+        "debit": 0,
+        "credit": 5000.00,
+        "memo": "銷貨收入"
+      }
+    ]
+  }
+}
+```
+
+#### 中台 API 範例（Supabase Function）
+
+```typescript
+// Supabase Edge Function: create-journal-entry
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+serve(async (req) => {
+  try {
+    // 解析請求
+    const { 
+      subsidiary_name,
+      currency_symbol,
+      period_name,
+      tran_date,
+      memo,
+      lines  // [{ account_name, debit, credit, department_name?, class_name?, location_name?, entity_name? }]
+    } = await req.json()
+    
+    // 建立 Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL'),
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    )
+    
+    // 驗證傳票資料
+    const { data: validation, error: validationError } = await supabase
+      .rpc('validate_journal_entry', {
+        p_subsidiary_name: subsidiary_name,
+        p_currency_symbol: currency_symbol,
+        p_period_name: period_name,
+        p_tran_date: tran_date,
+        p_lines: lines
+      })
+    
+    if (validationError || !validation.is_valid) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Validation failed',
+          details: validation.errors || validationError 
+        }),
+        { status: 400 }
+      )
+    }
+    
+    // 查詢會計期間 ID
+    const { data: period } = await supabase
+      .from('<accountid>_accounting_periods')
+      .select('netsuite_internal_id')
+      .eq('period_name', period_name)
+      .single()
+    
+    // 查詢所有明細的科目 ID
+    const lineItems = await Promise.all(
+      lines.map(async (line: any) => {
+        // 查詢科目 ID
+        const { data: account } = await supabase
+          .from('<accountid>_accounts')
+          .select('netsuite_internal_id, acct_type')
+          .or(`acct_name.eq.${line.account_name},full_name.eq.${line.account_name}`)
+          .eq('is_inactive', false)
+          .single()
+        
+        if (!account) {
+          throw new Error(`Account not found: ${line.account_name}`)
+        }
+        
+        // 查詢 Department（如果有）
+        let departmentId = null
+        if (line.department_name) {
+          const { data: dept } = await supabase
+            .rpc('lookup_netsuite_id', {
+              p_table_name: '<accountid>_departments',
+              p_name: line.department_name
+            })
+          departmentId = dept
+        }
+        
+        // 查詢 Class（如果有）
+        let classId = null
+        if (line.class_name) {
+          const { data: cls } = await supabase
+            .rpc('lookup_netsuite_id', {
+              p_table_name: '<accountid>_classes',
+              p_name: line.class_name
+            })
+          classId = cls
+        }
+        
+        // 查詢 Location（如果有）
+        let locationId = null
+        if (line.location_name) {
+          const { data: loc } = await supabase
+            .rpc('lookup_netsuite_id', {
+              p_table_name: '<accountid>_locations',
+              p_name: line.location_name
+            })
+          locationId = loc
+        }
+        
+        // 查詢 Entity（如果需要）
+        let entityId = null
+        if (line.entity_name) {
+          // 先查客戶
+          const { data: customer } = await supabase
+            .from('<accountid>_entities_customers')
+            .select('netsuite_internal_id')
+            .eq('name', line.entity_name)
+            .eq('is_inactive', false)
+            .single()
+          
+          if (customer) {
+            entityId = customer.netsuite_internal_id
+          } else {
+            // 查供應商
+            const { data: vendor } = await supabase
+              .from('<accountid>_entities_vendors')
+              .select('netsuite_internal_id')
+              .eq('name', line.entity_name)
+              .eq('is_inactive', false)
+              .single()
+            
+            if (vendor) {
+              entityId = vendor.netsuite_internal_id
+            } else {
+              // 查員工
+              const { data: employee } = await supabase
+                .from('<accountid>_entities_employees')
+                .select('netsuite_internal_id')
+                .eq('name', line.entity_name)
+                .eq('is_inactive', false)
+                .single()
+              
+              if (employee) {
+                entityId = employee.netsuite_internal_id
+              }
+            }
+          }
+        }
+        
+        // 組裝 NetSuite Line Item
+        const lineItem: any = {
+          account: { id: account.netsuite_internal_id.toString() },
+          debit: line.debit || 0,
+          credit: line.credit || 0,
+          memo: line.memo || ''
+        }
+        
+        if (departmentId) {
+          lineItem.department = { id: departmentId.toString() }
+        }
+        
+        if (classId) {
+          lineItem.class = { id: classId.toString() }
+        }
+        
+        if (locationId) {
+          lineItem.location = { id: locationId.toString() }
+        }
+        
+        if (entityId) {
+          lineItem.entity = { id: entityId.toString() }
+        }
+        
+        return lineItem
+      })
+    )
+    
+    // 組裝 NetSuite payload
+    const netsuitePayload = {
+      recordType: "journalEntry",
+      subsidiary: { id: validation.components.subsidiary_id.toString() },
+      currency: { id: validation.components.currency_id.toString() },
+      postingPeriod: { id: period.netsuite_internal_id.toString() },
+      tranDate: tran_date,
+      memo: memo || '手切傳票',
+      approved: true,
+      line: {
+        items: lineItems
+      }
+    }
+    
+    // 呼叫 NetSuite API
+    const netsuiteResponse = await fetch(
+      `https://[ACCOUNT_ID].restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=xxx&deploy=1`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'OAuth ...'  // 實際需要 OAuth 1.0 簽章
+        },
+        body: JSON.stringify(netsuitePayload)
+      }
+    )
+    
+    const netsuiteResult = await netsuiteResponse.json()
+    
+    // 記錄到 transaction_references
+    await supabase
+      .from('transaction_references')
+      .insert({
+        source_system: 'MANUAL',
+        source_transaction_id: 'JE-' + Date.now(),
+        source_transaction_type: 'JournalEntry',
+        netsuite_record_type: 'journalEntry',
+        netsuite_internal_id: netsuiteResult.id,
+        netsuite_tran_id: netsuiteResult.tranId,
+        status: 'success',
+        request_payload: netsuitePayload,
+        response_payload: netsuiteResult
+      })
+    
+    // 返回結果
+    return new Response(
+      JSON.stringify({
+        success: true,
+        netsuite_id: netsuiteResult.id,
+        netsuite_tran_id: netsuiteResult.tranId,
+        total_debit: validation.total_debit,
+        total_credit: validation.total_credit
+      }),
+      { headers: { 'Content-Type': 'application/json' } }
+    )
+    
+  } catch (error) {
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500 }
+    )
+  }
+})
+```
+
+#### Next.js 前臺需要的 Mapping 資料
+
+**1. API Route 範例** (`app/api/create-journal-entry/route.ts`)
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/utils/supabase/server'
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const supabase = await createClient()
+    
+    // 驗證傳票
+    const { data: validation, error: validationError } = await supabase
+      .rpc('validate_journal_entry', {
+        p_subsidiary_name: body.subsidiary_name,
+        p_currency_symbol: body.currency_symbol,
+        p_period_name: body.period_name,
+        p_tran_date: body.tran_date,
+        p_lines: body.lines
+      })
+    
+    if (validationError || !validation.is_valid) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: validation.errors },
+        { status: 400 }
+      )
+    }
+    
+    // 呼叫 NetSuite API（這裡簡化，實際需要透過你的 NetSuite Client）
+    // ... 實際實作 ...
+    
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+```
+
+**2. 前臺表單組件需要的資料結構**
+
+```typescript
+// types/journal-entry.ts
+export interface JournalEntryLine {
+  account_name: string        // 會計科目名稱
+  debit: number               // 借方金額
+  credit: number              // 貸方金額
+  department_name?: string    // 部門（選填）
+  class_name?: string         // 類別（選填）
+  location_name?: string      // 地點（選填）
+  entity_name?: string        // 客戶/供應商/員工（選填，某些科目必填）
+  memo?: string               // 備註
+}
+
+export interface JournalEntryForm {
+  subsidiary_name: string     // 公司別
+  currency_symbol: string      // 幣別（如 'TWD'）
+  period_name: string         // 會計期間（如 'Jan 2025'）
+  tran_date: string           // 傳票日期 (YYYY-MM-DD)
+  memo?: string              // 傳票備註
+  lines: JournalEntryLine[]   // 傳票明細（至少兩筆）
+}
+```
+
+**3. 前臺需要的查詢函數**
+
+```typescript
+// hooks/use-journal-entry.ts
+import { useQuery } from '@tanstack/react-query'
+import { createClient } from '@/utils/supabase/client'
+
+export function useAccountingPeriods() {
+  const supabase = createClient()
+  
+  return useQuery({
+    queryKey: ['accounting-periods'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('<accountid>_accounting_periods')
+        .select('netsuite_internal_id, period_name, start_date, end_date, is_closed')
+        .eq('is_closed', false)
+        .order('start_date', { ascending: false })
+      
+      if (error) throw error
+      return data
+    }
+  })
+}
+
+export function useAccounts(subsidiaryId?: number) {
+  const supabase = createClient()
+  
+  return useQuery({
+    queryKey: ['accounts', subsidiaryId],
+    queryFn: async () => {
+      let query = supabase
+        .from('<accountid>_accounts')
+        .select('netsuite_internal_id, acct_number, acct_name, full_name, acct_type')
+        .eq('is_inactive', false)
+      
+      if (subsidiaryId) {
+        query = query.or(`subsidiary_id.is.null,subsidiary_id.eq.${subsidiaryId}`)
+      }
+      
+      const { data, error } = await query.order('acct_number')
+      
+      if (error) throw error
+      return data
+    }
+  })
+}
+
+export function useDepartments(subsidiaryId?: number) {
+  const supabase = createClient()
+  
+  return useQuery({
+    queryKey: ['departments', subsidiaryId],
+    queryFn: async () => {
+      let query = supabase
+        .from('<accountid>_departments')
+        .select('netsuite_internal_id, name')
+        .eq('is_inactive', false)
+      
+      if (subsidiaryId) {
+        query = query.or(`subsidiary_id.is.null,subsidiary_id.eq.${subsidiaryId}`)
+      }
+      
+      const { data, error } = await query.order('name')
+      
+      if (error) throw error
+      return data
+    }
+  })
+}
+```
+
+**4. 前臺表單範例（React Component）**
+
+```typescript
+// components/journal-entry-form.tsx
+'use client'
+
+import { useState } from 'react'
+import { useAccountingPeriods, useAccounts, useDepartments } from '@/hooks/use-journal-entry'
+import { JournalEntryForm, JournalEntryLine } from '@/types/journal-entry'
+
+export function JournalEntryForm() {
+  const [form, setForm] = useState<JournalEntryForm>({
+    subsidiary_name: '台灣分公司',
+    currency_symbol: 'TWD',
+    period_name: '',
+    tran_date: new Date().toISOString().split('T')[0],
+    memo: '',
+    lines: [
+      { account_name: '', debit: 0, credit: 0 },
+      { account_name: '', debit: 0, credit: 0 }
+    ]
+  })
+  
+  const { data: periods } = useAccountingPeriods()
+  const { data: accounts } = useAccounts()
+  const { data: departments } = useDepartments()
+  
+  const handleAddLine = () => {
+    setForm(prev => ({
+      ...prev,
+      lines: [...prev.lines, { account_name: '', debit: 0, credit: 0 }]
+    }))
+  }
+  
+  const handleLineChange = (index: number, field: keyof JournalEntryLine, value: any) => {
+    setForm(prev => ({
+      ...prev,
+      lines: prev.lines.map((line, i) => 
+        i === index ? { ...line, [field]: value } : line
+      )
+    }))
+  }
+  
+  const calculateTotals = () => {
+    const totalDebit = form.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
+    const totalCredit = form.lines.reduce((sum, line) => sum + (line.credit || 0), 0)
+    return { totalDebit, totalCredit, difference: Math.abs(totalDebit - totalCredit) }
+  }
+  
+  const { totalDebit, totalCredit, difference } = calculateTotals()
+  const isBalanced = difference < 0.01
+  
+  const handleSubmit = async () => {
+    // 呼叫 API
+    const response = await fetch('/api/create-journal-entry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form)
+    })
+    
+    const result = await response.json()
+    
+    if (result.success) {
+      alert(`傳票建立成功！單號：${result.netsuite_tran_id}`)
+    } else {
+      alert(`錯誤：${result.error}`)
+    }
+  }
+  
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-4">手切傳票</h2>
+      
+      {/* 基本資訊 */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <label>會計期間</label>
+          <select 
+            value={form.period_name}
+            onChange={(e) => setForm(prev => ({ ...prev, period_name: e.target.value }))}
+          >
+            <option value="">請選擇</option>
+            {periods?.map(p => (
+              <option key={p.netsuite_internal_id} value={p.period_name}>
+                {p.period_name} {p.is_closed ? '(已關閉)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        
+        <div>
+          <label>傳票日期</label>
+          <input
+            type="date"
+            value={form.tran_date}
+            onChange={(e) => setForm(prev => ({ ...prev, tran_date: e.target.value }))}
+          />
+        </div>
+      </div>
+      
+      {/* 傳票明細 */}
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold mb-2">傳票明細</h3>
+        <table className="w-full border">
+          <thead>
+            <tr>
+              <th>會計科目</th>
+              <th>借方</th>
+              <th>貸方</th>
+              <th>部門</th>
+              <th>備註</th>
+            </tr>
+          </thead>
+          <tbody>
+            {form.lines.map((line, index) => (
+              <tr key={index}>
+                <td>
+                  <select
+                    value={line.account_name}
+                    onChange={(e) => handleLineChange(index, 'account_name', e.target.value)}
+                  >
+                    <option value="">請選擇</option>
+                    {accounts?.map(acc => (
+                      <option key={acc.netsuite_internal_id} value={acc.acct_name}>
+                        {acc.full_name || `${acc.acct_number} - ${acc.acct_name}`}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    value={line.debit || ''}
+                    onChange={(e) => handleLineChange(index, 'debit', parseFloat(e.target.value) || 0)}
+                    onBlur={(e) => {
+                      // 如果輸入了借方，清空貸方
+                      if (parseFloat(e.target.value) > 0) {
+                        handleLineChange(index, 'credit', 0)
+                      }
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    value={line.credit || ''}
+                    onChange={(e) => handleLineChange(index, 'credit', parseFloat(e.target.value) || 0)}
+                    onBlur={(e) => {
+                      // 如果輸入了貸方，清空借方
+                      if (parseFloat(e.target.value) > 0) {
+                        handleLineChange(index, 'debit', 0)
+                      }
+                    }}
+                  />
+                </td>
+                <td>
+                  <select
+                    value={line.department_name || ''}
+                    onChange={(e) => handleLineChange(index, 'department_name', e.target.value)}
+                  >
+                    <option value="">無</option>
+                    {departments?.map(dept => (
+                      <option key={dept.netsuite_internal_id} value={dept.name}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    type="text"
+                    value={line.memo || ''}
+                    onChange={(e) => handleLineChange(index, 'memo', e.target.value)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button onClick={handleAddLine} className="mt-2">新增明細</button>
+      </div>
+      
+      {/* 借貸平衡檢查 */}
+      <div className="mb-4 p-4 bg-gray-100">
+        <div className="flex justify-between">
+          <span>借方總額：{totalDebit.toFixed(2)}</span>
+          <span>貸方總額：{totalCredit.toFixed(2)}</span>
+          <span className={isBalanced ? 'text-green-600' : 'text-red-600'}>
+            差異：{difference.toFixed(2)}
+            {isBalanced ? ' ✅ 平衡' : ' ❌ 不平衡'}
+          </span>
+        </div>
+      </div>
+      
+      {/* 提交按鈕 */}
+      <button
+        onClick={handleSubmit}
+        disabled={!isBalanced || form.period_name === ''}
+        className="px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-400"
+      >
+        建立傳票
+      </button>
+    </div>
+  )
+}
+```
+
+---
+
+## 手切傳票功能檢查清單
+
+### Supabase 中臺需要：
+- ✅ 確認 `validate_journal_entry()` 函數已建立
+- ✅ 確認所有主檔表已同步（特別是 Accounts 和 Accounting Periods）
+- ✅ 建立 API endpoint `/api/create-journal-entry`
+
+### Next.js 前臺需要：
+- ✅ 建立 Journal Entry 表單頁面
+- ✅ 建立 `useAccountingPeriods` Hook
+- ✅ 建立 `useAccounts` Hook
+- ✅ 建立 `useDepartments/Classes/Locations` Hooks
+- ✅ 實作借貸平衡檢查
+- ✅ 實作會計期間驗證
+
+### 測試項目：
+- ✅ 測試借貸平衡驗證
+- ✅ 測試會計期間關閉檢查
+- ✅ 測試科目有效性驗證
+- ✅ 測試需要 Entity 的科目（應收/應付帳款）
+- ✅ 測試多筆明細傳票
+
+---
+
+## 7. Phase 4: 製造業專屬（MES/WMS）
+
+### 7.1 Work Order（工單）
+
+#### 前置條件
+1. 成品必須是 Assembly Item（`is_assembly = TRUE`）
+2. 必須有有效的 BOM
+
+#### API Payload
+
+```json
+{
+  "recordType": "workOrder",
+  "subsidiary": { "id": "1" },
+  "assemblyItem": { "id": "201" },
+  "quantity": 100,
+  "location": { "id": "10" },
+  "startDate": "2025-11-05",
+  "endDate": "2025-11-10",
+  "status": "Released",
+  "billOfMaterials": { "id": "1001" },
+  "memo": "生產 100 箱可口可樂"
+}
+```
+
+#### 中台查詢 BOM 範例
+
+```typescript
+// 查詢 BOM 組成
+const { data: bomComponents } = await supabase
+  .rpc('get_bom_components', {
+    p_assembly_item_id: 201,
+    p_quantity: 100
+  })
+
+// 結果：
+// [
+//   { component_item_id: 200, component_name: '單罐可樂', required_quantity: 2400 },
+//   { component_item_id: 300, component_name: '紙箱', required_quantity: 100 },
+//   { component_item_id: 301, component_name: '塑膠膜', required_quantity: 100 }
+// ]
+```
+
+### 7.2 Component Issue（領料單）
+
+#### API Payload
+
+```json
+{
+  "recordType": "workOrderIssue",
+  "workOrder": { "id": "88888" },
+  "tranDate": "2025-11-05",
+  "location": { "id": "10" },
+  "memo": "包裝線 A 領料",
+  
+  "component": {
+    "items": [
+      {
+        "item": { "id": "200" },
+        "quantity": 2400,
+        "location": { "id": "10" }
+      },
+      {
+        "item": { "id": "300" },
+        "quantity": 100
+      },
+      {
+        "item": { "id": "301" },
+        "quantity": 100
+      }
+    ]
+  }
+}
+```
+
+### 7.3 Work Order Completion（完工入庫）
+
+```json
+{
+  "recordType": "workOrderCompletion",
+  "workOrder": { "id": "88888" },
+  "tranDate": "2025-11-10",
+  "location": { "id": "10" },
+  "completedQuantity": 98,
+  "scrapQuantity": 2,
+  "buildable": { "id": "201" },
+  "memo": "包裝線 A 完工，良率 98%"
+}
+```
+
+### 7.4 完整 MES 流程範例
+
+```typescript
+// ========================================
+// MES 生產流程完整範例
+// ========================================
+
+async function createProductionOrder(
+  assemblyItemName: string,
+  quantity: number,
+  locationName: string
+) {
+  // 1. 查詢成品 ID
+  const { data: assemblyItem } = await supabase
+    .from('<accountid>_items')
+    .select('netsuite_internal_id, is_assembly')
+    .eq('name', assemblyItemName)
+    .single()
+  
+  if (!assemblyItem.is_assembly) {
+    throw new Error('此產品不是組合品，無法建立工單')
+  }
+  
+  // 2. 查詢 BOM
+  const { data: bomComponents } = await supabase
+    .rpc('get_bom_components', {
+      p_assembly_item_id: assemblyItem.netsuite_internal_id,
+      p_quantity: quantity
+    })
+  
+  // 3. 查詢地點 ID
+  const locationId = await supabase
+    .rpc('lookup_netsuite_id', {
+      p_table_name: '<accountid>_locations',
+      p_name: locationName
+    })
+  
+  // 4. 建立工單
+  const woPayload = {
+    recordType: "workOrder",
+    subsidiary: { id: "1" },
+    assemblyItem: { id: assemblyItem.netsuite_internal_id },
+    quantity: quantity,
+    location: { id: locationId },
+    startDate: new Date().toISOString().split('T')[0],
+    status: "Released"
+  }
+  
+  const woResult = await callNetSuiteAPI(woPayload)
+  
+  // 5. 記錄到追蹤表
+  await supabase
+    .from('work_order_tracking')
+    .insert({
+      source_system: 'MES',
+      source_wo_number: 'MES-WO-' + Date.now(),
+      netsuite_wo_id: woResult.id,
+      netsuite_wo_number: woResult.tranId,
+      assembly_item_id: assemblyItem.netsuite_internal_id,
+      quantity_ordered: quantity,
+      status: 'Released',
+      location_id: locationId
+    })
+  
+  return {
+    workOrderId: woResult.id,
+    workOrderNumber: woResult.tranId,
+    requiredComponents: bomComponents
+  }
+}
+```
+
+---
+
+## 8. 實作時間表
+
+### 8.1 完整時程規劃（5 天）
+
+#### Day 1：基礎建設（6 小時）
+```
+09:00-10:00  建立 Supabase Project
+10:00-12:00  執行所有 CREATE TABLE（基礎 15 張表）
+13:00-14:00  執行 Helper Functions
+14:00-15:00  建立測試資料
+15:00-16:00  測試 lookup_netsuite_id() 和 validate_transaction_components()
+```
+
+#### Day 2：主檔同步機制建立（8 小時）
+```
+09:00-10:00  設計主檔同步架構
+10:00-12:00  建立同步 API（Supabase Function 或自行實作）
+13:00-15:00  實作前 3 個主檔同步（Subsidiaries, Currencies, Periods）
+15:00-17:00  實作後 4 個主檔同步（Departments, Classes, Locations, Accounts）
+```
+
+#### Day 3：完整主檔同步（8 小時）
+```
+09:00-12:00  實作剩餘主檔同步（Terms → Employees）
+13:00-15:00  執行第一次完整同步
+15:00-17:00  驗證資料正確性，檢查 sync_logs
+```
+
+#### Day 4：交易測試（8 小時）
+```
+09:00-10:00  建立 transaction_references 表
+10:00-12:00  測試第一張 Sales Order
+13:00-15:00  測試 Purchase Order + Transfer Order
+15:00-17:00  測試 Expense Report
+```
+
+#### Day 5：製造業測試與優化（8 小時）
+```
+09:00-11:00  建立製造業表結構（BOM Headers + Lines, Work Centers）
+11:00-12:00  建立 Work Order Tracking
+13:00-15:00  測試 Work Order、Component Issue、Completion
+15:00-17:00  建立監控 Dashboard、錯誤處理優化
+```
+
+### 8.2 最小可行版本（MVP）時程（3 天）
+
+如果時間緊迫，可以先做 MVP：
+
+#### Day 1：核心表與基礎功能（6 小時）
+```
+✅ 建立 8 張核心表：
+   - Subsidiaries, Currencies, Departments, Locations
+   - Accounts, Items, Customers, Tax Codes
+✅ 建立 lookup_netsuite_id() 函數
+✅ 建立主檔同步機制（至少 3 個主檔）
+```
+
+#### Day 2：第一張交易（6 小時）
+```
+✅ 建立 transaction_references
+✅ 建立 validate_transaction_components() 函數
+✅ 測試第一張 Sales Order
+```
+
+#### Day 3：POS 整合（6 小時）
+```
+✅ 建立 Supabase Edge Function
+✅ POS 系統串接測試
+✅ 錯誤處理與監控
+```
+
+---
+
+## 9. 常見問題與陷阱
+
+### 9.1 資料類型陷阱
+
+#### ❌ 錯誤：使用 STRING 存 NetSuite ID
+```sql
+-- 錯誤
+CREATE TABLE <accountid>_subsidiaries (
+  netsuite_internal_id VARCHAR(50)  -- ❌ NetSuite ID 是 INTEGER
+);
+```
+
+#### ✅ 正確
+```sql
+CREATE TABLE <accountid>_subsidiaries (
+  netsuite_internal_id INTEGER  -- ✅ 正確
+);
+```
+
+### 9.2 SuiteQL 欄位名稱陷阱
+
+#### ❌ 錯誤：使用駝峰命名
+```sql
+-- 錯誤
+SELECT internalId, companyName FROM subsidiary  -- ❌ SuiteQL 用小寫
+```
+
+#### ✅ 正確
+```sql
+-- 正確
+SELECT id, name FROM subsidiary  -- ✅ SuiteQL 欄位是小寫
+```
+
+### 9.3 isInactive 判斷陷阱
+
+#### ❌ 錯誤：當成 Boolean
+```sql
+-- 錯誤
+WHERE isInactive = FALSE  -- ❌ SuiteQL 中是字串
+```
+
+#### ✅ 正確
+```sql
+-- 正確
+WHERE isInactive = 'F'  -- ✅ 使用字串 'F' 或 'T'
+```
+
+### 9.4 Items 表數量陷阱
+
+**問題**：Items 表可能有數萬筆，全量同步會 timeout
+
+**解決方案**：使用增量同步
+
+```sql
+-- 只抓最近 7 天修改的
+SELECT * FROM item 
+WHERE lastmodifieddate >= SYSDATE - 7
+AND isinactive = 'F'
+```
+
+### 9.5 匯率陷阱
+
+**問題**：不同 Subsidiary 可能有不同匯率
+
+**解決方案**：建立 Exchange Rates 表
+
+```sql
+CREATE TABLE <accountid>_exchange_rates (
+  id UUID PRIMARY KEY,
+  from_currency_id INTEGER,
+  to_currency_id INTEGER,
+  effective_date DATE,
+  rate DECIMAL(15,6),
+  source VARCHAR(50)
+);
+```
+
+### 9.6 BOM 版本控制陷阱
+
+**問題**：BOM 可能有多個版本同時存在
+
+**解決方案**：使用有效日期過濾
+
+```sql
+SELECT * FROM <accountid>_bom_headers 
+WHERE assembly_item_id = 201 
+  AND is_active = TRUE
+  AND (effective_date IS NULL OR effective_date <= CURRENT_DATE)
+  AND (obsolete_date IS NULL OR obsolete_date > CURRENT_DATE)
+ORDER BY effective_date DESC
+LIMIT 1;
+```
+
+### 9.7 必填欄位動態判斷
+
+**問題**：不同 Subsidiary 的必填欄位不同
+
+**解決方案**：建立規則表
+
+```sql
+CREATE TABLE netsuite_field_requirements (
+  id UUID PRIMARY KEY,
+  subsidiary_id INTEGER,
+  transaction_type VARCHAR(100),
+  field_name VARCHAR(100),
+  is_required BOOLEAN
+);
+
+-- 範例：台灣子公司的銷售訂單必須填 Department
+INSERT INTO netsuite_field_requirements 
+VALUES (gen_random_uuid(), 1, 'SalesOrder', 'department', TRUE);
+```
+
+---
+
+## 10. 附錄
+
+### 10.1 完整 SQL 腳本（一鍵執行）
+
+```sql
+-- ============================================
+-- NetSuite 中台完整建置腳本
+-- 執行時間：約 30 秒
+-- 執行方式：複製全部內容到 Supabase SQL Editor
+-- ============================================
+
+-- 第一批：基礎主檔
+\i create_table_subsidiaries.sql
+\i create_table_currencies.sql
+\i create_table_departments.sql
+\i create_table_classes.sql
+\i create_table_locations.sql
+\i create_table_accounts.sql
+\i create_table_items.sql
+\i create_table_customers.sql
+\i create_table_vendors.sql
+\i create_table_employees.sql
+\i create_table_tax_codes.sql
+\i create_table_expense_categories.sql
+\i create_table_terms.sql
+\i create_table_periods.sql
+\i create_table_ship_methods.sql
+
+-- 第二批：製造業主檔
+\i create_table_bom_headers.sql
+\i create_table_bom_lines.sql
+\i create_table_work_centers.sql
+\i create_table_routings.sql
+
+-- 第三批：系統表
+\i create_table_transaction_references.sql
+\i create_table_work_order_tracking.sql
+\i create_table_sync_logs.sql
+
+-- 第四批：Helper Functions
+\i create_function_lookup_id.sql
+\i create_function_validate_components.sql
+\i create_function_get_bom_components.sql
+
+-- 第五批：Views
+\i create_view_sync_status.sql
+
+-- 完成！
+SELECT 'NetSuite 中台建置完成！' as message;
+```
+
+### 10.2 測試資料腳本
+
+```sql
+-- ============================================
+-- 測試資料（用於開發測試）
+-- ============================================
+
+-- 1. Subsidiaries
+INSERT INTO <accountid>_subsidiaries (netsuite_internal_id, name, legal_name, country, is_active)
+VALUES 
+  (1, '台灣分公司', '台灣某某股份有限公司', 'Taiwan', TRUE),
+  (2, '香港分公司', 'HK Branch Ltd.', 'Hong Kong', TRUE);
+
+-- 2. Currencies
+INSERT INTO <accountid>_currencies (netsuite_internal_id, name, symbol, exchange_rate, is_base_currency, is_active)
+VALUES 
+  (1, 'Taiwan Dollar', 'TWD', 1.000000, TRUE, TRUE),
+  (2, 'US Dollar', 'USD', 30.500000, FALSE, TRUE),
+  (3, 'Hong Kong Dollar', 'HKD', 3.900000, FALSE, TRUE);
+
+-- 3. Departments
+INSERT INTO <accountid>_departments (netsuite_internal_id, name, subsidiary_id, is_inactive)
+VALUES 
+  (1, '研發一部', 1, FALSE),
+  (2, '業務部', 1, FALSE),
+  (3, '財務部', 1, FALSE);
+
+-- 4. Locations
+INSERT INTO <accountid>_locations (netsuite_internal_id, name, subsidiary_id, is_inactive)
+VALUES 
+  (10, '台北倉', 1, FALSE),
+  (11, '台中倉', 1, FALSE),
+  (12, '高雄倉', 1, FALSE);
+
+-- 5. Accounts
+INSERT INTO <accountid>_accounts (netsuite_internal_id, acct_number, acct_name, full_name, acct_type, is_inactive)
+VALUES 
+  (100, '4110', '銷貨收入', '4110 - 銷貨收入', 'Income', FALSE),
+  (101, '5110', '銷貨成本', '5110 - 銷貨成本', 'Expense', FALSE),
+  (102, '6225', '交通費', '6225 - 交通費', 'Expense', FALSE);
+
+-- 6. Items
+INSERT INTO <accountid>_items (netsuite_internal_id, item_id, name, item_type, base_price, is_inactive)
+VALUES 
+  (200, 'ITEM-001', '可口可樂 330ml', 'Inventory', 25.00, FALSE),
+  (201, 'ITEM-002', '可口可樂 24 罐箱裝', 'Assembly', 600.00, FALSE);
+
+-- 7. Customers
+INSERT INTO <accountid>_entities_customers (netsuite_internal_id, entity_id, name, subsidiary_id, currency_id, is_inactive)
+VALUES 
+  (100, 'C-00001', '測試客戶', 1, 1, FALSE);
+
+-- 8. Tax Codes
+INSERT INTO <accountid>_tax_codes (netsuite_internal_id, name, rate)
+VALUES 
+  (1, '應稅 5%', 5.00),
+  (2, '零稅率', 0.00),
+  (3, '免稅', 0.00);
+
+-- 9. BOM Header
+INSERT INTO <accountid>_bom_headers (netsuite_internal_id, assembly_item_id, name, revision, is_active)
+VALUES 
+  (1001, 201, 'BOM - 可口可樂 24 罐箱裝', 'Rev 1.0', TRUE);
+
+-- 10. BOM Lines
+INSERT INTO <accountid>_bom_lines (bom_header_id, netsuite_bom_id, line_number, component_item_id, quantity)
+VALUES 
+  ((SELECT id FROM <accountid>_bom_headers WHERE netsuite_internal_id = 1001), 1001, 1, 200, 24.0000);
+
+-- 測試查詢
+SELECT 'Test Data Inserted!' as message;
+SELECT * FROM vw_sync_status;
+```
+
+### 10.3 檢查清單
+
+建置完成後請執行這些檢查：
+
+```sql
+-- ============================================
+-- 建置完成檢查清單
+-- ============================================
+
+-- 檢查 1：確認所有表都已建立
+SELECT table_name 
+FROM information_schema.tables 
+WHERE table_schema = 'public' 
+  AND table_name LIKE '<accountid>_%'
+ORDER BY table_name;
+-- 預期：至少 15 張表
+
+-- 檢查 2：確認所有表都有資料
+SELECT 
+  '<accountid>_subsidiaries' as table_name, COUNT(*) as row_count FROM <accountid>_subsidiaries
+UNION ALL
+SELECT '<accountid>_currencies', COUNT(*) FROM <accountid>_currencies
+UNION ALL
+SELECT '<accountid>_departments', COUNT(*) FROM <accountid>_departments
+UNION ALL
+SELECT '<accountid>_items', COUNT(*) FROM <accountid>_items;
+-- 預期：每張表都 > 0
+
+-- 檢查 3：測試 lookup 函數
+SELECT lookup_netsuite_id('<accountid>_subsidiaries', '台灣分公司');
+-- 預期：返回 1
+
+-- 檢查 4：測試驗證函數
+SELECT validate_transaction_components(
+  '台灣分公司',
+  'TWD',
+  '測試客戶'
+);
+-- 預期：is_valid = true
+
+-- 檢查 5：查看同步狀態
+SELECT * FROM vw_sync_status;
+-- 預期：所有表都是 ✅ 正常 或 ⚠️ 延遲
+
+-- 檢查 6：測試 BOM 查詢
+SELECT * FROM get_bom_components(201, 1);
+-- 預期：返回單罐可樂 x 24
+
+-- 全部通過！
+SELECT '✅ 所有檢查通過，系統可以開始使用！' as status;
+```
+
+### 10.4 快速參考
+
+#### NetSuite Record Types
+```
+salesOrder          - 銷售訂單
+purchaseOrder       - 採購單
+transferOrder       - 調撥單
+itemFulfillment     - 出貨單
+itemReceipt         - 入庫單
+invoice             - 發票
+vendorBill          - 廠商帳單
+expenseReport       - 費用報銷
+workOrder           - 工單
+workOrderIssue      - 領料單
+workOrderCompletion - 完工入庫
+journalEntry        - 日記帳
+```
+
+#### 常用查詢
+```sql
+-- 查 ID
+SELECT lookup_netsuite_id('<accountid>_items', '可口可樂 330ml');
+
+-- 驗證交易
+SELECT validate_transaction_components('台灣分公司', 'TWD', '客戶名稱');
+
+-- 驗證傳票
+SELECT validate_journal_entry(
+  '台灣分公司',
+  'TWD',
+  'Jan 2025',
+  '2025-01-15'::DATE,
+  '[
+    {"account_name": "現金", "debit": 1000, "credit": 0},
+    {"account_name": "銷貨收入", "debit": 0, "credit": 1000}
+  ]'::JSONB
+);
+
+-- 查 BOM
+SELECT * FROM get_bom_components(201, 100);
+
+-- 查同步狀態
+SELECT * FROM vw_sync_status;
+
+-- 查交易記錄
+SELECT * FROM transaction_references 
+WHERE source_system = 'POS' 
+ORDER BY created_at DESC LIMIT 10;
+```
+
+---
+
+## 🎉 結語
+
+恭喜你！如果你跟著這份指南一步步做完，你現在已經有：
+
+✅ 一個完整的 NetSuite 主檔快取層（Supabase）  
+✅ 主檔同步機制（需自行實作）  
+✅ 強大的 Name-to-ID Mapping 系統  
+✅ 完整的交易單據建立能力  
+✅ 製造業 MES/WMS 支援  
+✅ 監控與錯誤處理機制  
+
+**你現在可以：**
+- 從 POS 打銷售訂單到 NetSuite
+- 從 WMS 打調撥單、入庫單
+- 從 MES 打工單、領料單
+- 從報支系統打費用報銷單
+- 從財務系統打手切傳票（日記帳）
+
+**下一步建議：**
+1. 先從簡單的 Sales Order 開始測試
+2. 逐步增加複雜度（加入 Department、Class 等）
+3. 完善錯誤處理和重試機制
+4. 建立監控 Dashboard
+5. 撰寫團隊操作手冊
+
+祝你建置順利！🚀
+
+---
+
+**文檔維護**：
+- 如有更新，請修改文檔頂部的版本號和日期
+- 建議定期（每季）檢視並更新內容
+- 遇到新問題請補充到「常見問題與陷阱」章節

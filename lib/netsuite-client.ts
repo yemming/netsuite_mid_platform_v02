@@ -306,6 +306,18 @@ export class NetSuiteAPIClient {
     return this.request(`/services/rest/record/v1/${recordType}/${recordId}`);
   }
 
+  // 創建記錄（通用）
+  async createRecord(recordType: string, recordData: any): Promise<any> {
+    const endpoint = `/services/rest/record/v1/${recordType}`;
+    return this.request(endpoint, 'POST', recordData);
+  }
+
+  // 更新記錄（通用）
+  async updateRecord(recordType: string, recordId: string, recordData: any): Promise<any> {
+    const endpoint = `/services/rest/record/v1/${recordType}/${recordId}`;
+    return this.request(endpoint, 'PUT', recordData);
+  }
+
   // 執行 SuiteQL 查詢（支援自動分頁取得所有資料）
   async executeSuiteQL(
     query: string, 

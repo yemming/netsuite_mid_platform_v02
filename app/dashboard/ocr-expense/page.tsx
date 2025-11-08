@@ -17,13 +17,23 @@ import {
 } from '@/components/ui/select';
 
 export default function OCRExpensePage() {
+  // 獲取今天的日期（格式：YYYY-MM-DD）
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [formData, setFormData] = useState({
-    expenseDate: '',
+    expenseDate: getTodayDate(),
     type: '',
     subsidiary: '',
     expenseLocation: '',
     department: '',
     class: '',
+    employee: '', // 員工（Entity）
     receiptAmount: '',
     receiptCurrency: 'TWD',
     description: '',
@@ -71,6 +81,10 @@ export default function OCRExpensePage() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentJobIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [employees, setEmployees] = useState<Array<{ id: string; name: string; netsuite_internal_id: number }>>([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [expenseCategories, setExpenseCategories] = useState<Array<{ id: string; name: string; netsuite_internal_id: number }>>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
 
   const handleInputChange = (field: string, value: any) => {
     setFormData((prev) => ({
@@ -167,6 +181,62 @@ export default function OCRExpensePage() {
         clearTimeout(timeoutRef.current);
       }
     };
+  }, []);
+
+  // 載入員工列表
+  useEffect(() => {
+    const loadEmployees = async () => {
+      setLoadingEmployees(true);
+      try {
+        const { createClient } = await import('@/utils/supabase/client');
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from('ns_entities_employees')
+          .select('id, name, netsuite_internal_id')
+          .eq('is_inactive', false)
+          .order('name');
+        
+        if (!error && data) {
+          setEmployees(data);
+        } else if (error) {
+          console.error('載入員工列表錯誤:', error);
+        }
+      } catch (error) {
+        console.error('載入員工列表錯誤:', error);
+      } finally {
+        setLoadingEmployees(false);
+      }
+    };
+
+    loadEmployees();
+  }, []);
+
+  // 載入費用類別列表
+  useEffect(() => {
+    const loadExpenseCategories = async () => {
+      setLoadingCategories(true);
+      try {
+        const { createClient } = await import('@/utils/supabase/client');
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from('ns_expense_categories')
+          .select('id, name, netsuite_internal_id')
+          .eq('is_inactive', false)
+          .order('name');
+        
+        if (!error && data) {
+          setExpenseCategories(data);
+        } else if (error) {
+          console.error('載入費用類別列表錯誤:', error);
+        }
+      } catch (error) {
+        console.error('載入費用類別列表錯誤:', error);
+      } finally {
+        setLoadingCategories(false);
+      }
+    };
+
+    loadExpenseCategories();
   }, []);
 
   // 取消 OCR 處理
@@ -474,12 +544,68 @@ export default function OCRExpensePage() {
   };
 
   const handleSubmit = async () => {
+    // 驗證必填欄位
+    if (!formData.expenseDate || !formData.type || !formData.subsidiary || !formData.employee) {
+      alert('請填寫所有必填欄位（報支日期、費用科目、員工、公司別）');
+      return;
+    }
+
+    if (!formData.receiptAmount || parseFloat(formData.receiptAmount) <= 0) {
+      alert('請輸入有效的收據金額');
+      return;
+    }
+
     setLoading(true);
-    // TODO: 實現提交邏輯
-    setTimeout(() => {
+
+    try {
+      // 準備附件數據（如果有）
+      let attachmentData = null;
+      if (attachments.length > 0 && attachments[0]) {
+        const file = attachments[0];
+        if (previewImage && previewImage.startsWith('data:')) {
+          // 將 base64 轉換為 Blob
+          const response = await fetch(previewImage);
+          const blob = await response.blob();
+          // 轉換為 base64 字符串（用於傳輸）
+          const reader = new FileReader();
+          attachmentData = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+
+      // 發送請求到 API
+      const response = await fetch('/api/create-expense-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...formData,
+          attachment: attachmentData,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || result.message || '提交失敗');
+      }
+
+      // 成功
+      alert(`報支項目已成功建立！\n\nNetSuite ID: ${result.netsuite_id}\n交易編號: ${result.netsuite_tran_id || 'N/A'}`);
+      
+      // 可選：重置表單或導航
+      // window.location.href = '/dashboard';
+      
+    } catch (error) {
+      console.error('提交報支項目錯誤:', error);
+      alert(`提交失敗: ${error instanceof Error ? error.message : '未知錯誤'}`);
+    } finally {
       setLoading(false);
-      alert('報支項目已建立');
-    }, 1000);
+    }
   };
 
   return (
@@ -841,17 +967,52 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.type}
                   onValueChange={(value) => handleInputChange('type', value)}
+                  disabled={loadingCategories}
                 >
                   <SelectTrigger id="type">
-                    <SelectValue placeholder="選擇報支類型" />
+                    <SelectValue placeholder={loadingCategories ? "載入中..." : "選擇費用科目"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="meals-customer">Meals - Customer/Partner - Private</SelectItem>
-                    <SelectItem value="meals-employee">Meals - Employee</SelectItem>
-                    <SelectItem value="travel">Travel</SelectItem>
-                    <SelectItem value="lodging">Lodging</SelectItem>
-                    <SelectItem value="transportation">Transportation</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {expenseCategories.length > 0 ? (
+                      expenseCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                        {loadingCategories ? "載入中..." : "無可用費用類別"}
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Employee */}
+              <div className="space-y-2">
+                <Label htmlFor="employee" className="text-sm font-semibold">
+                  員工 <span className="text-red-500">*</span>
+                </Label>
+                <Select
+                  value={formData.employee}
+                  onValueChange={(value) => handleInputChange('employee', value)}
+                  disabled={loadingEmployees}
+                >
+                  <SelectTrigger id="employee">
+                    <SelectValue placeholder={loadingEmployees ? "載入中..." : "選擇員工"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {employees.length > 0 ? (
+                      employees.map((emp) => (
+                        <SelectItem key={emp.id} value={emp.id}>
+                          {emp.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                        {loadingEmployees ? "載入中..." : "無可用員工"}
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -879,7 +1040,7 @@ export default function OCRExpensePage() {
               {/* Expense Location */}
               <div className="space-y-2">
                 <Label htmlFor="expenseLocation" className="text-sm font-semibold">
-                  地點 <span className="text-red-500">*</span>
+                  地點
                 </Label>
                 <Select
                   value={formData.expenseLocation}
@@ -901,7 +1062,7 @@ export default function OCRExpensePage() {
               {/* Department */}
               <div className="space-y-2">
                 <Label htmlFor="department" className="text-sm font-semibold">
-                  部門 <span className="text-red-500">*</span>
+                  部門
                 </Label>
                 <Select
                   value={formData.department}
@@ -921,7 +1082,7 @@ export default function OCRExpensePage() {
               {/* Class */}
               <div className="space-y-2">
                 <Label htmlFor="class" className="text-sm font-semibold">
-                  類別 <span className="text-red-500">*</span>
+                  類別
                 </Label>
                 <Select
                   value={formData.class}
@@ -997,46 +1158,46 @@ export default function OCRExpensePage() {
         <CardContent>
           {ocrProcessing ? (
             /* Skeleton Loading */
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-800/50 animate-pulse">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50 animate-pulse">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* 第一列：發票相關資訊 Skeleton */}
-                <div className="space-y-3">
-                  <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
                     {[1, 2, 3, 4, 5, 6].map((i) => (
-                      <div key={i} className="space-y-1.5">
+                      <div key={i} className="space-y-1">
                         <div className="h-3 w-16 bg-gray-300 dark:bg-gray-700 rounded"></div>
-                        <div className="h-9 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
                       </div>
                     ))}
                   </div>
                 </div>
                 
                 {/* 第二列：賣方資訊 Skeleton */}
-                <div className="space-y-3">
-                  <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="space-y-1.5">
+                      <div key={i} className="space-y-1">
                         <div className="h-3 w-16 bg-gray-300 dark:bg-gray-700 rounded"></div>
-                        <div className="h-9 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
                       </div>
                     ))}
                   </div>
                 </div>
                 
                 {/* 第三列：買方資訊及金額 Skeleton */}
-                <div className="space-y-3">
-                  <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="space-y-1.5">
+                      <div key={i} className="space-y-1">
                         <div className="h-3 w-16 bg-gray-300 dark:bg-gray-700 rounded"></div>
-                        <div className="h-9 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
                       </div>
                     ))}
-                    <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                    <div className="pt-1.5 border-t border-gray-200 dark:border-gray-700 space-y-1.5">
                       {[1, 2, 3].map((i) => (
-                        <div key={i} className="space-y-1.5">
+                        <div key={i} className="space-y-1">
                           <div className="h-3 w-20 bg-gray-300 dark:bg-gray-700 rounded"></div>
-                          <div className="h-9 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                          <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
                         </div>
                       ))}
                     </div>
@@ -1045,26 +1206,53 @@ export default function OCRExpensePage() {
               </div>
               
               {/* OCR 元數據資訊 Skeleton */}
-              <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                <div className="h-4 w-24 bg-gray-300 dark:bg-gray-700 rounded mb-4"></div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => (
-                    <div key={i} className="space-y-1.5">
-                      <div className="h-3 w-20 bg-gray-300 dark:bg-gray-700 rounded"></div>
-                      <div className="h-9 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="h-3 w-24 bg-gray-300 dark:bg-gray-700 rounded mb-3"></div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* 第一列 Skeleton */}
+                  <div className="space-y-1.5">
+                    <div className="space-y-1.5">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="space-y-1">
+                          <div className="h-3 w-20 bg-gray-300 dark:bg-gray-700 rounded"></div>
+                          <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                  {/* 第二列 Skeleton */}
+                  <div className="space-y-1.5">
+                    <div className="space-y-1.5">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="space-y-1">
+                          <div className="h-3 w-20 bg-gray-300 dark:bg-gray-700 rounded"></div>
+                          <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 第三列 Skeleton */}
+                  <div className="space-y-1.5">
+                    <div className="space-y-1.5">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="space-y-1">
+                          <div className="h-3 w-20 bg-gray-300 dark:bg-gray-700 rounded"></div>
+                          <div className="h-8 w-full bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           ) : (
             /* 實際內容 */
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-800/50">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* 第一列：發票相關資訊 */}
-                <div className="space-y-3">
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
+                    <div className="space-y-1">
                       <Label htmlFor="ocr-invoiceTitle" className="text-xs font-medium text-gray-700 dark:text-gray-300">
                         發票標題
                       </Label>
@@ -1072,353 +1260,370 @@ export default function OCRExpensePage() {
                         id="ocr-invoiceTitle"
                         value={formData.invoiceTitle}
                         onChange={(e) => handleInputChange('invoiceTitle', e.target.value)}
-                        className="text-sm"
+                        className="text-sm h-8"
                         placeholder="發票標題"
                       />
                     </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-invoicePeriod" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      發票期別
-                    </Label>
-                    <Input
-                      id="ocr-invoicePeriod"
-                      value={formData.invoicePeriod}
-                      onChange={(e) => handleInputChange('invoicePeriod', e.target.value)}
-                      className="text-sm"
-                      placeholder="發票期別"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-invoiceNumber" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      發票號碼
-                    </Label>
-                    <Input
-                      id="ocr-invoiceNumber"
-                      value={formData.invoiceNumber}
-                      onChange={(e) => handleInputChange('invoiceNumber', e.target.value)}
-                      className="text-sm"
-                      placeholder="發票號碼"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-invoiceDate" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      開立時間
-                    </Label>
-                    <Input
-                      id="ocr-invoiceDate"
-                      value={formData.invoiceDate}
-                      onChange={(e) => handleInputChange('invoiceDate', e.target.value)}
-                      className="text-sm"
-                      placeholder="開立時間"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-randomCode" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      隨機碼
-                    </Label>
-                    <Input
-                      id="ocr-randomCode"
-                      value={formData.randomCode}
-                      onChange={(e) => handleInputChange('randomCode', e.target.value)}
-                      className="text-sm"
-                      placeholder="隨機碼"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-formatCode" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      格式代號
-                    </Label>
-                    <Input
-                      id="ocr-formatCode"
-                      value={formData.formatCode}
-                      onChange={(e) => handleInputChange('formatCode', e.target.value)}
-                      className="text-sm"
-                      placeholder="格式代號"
-                    />
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-invoicePeriod" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        發票期別
+                      </Label>
+                      <Input
+                        id="ocr-invoicePeriod"
+                        value={formData.invoicePeriod}
+                        onChange={(e) => handleInputChange('invoicePeriod', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="發票期別"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-invoiceNumber" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        發票號碼
+                      </Label>
+                      <Input
+                        id="ocr-invoiceNumber"
+                        value={formData.invoiceNumber}
+                        onChange={(e) => handleInputChange('invoiceNumber', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="發票號碼"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-invoiceDate" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        開立時間
+                      </Label>
+                      <Input
+                        id="ocr-invoiceDate"
+                        value={formData.invoiceDate}
+                        onChange={(e) => handleInputChange('invoiceDate', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="開立時間"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-randomCode" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        隨機碼
+                      </Label>
+                      <Input
+                        id="ocr-randomCode"
+                        value={formData.randomCode}
+                        onChange={(e) => handleInputChange('randomCode', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="隨機碼"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-formatCode" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        格式代號
+                      </Label>
+                      <Input
+                        id="ocr-formatCode"
+                        value={formData.formatCode}
+                        onChange={(e) => handleInputChange('formatCode', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="格式代號"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* 第二列：賣方資訊 */}
-              <div className="space-y-3">
-                <div className="space-y-3">
+                {/* 第二列：賣方資訊 */}
+                <div className="space-y-1.5">
                   <div className="space-y-1.5">
-                    <Label htmlFor="ocr-sellerName" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      賣方名稱
-                    </Label>
-                    <Input
-                      id="ocr-sellerName"
-                      value={formData.sellerName}
-                      onChange={(e) => handleInputChange('sellerName', e.target.value)}
-                      className="text-sm"
-                      placeholder="賣方名稱"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-sellerTaxId" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      賣方統編
-                    </Label>
-                    <Input
-                      id="ocr-sellerTaxId"
-                      value={formData.sellerTaxId}
-                      onChange={(e) => handleInputChange('sellerTaxId', e.target.value)}
-                      className="text-sm"
-                      placeholder="賣方統編"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-sellerAddress" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      賣方地址
-                    </Label>
-                    <Input
-                      id="ocr-sellerAddress"
-                      value={formData.sellerAddress}
-                      onChange={(e) => handleInputChange('sellerAddress', e.target.value)}
-                      className="text-sm"
-                      placeholder="賣方地址"
-                    />
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-sellerName" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        賣方名稱
+                      </Label>
+                      <Input
+                        id="ocr-sellerName"
+                        value={formData.sellerName}
+                        onChange={(e) => handleInputChange('sellerName', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="賣方名稱"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-sellerTaxId" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        賣方統編
+                      </Label>
+                      <Input
+                        id="ocr-sellerTaxId"
+                        value={formData.sellerTaxId}
+                        onChange={(e) => handleInputChange('sellerTaxId', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="賣方統編"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-sellerAddress" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        賣方地址
+                      </Label>
+                      <Input
+                        id="ocr-sellerAddress"
+                        value={formData.sellerAddress}
+                        onChange={(e) => handleInputChange('sellerAddress', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="賣方地址"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* 第三列：買方資訊及金額 */}
-              <div className="space-y-3">
-                <div className="space-y-3">
+                {/* 第三列：買方資訊及金額 */}
+                <div className="space-y-1.5">
                   <div className="space-y-1.5">
-                    <Label htmlFor="ocr-buyerName" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      買方名稱
-                    </Label>
-                    <Input
-                      id="ocr-buyerName"
-                      value={formData.buyerName}
-                      onChange={(e) => handleInputChange('buyerName', e.target.value)}
-                      className="text-sm"
-                      placeholder="買方名稱"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-buyerTaxId" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      買方統編
-                    </Label>
-                    <Input
-                      id="ocr-buyerTaxId"
-                      value={formData.buyerTaxId}
-                      onChange={(e) => handleInputChange('buyerTaxId', e.target.value)}
-                      className="text-sm"
-                      placeholder="買方統編"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ocr-buyerAddress" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      買方地址
-                    </Label>
-                    <Input
-                      id="ocr-buyerAddress"
-                      value={formData.buyerAddress}
-                      onChange={(e) => handleInputChange('buyerAddress', e.target.value)}
-                      className="text-sm"
-                      placeholder="買方地址"
-                    />
-                  </div>
-                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ocr-untaxedAmount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                        未稅銷售額
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-buyerName" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        買方名稱
                       </Label>
                       <Input
-                        id="ocr-untaxedAmount"
-                        type="number"
-                        step="0.01"
-                        value={formData.untaxedAmount}
-                        onChange={(e) => handleInputChange('untaxedAmount', e.target.value)}
-                        className="text-sm"
-                        placeholder="未稅銷售額"
+                        id="ocr-buyerName"
+                        value={formData.buyerName}
+                        onChange={(e) => handleInputChange('buyerName', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="買方名稱"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ocr-taxAmount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                        稅額
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-buyerTaxId" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        買方統編
                       </Label>
                       <Input
-                        id="ocr-taxAmount"
-                        type="number"
-                        step="0.01"
-                        value={formData.taxAmount}
-                        onChange={(e) => handleInputChange('taxAmount', e.target.value)}
-                        className="text-sm"
-                        placeholder="稅額"
+                        id="ocr-buyerTaxId"
+                        value={formData.buyerTaxId}
+                        onChange={(e) => handleInputChange('buyerTaxId', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="買方統編"
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ocr-totalAmount" className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                        總計金額
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-buyerAddress" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        買方地址
                       </Label>
                       <Input
-                        id="ocr-totalAmount"
-                        type="number"
-                        step="0.01"
-                        value={formData.totalAmount}
-                        onChange={(e) => handleInputChange('totalAmount', e.target.value)}
-                        className="text-sm font-semibold"
-                        placeholder="總計金額"
+                        id="ocr-buyerAddress"
+                        value={formData.buyerAddress}
+                        onChange={(e) => handleInputChange('buyerAddress', e.target.value)}
+                        className="text-sm h-8"
+                        placeholder="買方地址"
                       />
+                    </div>
+                    <div className="pt-1.5 border-t border-gray-200 dark:border-gray-700 space-y-1.5">
+                      <div className="space-y-1">
+                        <Label htmlFor="ocr-untaxedAmount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                          未稅銷售額
+                        </Label>
+                        <Input
+                          id="ocr-untaxedAmount"
+                          type="number"
+                          step="0.01"
+                          value={formData.untaxedAmount}
+                          onChange={(e) => handleInputChange('untaxedAmount', e.target.value)}
+                          className="text-sm h-8"
+                          placeholder="未稅銷售額"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ocr-taxAmount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                          稅額
+                        </Label>
+                        <Input
+                          id="ocr-taxAmount"
+                          type="number"
+                          step="0.01"
+                          value={formData.taxAmount}
+                          onChange={(e) => handleInputChange('taxAmount', e.target.value)}
+                          className="text-sm h-8"
+                          placeholder="稅額"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ocr-totalAmount" className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                          總計金額
+                        </Label>
+                        <Input
+                          id="ocr-totalAmount"
+                          type="number"
+                          step="0.01"
+                          value={formData.totalAmount}
+                          onChange={(e) => handleInputChange('totalAmount', e.target.value)}
+                          className="text-sm font-semibold h-8"
+                          placeholder="總計金額"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
             </div>
             
             {/* OCR 元數據資訊 */}
-            <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-4">OCR 處理資訊</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-3">OCR 處理資訊</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* 第一列：處理狀態與品質 */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="ocr-success" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    處理狀態
-                  </Label>
-                  <Input
-                    id="ocr-success"
-                    value={formData.ocrSuccess ? '成功' : '失敗'}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-confidence" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    辨識信心度 (%)
-                  </Label>
-                  <Input
-                    id="ocr-confidence"
-                    type="number"
-                    value={formData.ocrConfidence}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-documentType" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    文件類型
-                  </Label>
-                  <Input
-                    id="ocr-documentType"
-                    value={formData.ocrDocumentType}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-qualityGrade" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    品質等級
-                  </Label>
-                  <Input
-                    id="ocr-qualityGrade"
-                    value={formData.ocrQualityGrade}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-errorCount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    錯誤數量
-                  </Label>
-                  <Input
-                    id="ocr-errorCount"
-                    type="number"
-                    value={formData.ocrErrorCount}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-warningCount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    警告數量
-                  </Label>
-                  <Input
-                    id="ocr-warningCount"
-                    type="number"
-                    value={formData.ocrWarningCount}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-errors" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    錯誤訊息
-                  </Label>
-                  <Input
-                    id="ocr-errors"
-                    value={formData.ocrErrors || '無'}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-warnings" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    警告訊息
-                  </Label>
-                  <Input
-                    id="ocr-warnings"
-                    value={formData.ocrWarnings || '無'}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-fileName" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    檔案名稱
-                  </Label>
-                  <Input
-                    id="ocr-fileName"
-                    value={formData.ocrFileName || '未知檔案'}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-fileId" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    檔案 ID
-                  </Label>
-                  <Input
-                    id="ocr-fileId"
-                    value={formData.ocrFileId || ''}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ocr-processedAt" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    處理時間
-                  </Label>
-                  <Input
-                    id="ocr-processedAt"
-                    value={formData.ocrProcessedAt ? new Date(formData.ocrProcessedAt).toLocaleString('zh-TW') : ''}
-                    readOnly
-                    className="text-sm bg-gray-100 dark:bg-gray-800"
-                  />
-                </div>
-                {formData.ocrWebViewLink && (
                   <div className="space-y-1.5">
-                    <Label htmlFor="ocr-webViewLink" className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      預覽連結
-                    </Label>
-                    <div className="flex gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-success" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        處理狀態
+                      </Label>
                       <Input
-                        id="ocr-webViewLink"
-                        value={formData.ocrWebViewLink}
+                        id="ocr-success"
+                        value={formData.ocrSuccess ? '成功' : '失敗'}
                         readOnly
-                        className="text-sm bg-gray-100 dark:bg-gray-800"
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
                       />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => window.open(formData.ocrWebViewLink, '_blank')}
-                        className="flex-shrink-0"
-                      >
-                        開啟
-                      </Button>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-confidence" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        辨識信心度 (%)
+                      </Label>
+                      <Input
+                        id="ocr-confidence"
+                        type="number"
+                        value={formData.ocrConfidence}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-documentType" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        文件類型
+                      </Label>
+                      <Input
+                        id="ocr-documentType"
+                        value={formData.ocrDocumentType}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-qualityGrade" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        品質等級
+                      </Label>
+                      <Input
+                        id="ocr-qualityGrade"
+                        value={formData.ocrQualityGrade}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
                     </div>
                   </div>
-                )}
+                </div>
+
+                {/* 第二列：錯誤與警告 */}
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-errorCount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        錯誤數量
+                      </Label>
+                      <Input
+                        id="ocr-errorCount"
+                        type="number"
+                        value={formData.ocrErrorCount}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-warningCount" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        警告數量
+                      </Label>
+                      <Input
+                        id="ocr-warningCount"
+                        type="number"
+                        value={formData.ocrWarningCount}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-errors" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        錯誤訊息
+                      </Label>
+                      <Input
+                        id="ocr-errors"
+                        value={formData.ocrErrors || '無'}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-warnings" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        警告訊息
+                      </Label>
+                      <Input
+                        id="ocr-warnings"
+                        value={formData.ocrWarnings || '無'}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 第三列：檔案資訊 */}
+                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-fileName" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        檔案名稱
+                      </Label>
+                      <Input
+                        id="ocr-fileName"
+                        value={formData.ocrFileName || '未知檔案'}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-fileId" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        檔案 ID
+                      </Label>
+                      <Input
+                        id="ocr-fileId"
+                        value={formData.ocrFileId || '無'}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="ocr-processedAt" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        處理時間
+                      </Label>
+                      <Input
+                        id="ocr-processedAt"
+                        value={formData.ocrProcessedAt ? new Date(formData.ocrProcessedAt).toLocaleString('zh-TW') : ''}
+                        readOnly
+                        className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                      />
+                    </div>
+                    {formData.ocrWebViewLink && (
+                      <div className="space-y-1">
+                        <Label htmlFor="ocr-webViewLink" className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                          預覽連結
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="ocr-webViewLink"
+                            value={formData.ocrWebViewLink}
+                            readOnly
+                            className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => window.open(formData.ocrWebViewLink, '_blank')}
+                            className="flex-shrink-0 h-8"
+                          >
+                            開啟
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
