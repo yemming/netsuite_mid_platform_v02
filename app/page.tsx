@@ -134,66 +134,10 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-      {/* NetSuite Background Pattern - Blue-gray abstract geometric shapes */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#E8EEF2] via-[#D6E1E8] to-[#C4D4DE]">
-        {/* Abstract cloud/data flow pattern */}
-        <div className="absolute inset-0">
-          <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" className="opacity-40">
-            <defs>
-              <radialGradient id="cloud1" cx="20%" cy="30%">
-                <stop offset="0%" stopColor="#B8C8D8" stopOpacity="0.6"/>
-                <stop offset="50%" stopColor="#B8C8D8" stopOpacity="0.3"/>
-                <stop offset="100%" stopColor="#B8C8D8" stopOpacity="0"/>
-              </radialGradient>
-              <radialGradient id="cloud2" cx="75%" cy="65%">
-                <stop offset="0%" stopColor="#A8B8C8" stopOpacity="0.5"/>
-                <stop offset="50%" stopColor="#A8B8C8" stopOpacity="0.2"/>
-                <stop offset="100%" stopColor="#A8B8C8" stopOpacity="0"/>
-              </radialGradient>
-              <radialGradient id="cloud3" cx="50%" cy="50%">
-                <stop offset="0%" stopColor="#C8D8E8" stopOpacity="0.4"/>
-                <stop offset="100%" stopColor="#C8D8E8" stopOpacity="0"/>
-              </radialGradient>
-            </defs>
-            {/* Cloud-like abstract shapes */}
-            <ellipse cx="20%" cy="30%" rx="300" ry="200" fill="url(#cloud1)"/>
-            <ellipse cx="75%" cy="65%" rx="280" ry="180" fill="url(#cloud2)"/>
-            <ellipse cx="50%" cy="50%" rx="250" ry="150" fill="url(#cloud3)"/>
-          </svg>
-        </div>
-        
-        {/* Right edge geometric shapes - deep blue and yellow bands */}
-        <div className="absolute right-0 top-0 bottom-0 w-40">
-          {/* Deep blue vertical band with geometric cut */}
-          <div className="absolute right-0 top-0 bottom-0 w-20">
-            <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#1C3A5E" stopOpacity="0.7"/>
-                  <stop offset="100%" stopColor="#1C3A5E" stopOpacity="0.5"/>
-                </linearGradient>
-              </defs>
-              <polygon points="0,0 100%,15 100%,100% 0,100%" fill="url(#blueGrad)"/>
-            </svg>
-          </div>
-          {/* Yellow vertical band */}
-          <div className="absolute right-20 top-0 bottom-0 w-12">
-            <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="yellowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#FDB515" stopOpacity="0.5"/>
-                  <stop offset="100%" stopColor="#FDB515" stopOpacity="0.3"/>
-                </linearGradient>
-              </defs>
-              <polygon points="0,10 100%,25 100%,100% 0,100%" fill="url(#yellowGrad)"/>
-            </svg>
-          </div>
-        </div>
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
 
-      {/* Login Card - White card centered */}
-      <div className="relative z-10 bg-white rounded-lg shadow-2xl w-full max-w-md mx-4">
+      {/* Login Card - NetSuite Style Clean White Card */}
+      <div className="bg-white rounded shadow-lg w-full max-w-md mx-4 border border-gray-200">
         {/* Logo at top left */}
         <div className="p-8 pb-6">
           <NetSuiteLogo />
@@ -276,11 +220,11 @@ export default function Home() {
               </div>
             )}
 
-            {/* Log In Button */}
+            {/* Log In Button - NetSuite Style */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#1C3A5E] text-white py-3 px-4 rounded flex items-center justify-center gap-2 hover:bg-[#254A6E] focus:outline-none focus:ring-2 focus:ring-[#0073C5] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+              className="w-full bg-[#28363F] text-white py-2.5 px-4 rounded flex items-center justify-center gap-2 hover:bg-[#354a56] focus:outline-none focus:ring-2 focus:ring-[#28363F] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
             >
               <Lock className="w-4 h-4" />
               <span>{loading ? '處理中...' : isSignUp ? '註冊' : 'Log In'}</span>

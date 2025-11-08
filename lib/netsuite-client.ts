@@ -239,6 +239,73 @@ export class NetSuiteAPIClient {
     return this.request(`/services/rest/record/v1/inventoryitem/${itemId}`);
   }
 
+  // 通用 REST API 記錄列表查詢（支援分頁）
+  // 先嘗試直接列表 API，如果失敗則使用搜索 API
+  async getRecordList(
+    recordType: string,
+    params?: {
+      limit?: number;
+      offset?: number;
+      q?: string;
+      fetchAll?: boolean;
+    }
+  ): Promise<{
+    items: any[];
+    count?: number;
+    hasMore?: boolean;
+  }> {
+    const fetchAll = params?.fetchAll ?? true;
+    const allItems: any[] = [];
+    let offset = params?.offset || 0;
+    const limit = params?.limit || 1000;
+
+    // 直接使用列表 API（不使用 q 參數，避免被解釋為搜索查詢）
+    const queryParams: Record<string, string> = {};
+    if (params?.limit) queryParams.limit = params.limit.toString();
+    if (params?.offset) queryParams.offset = params.offset.toString();
+    // 注意：不使用 q 參數，因為會被解釋為搜索查詢
+
+    do {
+      queryParams.offset = offset.toString();
+      queryParams.limit = limit.toString();
+
+      // 注意：URL 結尾需要有斜線，NetSuite API 要求
+      const endpoint = `/services/rest/record/v1/${recordType}${recordType.endsWith('/') ? '' : '/'}`;
+      
+      const result = await this.request<{
+        items: Array<any>;
+        count?: number;
+        hasMore?: boolean;
+      }>(
+        endpoint,
+        'GET',
+        undefined,
+        queryParams
+      );
+
+      if (result.items && Array.isArray(result.items)) {
+        allItems.push(...result.items);
+      }
+
+      if (fetchAll && result.hasMore) {
+        offset += limit;
+      } else {
+        break;
+      }
+    } while (fetchAll);
+
+    return {
+      items: allItems,
+      count: allItems.length,
+      hasMore: false,
+    };
+  }
+
+  // 取得單一記錄（通用）
+  async getRecord(recordType: string, recordId: string) {
+    return this.request(`/services/rest/record/v1/${recordType}/${recordId}`);
+  }
+
   // 執行 SuiteQL 查詢（支援自動分頁取得所有資料）
   async executeSuiteQL(
     query: string, 
