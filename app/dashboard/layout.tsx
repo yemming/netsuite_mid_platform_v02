@@ -14,6 +14,7 @@ export default function DashboardLayout({
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     const checkUser = async () => {
@@ -72,14 +73,25 @@ export default function DashboardLayout({
   }, [router])
 
   const handleSignOut = async () => {
+    // 立即顯示載入狀態，提供即時反饋
+    setSigningOut(true)
+    
+    // 立即重定向，不等待 API 回應
+    router.push('/')
+    
+    // 在背景執行登出，即使失敗也不影響用戶體驗
     try {
       const supabase = createClient()
-      await supabase.auth.signOut()
+      // 使用 Promise.race 設定超時，避免長時間等待
+      await Promise.race([
+        supabase.auth.signOut(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('登出超時')), 3000)
+        )
+      ])
     } catch (err: any) {
-      console.error('登出錯誤:', err)
-      // 即使出錯也要重定向，確保用戶被登出
-    } finally {
-      router.push('/')
+      // 靜默處理錯誤，因為已經重定向了
+      console.error('登出錯誤（已忽略）:', err)
     }
   }
 
@@ -116,9 +128,10 @@ export default function DashboardLayout({
               </div>
               <button
                 onClick={handleSignOut}
-                className="px-3 py-1 bg-gray-100 dark:bg-[#354a56] text-gray-700 dark:text-white rounded hover:bg-gray-200 dark:hover:bg-[#3a4f5d] transition-colors text-xs font-medium ml-2 h-6 flex items-center"
+                disabled={signingOut}
+                className="px-3 py-1 bg-gray-100 dark:bg-[#354a56] text-gray-700 dark:text-white rounded hover:bg-gray-200 dark:hover:bg-[#3a4f5d] transition-colors text-xs font-medium ml-2 h-6 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                登出
+                {signingOut ? '登出中...' : '登出'}
               </button>
             </div>
           </div>
