@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { TrendingUp, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { TrendingUp, CheckCircle2, XCircle, Loader2, LayoutDashboard } from 'lucide-react'
 
 interface ConnectionStatus {
   connected: boolean
@@ -268,37 +268,43 @@ export default function Dashboard() {
   const connectionRate = totalConnections > 0 ? (connectedCount / totalConnections) * 100 : 0
 
   return (
-    <div className="p-6 bg-background">
-      {/* Page Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-foreground mb-2">儀表板</h1>
-        <p className="text-muted-foreground">歡迎來到您的主要控制中心</p>
+    <div className="bg-white dark:bg-background">
+      {/* Page Header - SuiteQL Style */}
+      <div className="bg-white dark:bg-[#28363F] px-8 py-6 mb-8">
+        <div className="flex items-center gap-3 mb-2">
+          <LayoutDashboard className="h-8 w-8 text-primary" />
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">儀表板</h1>
+        </div>
+        <p className="text-gray-600 dark:text-muted-foreground">
+          系統狀態總覽
+        </p>
       </div>
 
-      {/* KPI Cards - NetSuite Style */}
+      <div className="p-6">
+        {/* KPI Cards - NetSuite Style */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {/* Connection Status KPI */}
-        <div className="bg-card border border-border rounded-lg p-5 shadow-sm">
-          <div className="text-sm text-muted-foreground mb-1">連接狀態</div>
-          <div className="text-3xl font-bold text-card-foreground mb-1">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded p-5 shadow-sm">
+          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">連接狀態</div>
+          <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-1">
             {connectedCount}/{totalConnections}
           </div>
-          <div className="flex items-center text-sm">
-            <span className={`font-medium ${connectionRate === 100 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}`}>
+          <div className="flex items-center text-xs">
+            <span className={`font-medium ${connectionRate === 100 ? 'text-green-600' : 'text-orange-600'}`}>
               {connectionRate === 100 ? '✓' : '⚠'} {Math.round(connectionRate)}%
             </span>
-            <span className="text-muted-foreground ml-2">已連接</span>
+            <span className="text-gray-500 dark:text-gray-400 ml-2">已連接</span>
           </div>
         </div>
 
         {/* System Health KPI */}
-        <div className="bg-card border border-border rounded-lg p-5 shadow-sm">
-          <div className="text-sm text-muted-foreground mb-1">系統狀態</div>
-          <div className="text-3xl font-bold text-card-foreground mb-1">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded p-5 shadow-sm">
+          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">系統狀態</div>
+          <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-1">
             {connectionRate === 100 ? '正常' : '警告'}
           </div>
-          <div className="flex items-center text-sm">
-            <span className={`font-medium ${connectionRate === 100 ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}`}>
+          <div className="flex items-center text-xs">
+            <span className={`font-medium ${connectionRate === 100 ? 'text-green-600' : 'text-orange-600'}`}>
               <TrendingUp className="w-4 h-4 inline mr-1" />
               {connectionRate === 100 ? '運行中' : '部分離線'}
             </span>
@@ -306,24 +312,24 @@ export default function Dashboard() {
         </div>
 
         {/* Active Services KPI */}
-        <div className="bg-card border border-border rounded-lg p-5 shadow-sm">
-          <div className="text-sm text-muted-foreground mb-1">活躍服務</div>
-          <div className="text-3xl font-bold text-card-foreground mb-1">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded p-5 shadow-sm">
+          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">活躍服務</div>
+          <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-1">
             {connectedCount}
           </div>
-          <div className="flex items-center text-sm">
-            <span className="text-muted-foreground">服務運行中</span>
+          <div className="flex items-center text-xs">
+            <span className="text-gray-500 dark:text-gray-400">服務運行中</span>
           </div>
         </div>
 
         {/* Uptime KPI */}
-        <div className="bg-card border border-border rounded-lg p-5 shadow-sm">
-          <div className="text-sm text-muted-foreground mb-1">系統運行時間</div>
-          <div className="text-3xl font-bold text-card-foreground mb-1">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded p-5 shadow-sm">
+          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">系統運行時間</div>
+          <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-1">
             99.9%
           </div>
-          <div className="flex items-center text-sm">
-            <span className="text-green-600 dark:text-green-400 font-medium">
+          <div className="flex items-center text-xs">
+            <span className="text-green-600 font-medium">
               <TrendingUp className="w-4 h-4 inline mr-1" />
               ↑ 穩定
             </span>
@@ -332,33 +338,33 @@ export default function Dashboard() {
       </div>
 
       {/* Connection Cards - NetSuite Style */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {/* Supabase Card */}
-        <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded shadow-sm overflow-hidden">
           <div className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-card-foreground">Supabase</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">Supabase</h3>
               <div className="flex items-center">
                 {supabaseStatus.loading ? (
-                  <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                 ) : supabaseStatus.connected ? (
-                  <CheckCircle2 className="w-5 h-5 text-green-500 dark:text-green-400" />
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
                 ) : (
-                  <XCircle className="w-5 h-5 text-red-500 dark:text-red-400" />
+                  <XCircle className="w-5 h-5 text-red-500" />
                 )}
               </div>
             </div>
             
             {supabaseStatus.companyName && (
-              <div className="mb-3">
-                <p className="text-base font-semibold text-card-foreground">
+              <div className="mb-2">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
                   {supabaseStatus.companyName}
                 </p>
               </div>
             )}
             
-            <p className={`text-sm ${
-              supabaseStatus.connected ? 'text-card-foreground/80' : 'text-muted-foreground'
+            <p className={`text-xs ${
+              supabaseStatus.connected ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'
             }`}>
               {supabaseStatus.message}
             </p>
@@ -366,31 +372,31 @@ export default function Dashboard() {
         </div>
 
         {/* N8n Card */}
-        <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded shadow-sm overflow-hidden">
           <div className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-card-foreground">N8n</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">N8n</h3>
               <div className="flex items-center">
                 {n8nStatus.loading ? (
-                  <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                 ) : n8nStatus.connected ? (
-                  <CheckCircle2 className="w-5 h-5 text-green-500 dark:text-green-400" />
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
                 ) : (
-                  <XCircle className="w-5 h-5 text-red-500 dark:text-red-400" />
+                  <XCircle className="w-5 h-5 text-red-500" />
                 )}
               </div>
             </div>
             
             {n8nStatus.companyName && (
-              <div className="mb-3">
-                <p className="text-base font-semibold text-card-foreground">
+              <div className="mb-2">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
                   {n8nStatus.companyName}
                 </p>
               </div>
             )}
             
-            <p className={`text-sm ${
-              n8nStatus.connected ? 'text-card-foreground/80' : 'text-muted-foreground'
+            <p className={`text-xs ${
+              n8nStatus.connected ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'
             }`}>
               {n8nStatus.message}
             </p>
@@ -398,31 +404,31 @@ export default function Dashboard() {
         </div>
 
         {/* NetSuite Card */}
-        <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
+        <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded shadow-sm overflow-hidden">
           <div className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-card-foreground">NetSuite</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">NetSuite</h3>
               <div className="flex items-center">
                 {netsuiteStatus.loading ? (
-                  <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                  <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                 ) : netsuiteStatus.connected ? (
-                  <CheckCircle2 className="w-5 h-5 text-green-500 dark:text-green-400" />
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
                 ) : (
-                  <XCircle className="w-5 h-5 text-red-500 dark:text-red-400" />
+                  <XCircle className="w-5 h-5 text-red-500" />
                 )}
               </div>
             </div>
             
             {netsuiteStatus.companyName && (
-              <div className="mb-3">
-                <p className="text-base font-semibold text-card-foreground">
+              <div className="mb-2">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
                   {netsuiteStatus.companyName}
                 </p>
               </div>
             )}
             
-            <p className={`text-sm ${
-              netsuiteStatus.connected ? 'text-card-foreground/80' : 'text-muted-foreground'
+            <p className={`text-xs ${
+              netsuiteStatus.connected ? 'text-gray-700 dark:text-gray-300' : 'text-gray-500 dark:text-gray-400'
             }`}>
               {netsuiteStatus.message}
             </p>
@@ -431,22 +437,23 @@ export default function Dashboard() {
       </div>
 
       {/* Quick Actions Section */}
-      <div className="bg-card border border-border rounded-lg shadow-sm p-6">
-        <h2 className="text-xl font-semibold text-card-foreground mb-4">快速操作</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <button className="px-4 py-3 bg-[#28363F] text-white rounded-lg hover:bg-[#354a56] transition-colors text-left">
-            <div className="font-semibold">查看訂單</div>
-            <div className="text-sm opacity-90">瀏覽所有訂單記錄</div>
+      <div className="bg-white dark:bg-card border border-gray-200 dark:border-border rounded shadow-sm p-5">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">快速操作</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <button className="px-4 py-2.5 bg-[#28363F] text-white rounded hover:bg-[#354a56] transition-colors text-left">
+            <div className="text-sm font-semibold">查看訂單</div>
+            <div className="text-xs opacity-90 mt-0.5">瀏覽所有訂單記錄</div>
           </button>
-          <button className="px-4 py-3 bg-[#28363F] text-white rounded-lg hover:bg-[#354a56] transition-colors text-left">
-            <div className="font-semibold">執行查詢</div>
-            <div className="text-sm opacity-90">使用 SuiteQL 查詢資料</div>
+          <button className="px-4 py-2.5 bg-[#28363F] text-white rounded hover:bg-[#354a56] transition-colors text-left">
+            <div className="text-sm font-semibold">執行查詢</div>
+            <div className="text-xs opacity-90 mt-0.5">使用 SuiteQL 查詢資料</div>
           </button>
-          <button className="px-4 py-3 bg-[#28363F] text-white rounded-lg hover:bg-[#354a56] transition-colors text-left">
-            <div className="font-semibold">系統設定</div>
-            <div className="text-sm opacity-90">管理系統配置</div>
+          <button className="px-4 py-2.5 bg-[#28363F] text-white rounded hover:bg-[#354a56] transition-colors text-left">
+            <div className="text-sm font-semibold">系統設定</div>
+            <div className="text-xs opacity-90 mt-0.5">管理系統配置</div>
           </button>
         </div>
+      </div>
       </div>
     </div>
   )

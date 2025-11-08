@@ -97,103 +97,38 @@ export default function DashboardLayout({
       <Sidebar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-background">
-        {/* Top Navbar - NetSuite Style with Camouflage Pattern */}
-        <nav className="relative bg-card border-b border-border">
-          {/* Modern Camouflage Top Bar - Visible in both light and dark modes */}
-          <div className="absolute top-0 left-0 right-0 h-1 overflow-hidden">
-            <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
-              <defs>
-                {/* Light mode pattern - subtle blue-green tones */}
-                <pattern id="camouflagePatternLight" x="0" y="0" width="200" height="4" patternUnits="userSpaceOnUse">
-                  {/* Base - light gray-blue background */}
-                  <rect width="200" height="4" fill="#C8D4DE"/>
-                  
-                  {/* Modern camouflage - abstract geometric blobs (light tones) */}
-                  <ellipse cx="30" cy="2" rx="25" ry="1.8" fill="#A8B8C8" opacity="0.6"/>
-                  <ellipse cx="60" cy="1.2" rx="20" ry="2.2" fill="#98A8B8" opacity="0.55"/>
-                  <ellipse cx="90" cy="2.8" rx="28" ry="1.5" fill="#B8C8D8" opacity="0.65"/>
-                  <ellipse cx="120" cy="0.8" rx="22" ry="2" fill="#88A8C8" opacity="0.5"/>
-                  <ellipse cx="150" cy="3.2" rx="26" ry="1.3" fill="#A8C8D8" opacity="0.6"/>
-                  <ellipse cx="175" cy="1.5" rx="18" ry="1.7" fill="#98B8C8" opacity="0.55"/>
-                  
-                  {/* Wavy lines for texture */}
-                  <path d="M 0 0 Q 50 2 100 0.5 T 200 1" fill="none" stroke="#88A8B8" strokeWidth="0.4" opacity="0.4"/>
-                  <path d="M 0 4 Q 55 2.5 110 3.5 T 200 4" fill="none" stroke="#78A8B8" strokeWidth="0.4" opacity="0.35"/>
-                  <path d="M 25 0 Q 75 2.5 125 1 T 200 2" fill="none" stroke="#98B8C8" strokeWidth="0.3" opacity="0.3"/>
-                  
-                  {/* Small texture dots for depth */}
-                  <circle cx="20" cy="2" r="1" fill="#88A8B8" opacity="0.5"/>
-                  <circle cx="70" cy="1.5" r="0.8" fill="#78A8B8" opacity="0.45"/>
-                  <circle cx="110" cy="2.5" r="0.9" fill="#88B8C8" opacity="0.55"/>
-                  <circle cx="140" cy="1.8" r="0.7" fill="#98A8B8" opacity="0.4"/>
-                  <circle cx="180" cy="2.2" r="0.6" fill="#88A8C8" opacity="0.35"/>
-                </pattern>
-                
-                {/* Dark mode pattern - darker blue-green tones */}
-                <pattern id="camouflagePatternDark" x="0" y="0" width="200" height="4" patternUnits="userSpaceOnUse">
-                  {/* Base - subtle gradient background */}
-                  <rect width="200" height="4" fill="#28363F"/>
-                  
-                  {/* Modern camouflage - abstract geometric blobs */}
-                  <ellipse cx="30" cy="2" rx="25" ry="1.8" fill="#354a56" opacity="0.85"/>
-                  <ellipse cx="60" cy="1.2" rx="20" ry="2.2" fill="#3a4f5d" opacity="0.75"/>
-                  <ellipse cx="90" cy="2.8" rx="28" ry="1.5" fill="#2d434f" opacity="0.9"/>
-                  <ellipse cx="120" cy="0.8" rx="22" ry="2" fill="#354a56" opacity="0.65"/>
-                  <ellipse cx="150" cy="3.2" rx="26" ry="1.3" fill="#3a4f5d" opacity="0.8"/>
-                  <ellipse cx="175" cy="1.5" rx="18" ry="1.7" fill="#2d434f" opacity="0.7"/>
-                  
-                  {/* Wavy lines for texture */}
-                  <path d="M 0 0 Q 50 2 100 0.5 T 200 1" fill="none" stroke="#4a5f6d" strokeWidth="0.4" opacity="0.5"/>
-                  <path d="M 0 4 Q 55 2.5 110 3.5 T 200 4" fill="none" stroke="#2d434f" strokeWidth="0.4" opacity="0.4"/>
-                  <path d="M 25 0 Q 75 2.5 125 1 T 200 2" fill="none" stroke="#5a6f7d" strokeWidth="0.3" opacity="0.3"/>
-                  
-                  {/* Small texture dots for depth */}
-                  <circle cx="20" cy="2" r="1" fill="#5a6f7d" opacity="0.6"/>
-                  <circle cx="70" cy="1.5" r="0.8" fill="#4a5f6d" opacity="0.5"/>
-                  <circle cx="110" cy="2.5" r="0.9" fill="#3a4f5d" opacity="0.7"/>
-                  <circle cx="140" cy="1.8" r="0.7" fill="#5a6f7d" opacity="0.5"/>
-                  <circle cx="180" cy="2.2" r="0.6" fill="#4a5f6d" opacity="0.4"/>
-                </pattern>
-              </defs>
-              {/* Light mode */}
-              <rect width="100%" height="100%" fill="url(#camouflagePatternLight)" className="dark:hidden"/>
-              {/* Dark mode */}
-              <rect width="100%" height="100%" fill="url(#camouflagePatternDark)" className="hidden dark:block"/>
-            </svg>
-          </div>
-          
-          {/* Main Navbar Content - Very Thin */}
-          <div className="px-4 py-1.5">
-            <div className="flex justify-between items-center">
-              <div></div>
-              <div className="flex items-center space-x-3">
-                <ThemeToggle />
-                <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 rounded-full bg-[#28363F] dark:bg-[#28363F] flex items-center justify-center">
-                    <span className="text-white text-xs font-semibold">
-                      {user?.email?.charAt(0).toUpperCase() || 'U'}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-foreground leading-tight">{user?.email?.split('@')[0] || 'User'}</span>
-                    <span className="text-xs text-muted-foreground leading-tight">Administrator</span>
-                  </div>
+      <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-background">
+        {/* Top Navbar - Fixed header aligned with sidebar */}
+        <nav className="sticky top-0 z-50 bg-white dark:bg-background text-gray-900 dark:text-white border-b border-gray-200 dark:border-b-0">
+          <div className="flex items-center gap-2 px-6 h-[38px] justify-end">
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <ThemeToggle />
+              <div className="flex items-center space-x-2 ml-2">
+                <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-[#354a56] flex items-center justify-center flex-shrink-0">
+                  <span className="text-gray-700 dark:text-white text-xs font-semibold">
+                    {user?.email?.charAt(0).toUpperCase() || 'U'}
+                  </span>
                 </div>
-                <button
-                  onClick={handleSignOut}
-                  className="px-3 py-1 bg-[#28363F] text-white rounded hover:bg-[#354a56] transition-colors text-xs font-medium"
-                >
-                  登出
-                </button>
+                <div className="flex flex-col leading-none">
+                  <span className="text-sm font-medium text-gray-900 dark:text-white leading-tight">{user?.email?.split('@')[0] || 'User'}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-300 leading-tight">Administrator</span>
+                </div>
               </div>
+              <button
+                onClick={handleSignOut}
+                className="px-3 py-1 bg-gray-100 dark:bg-[#354a56] text-gray-700 dark:text-white rounded hover:bg-gray-200 dark:hover:bg-[#3a4f5d] transition-colors text-xs font-medium ml-2 h-6 flex items-center"
+              >
+                登出
+              </button>
             </div>
           </div>
         </nav>
 
-        {/* Page Content - Responsive Background */}
-        <main className="flex-1 overflow-y-auto bg-background">
-          {children}
+        {/* Page Content - Scrollable with transparent overlay effect */}
+        <main className="flex-1 overflow-y-auto bg-white dark:bg-background relative">
+          <div className="relative z-10">
+            {children}
+          </div>
         </main>
       </div>
     </div>
