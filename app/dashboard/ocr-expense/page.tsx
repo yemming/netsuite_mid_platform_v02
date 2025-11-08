@@ -953,6 +953,18 @@ export default function OCRExpensePage() {
                     value={formData.expenseDate}
                     onChange={(e) => handleInputChange('expenseDate', e.target.value)}
                     className="pr-10"
+                    style={{
+                      fontSize: '16px', // iOS Safari 需要至少 16px 才不會自動縮放
+                      paddingRight: '2.5rem',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      WebkitAppearance: 'none', // 移除 Safari 默認樣式
+                      appearance: 'none',
+                      width: '100%',
+                      maxWidth: '100%',
+                      boxSizing: 'border-box',
+                    }}
                     required
                   />
                   <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
