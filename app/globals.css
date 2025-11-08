@@ -128,3 +128,25 @@
   animation: headerShimmer 20s ease-in-out infinite;
 }
 
+/* Override Chrome autofill styles to ensure readable text */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #ffffff inset !important;
+  -webkit-text-fill-color: #111827 !important;
+  box-shadow: 0 0 0 30px #ffffff inset !important;
+  color: #111827 !important;
+}
+
+/* Override Chrome autofill for password field with light blue background */
+input[type="password"]:-webkit-autofill,
+input[type="password"]:-webkit-autofill:hover,
+input[type="password"]:-webkit-autofill:focus,
+input[type="password"]:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #E0F2F7 inset !important;
+  -webkit-text-fill-color: #111827 !important;
+  box-shadow: 0 0 0 30px #E0F2F7 inset !important;
+  color: #111827 !important;
+}
+
