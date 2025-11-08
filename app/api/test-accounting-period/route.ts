@@ -120,16 +120,18 @@ export async function POST() {
       (m: any) => m.success
     );
     
+    const recommendedMethodKey = successfulMethods.length > 0 
+      ? Object.keys(results.methods).find(
+          (key) => (results.methods as any)[key].success
+        )
+      : 'none';
+    
     results.summary = {
       total_methods: Object.keys(results.methods).length,
       successful_methods: successfulMethods.length,
-      recommended_method: successfulMethods.length > 0 
-        ? Object.keys(results.methods).find(
-            (key) => results.methods[key].success
-          )
-        : 'none',
+      recommended_method: recommendedMethodKey,
       recommendation: successfulMethods.length > 0
-        ? `✅ 建議使用 ${successfulMethods[0].recommended_method || Object.keys(results.methods).find((key) => results.methods[key].success)} 方法`
+        ? `✅ 建議使用 ${recommendedMethodKey} 方法`
         : '❌ 所有方法都失敗，請檢查：1) NetSuite 權限設定 2) Record type 名稱是否正確 3) NetSuite 版本是否支援',
     };
 
