@@ -1,15 +1,22 @@
 'use client'
 
 import { useTheme } from 'next-themes'
+import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 export default function ColorfulHeaderBar() {
   const { theme, resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const pathname = usePathname()
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // 在登入頁面不顯示上邊條
+  if (pathname === '/') {
+    return null
+  }
 
   // 判斷是否為深色模式
   const isDark = mounted && (resolvedTheme === 'dark' || theme === 'dark')

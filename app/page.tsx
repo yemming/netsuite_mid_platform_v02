@@ -134,12 +134,209 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-start justify-center relative overflow-hidden pt-16 pb-8" style={{
+      backgroundColor: '#f5f7fa'
+    }}>
+      {/* Abstract Organic Shapes Background */}
+      <div className="absolute inset-0 overflow-hidden">
+        <svg 
+          width="100%" 
+          height="100%" 
+          viewBox="0 0 1200 800" 
+          preserveAspectRatio="xMidYMid slice"
+          style={{ position: 'absolute', top: 0, left: 0 }}
+        >
+          <defs>
+            {/* Gradients for organic shapes */}
+            <linearGradient id="mintGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#a8e6cf" stopOpacity="0.6"/>
+              <stop offset="100%" stopColor="#88d8c0" stopOpacity="0.4"/>
+            </linearGradient>
+            <linearGradient id="coralGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#ff9a8b" stopOpacity="0.7"/>
+              <stop offset="100%" stopColor="#ff6b6b" stopOpacity="0.5"/>
+            </linearGradient>
+            <linearGradient id="pinkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#fbc2eb" stopOpacity="0.6"/>
+              <stop offset="100%" stopColor="#f8a5c2" stopOpacity="0.4"/>
+            </linearGradient>
+            <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#c8a8e9" stopOpacity="0.7"/>
+              <stop offset="100%" stopColor="#a78bfa" stopOpacity="0.5"/>
+            </linearGradient>
+            <linearGradient id="coralGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#ff8a80" stopOpacity="0.6"/>
+              <stop offset="100%" stopColor="#ff6b6b" stopOpacity="0.4"/>
+            </linearGradient>
+            
+            {/* Texture pattern for purple shape */}
+            <pattern id="texturePattern" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+              <circle cx="20" cy="20" r="1.5" fill="#a78bfa" opacity="0.3"/>
+              <circle cx="10" cy="10" r="1" fill="#c8a8e9" opacity="0.2"/>
+              <circle cx="30" cy="30" r="1" fill="#c8a8e9" opacity="0.2"/>
+              <path d="M10,20 Q20,10 30,20 T50,20" stroke="#a78bfa" strokeWidth="0.5" fill="none" opacity="0.2"/>
+              <path d="M20,10 Q20,20 20,30 T20,50" stroke="#c8a8e9" strokeWidth="0.5" fill="none" opacity="0.2"/>
+            </pattern>
+            
+            {/* Blur filters */}
+            <filter id="blur20">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="20"/>
+            </filter>
+            <filter id="blur25">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="25"/>
+            </filter>
+            <filter id="blur22">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="22"/>
+            </filter>
+            <filter id="blur18">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="18"/>
+            </filter>
+            <filter id="blur15">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="15"/>
+            </filter>
+          </defs>
+          
+          {/* Large mint/teal shape - top right */}
+          <ellipse 
+            cx="900" 
+            cy="150" 
+            rx="280" 
+            ry="200" 
+            fill="url(#mintGrad)" 
+            transform="rotate(-25 900 150)"
+            filter="url(#blur20)"
+          />
+          <ellipse 
+            cx="920" 
+            cy="170" 
+            rx="250" 
+            ry="180" 
+            fill="url(#mintGrad)" 
+            transform="rotate(-20 920 170)"
+            opacity="0.8"
+          />
+          
+          {/* Coral/red shape - middle right */}
+          <ellipse 
+            cx="950" 
+            cy="350" 
+            rx="300" 
+            ry="220" 
+            fill="url(#coralGrad)" 
+            transform="rotate(35 950 350)"
+            filter="url(#blur25)"
+          />
+          <ellipse 
+            cx="970" 
+            cy="370" 
+            rx="270" 
+            ry="200" 
+            fill="url(#coralGrad)" 
+            transform="rotate(30 970 370)"
+            opacity="0.85"
+          />
+          
+          {/* Pink shape - middle left */}
+          <ellipse 
+            cx="200" 
+            cy="450" 
+            rx="320" 
+            ry="240" 
+            fill="url(#pinkGrad)" 
+            transform="rotate(-40 200 450)"
+            filter="url(#blur22)"
+          />
+          <ellipse 
+            cx="220" 
+            cy="470" 
+            rx="290" 
+            ry="220" 
+            fill="url(#pinkGrad)" 
+            transform="rotate(-35 220 470)"
+            opacity="0.8"
+          />
+          
+          {/* Second coral shape - bottom right */}
+          <ellipse 
+            cx="850" 
+            cy="650" 
+            rx="280" 
+            ry="200" 
+            fill="url(#coralGrad2)" 
+            transform="rotate(50 850 650)"
+            filter="url(#blur20)"
+          />
+          <ellipse 
+            cx="870" 
+            cy="670" 
+            rx="250" 
+            ry="180" 
+            fill="url(#coralGrad2)" 
+            transform="rotate(45 870 670)"
+            opacity="0.75"
+          />
+          
+          {/* Purple shape with texture - bottom */}
+          <ellipse 
+            cx="500" 
+            cy="700" 
+            rx="350" 
+            ry="250" 
+            fill="url(#purpleGrad)" 
+            transform="rotate(-15 500 700)"
+            filter="url(#blur18)"
+          />
+          <ellipse 
+            cx="520" 
+            cy="720" 
+            rx="320" 
+            ry="230" 
+            fill="url(#purpleGrad)" 
+            transform="rotate(-10 520 720)"
+            opacity="0.9"
+          />
+          {/* Texture overlay for purple shape */}
+          <ellipse 
+            cx="520" 
+            cy="720" 
+            rx="300" 
+            ry="210" 
+            fill="url(#texturePattern)" 
+            transform="rotate(-10 520 720)"
+            opacity="0.4"
+          />
+          
+          {/* Additional smaller overlapping shapes for depth */}
+          <ellipse 
+            cx="750" 
+            cy="250" 
+            rx="180" 
+            ry="140" 
+            fill="url(#mintGrad)" 
+            transform="rotate(15 750 250)"
+            opacity="0.5"
+            filter="url(#blur15)"
+          />
+          <ellipse 
+            cx="300" 
+            cy="300" 
+            rx="200" 
+            ry="150" 
+            fill="url(#pinkGrad)" 
+            transform="rotate(-25 300 300)"
+            opacity="0.4"
+            filter="url(#blur18)"
+          />
+        </svg>
+      </div>
 
       {/* Login Card - NetSuite Style Clean White Card */}
-      <div className="bg-white rounded shadow-lg w-full max-w-md mx-4 border border-gray-200">
-        {/* Logo at top left */}
-        <div className="p-8 pb-6">
+      <div className="bg-white shadow-xl w-full max-w-md mx-4 border border-gray-200 relative z-10" style={{
+        boxShadow: '0 10px 40px rgba(0, 0, 0, 0.15)',
+        borderRadius: '0.75rem' // 增加 50% 圓角，從 rounded-lg (0.5rem/8px) 增加到 0.75rem (12px)
+      }}>
+        {/* Logo centered */}
+        <div className="p-8 pb-6 flex justify-center">
           <NetSuiteLogo />
         </div>
 
@@ -162,7 +359,7 @@ export default function Home() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-black bg-[#e8ebe9]"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-gray-900 bg-white"
                 placeholder="your@email.com"
               />
             </div>
@@ -179,7 +376,8 @@ export default function Home() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-black bg-[#e8ebe9]"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-gray-900"
+                style={{ backgroundColor: '#E0F2F7' }}
                 placeholder="••••••••"
               />
             </div>
@@ -190,11 +388,11 @@ export default function Home() {
                 id="remember"
                 checked={rememberMe}
                 onCheckedChange={(checked) => setRememberMe(checked === true)}
-                className="data-[state=checked]:bg-[#0073C5] data-[state=checked]:border-[#0073C5]"
+                className="border-gray-900 data-[state=checked]:bg-gray-900 data-[state=checked]:border-gray-900"
               />
               <label
                 htmlFor="remember"
-                className="text-sm font-medium text-gray-700 cursor-pointer"
+                className="text-sm font-medium text-gray-500 cursor-pointer"
               >
                 Remember Me
               </label>
@@ -224,7 +422,16 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#28363F] text-white py-2.5 px-4 rounded flex items-center justify-center gap-2 hover:bg-[#354a56] focus:outline-none focus:ring-2 focus:ring-[#28363F] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+              className="w-full text-white py-2.5 px-4 rounded flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+              style={{ 
+                backgroundColor: '#354A56',
+              }}
+              onMouseEnter={(e) => {
+                if (!loading) e.currentTarget.style.backgroundColor = '#3a5562'
+              }}
+              onMouseLeave={(e) => {
+                if (!loading) e.currentTarget.style.backgroundColor = '#354A56'
+              }}
             >
               <Lock className="w-4 h-4" />
               <span>{loading ? '處理中...' : isSignUp ? '註冊' : 'Log In'}</span>
@@ -238,7 +445,10 @@ export default function Home() {
                   // TODO: Implement forgot password functionality
                   setError('忘記密碼功能尚未實現')
                 }}
-                className="text-sm text-[#0073C5] hover:text-[#005A9C] transition-colors"
+                className="text-sm transition-colors hover:underline"
+                style={{ color: '#354A56' }}
+                onMouseEnter={(e) => e.currentTarget.style.color = '#4a6572'}
+                onMouseLeave={(e) => e.currentTarget.style.color = '#354A56'}
               >
                 Forgot your password?
               </button>
@@ -249,23 +459,25 @@ export default function Home() {
           <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-xs text-gray-500 text-center mb-3">
               By clicking on the Log In button, you understand and agree to{' '}
-              <a href="#" className="text-[#0073C5] hover:underline">
+              <a href="#" className="hover:underline transition-colors" style={{ color: '#354A56' }}>
                 Terms of Use
               </a>
               {' '}and{' '}
-              <a href="#" className="text-[#0073C5] hover:underline">
+              <a href="#" className="hover:underline transition-colors" style={{ color: '#354A56' }}>
                 Privacy Policy
               </a>
             </p>
 
             {/* Footer Links */}
             <div className="mt-4 pt-4 border-t border-gray-100">
-              <div className="flex flex-col items-center space-y-2 text-xs">
-                <div className="flex items-center space-x-3 text-[#0073C5]">
-                  <a href="#" className="hover:underline">
-                    NetSuite Status
-                  </a>
-                </div>
+              <div className="flex flex-wrap items-center justify-start gap-x-3 gap-y-1 text-xs text-gray-500">
+                <a href="#" className="hover:underline transition-colors whitespace-nowrap" style={{ color: '#354A56' }}>
+                  Terms of Use for NetSuite Support Portal
+                </a>
+                <span className="text-gray-300">|</span>
+                <a href="#" className="hover:underline transition-colors whitespace-nowrap" style={{ color: '#354A56' }}>
+                  NetSuite Status
+                </a>
               </div>
             </div>
           </div>
