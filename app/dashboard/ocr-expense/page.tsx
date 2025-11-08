@@ -331,9 +331,6 @@ export default function OCRExpensePage() {
           timeoutRef.current = null;
         }
 
-        // 先顯示返回的參數確認數據接得進來
-        alert(`N8N 返回參數:\n\n${JSON.stringify(result, null, 2)}`);
-
         // 處理結果 - 新格式：數組，第一個元素包含 output 和頂層字段
         if (Array.isArray(result.data) && result.data.length > 0) {
           // 新格式：數組中的第一個元素包含 output 對象和頂層元數據
@@ -629,14 +626,14 @@ export default function OCRExpensePage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left Column - Attachments and Preview */}
-            <div className="space-y-4">
+            <div className="space-y-4 flex flex-col">
               {/* Attachments */}
-              <div className="space-y-2">
+              <div className="space-y-2 flex-1 flex flex-col">
                 <Label className="text-sm font-semibold">附件</Label>
                 <div
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
-                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer"
+                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex-1 min-h-[175px] flex flex-col"
                 >
                   <input
                     type="file"
@@ -645,7 +642,7 @@ export default function OCRExpensePage() {
                     onChange={handleFileUpload}
                     className="hidden"
                   />
-                  <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-4">
+                  <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-4 flex-1">
                     {/* Decorative Icon - Leaves with Paperclip */}
                     <div className="flex-shrink-0">
                       <svg
@@ -770,27 +767,27 @@ export default function OCRExpensePage() {
                       </p>
                     </div>
                   </label>
-                </div>
-                {attachments.length > 0 && (
-                  <div className="space-y-2 mt-2">
-                    {attachments.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded"
-                      >
-                        <span className="text-sm truncate flex-1">{file.name}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveFile(index)}
-                          className="h-6 w-6 p-0"
+                  {attachments.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                      {attachments.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded"
                         >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                          <span className="text-sm truncate flex-1">{file.name}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveFile(index)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Receipt Missing */}
@@ -801,6 +798,7 @@ export default function OCRExpensePage() {
                   onCheckedChange={(checked) =>
                     handleInputChange('receiptMissing', checked)
                   }
+                  className="border-gray-300 dark:border-gray-600"
                 />
                 <Label htmlFor="receiptMissing" className="font-normal cursor-pointer">
                   收據遺失
@@ -972,7 +970,11 @@ export default function OCRExpensePage() {
                     onClick={() => {
                       const dateInput = document.getElementById('expenseDate') as HTMLInputElement;
                       if (dateInput) {
-                        dateInput.showPicker?.() || dateInput.click();
+                        if (dateInput.showPicker) {
+                          dateInput.showPicker();
+                        } else {
+                          dateInput.click();
+                        }
                       }
                     }}
                   />
@@ -982,7 +984,7 @@ export default function OCRExpensePage() {
               {/* Type */}
               <div className="space-y-2">
                 <Label htmlFor="type" className="text-sm font-semibold">
-                  費用科目 <span className="text-red-500">*</span>
+                  費用用途 <span className="text-red-500">*</span>
                 </Label>
                 <Select
                   value={formData.type}
@@ -990,7 +992,7 @@ export default function OCRExpensePage() {
                   disabled={loadingCategories}
                 >
                   <SelectTrigger id="type">
-                    <SelectValue placeholder={loadingCategories ? "載入中..." : "選擇費用科目"} />
+                    <SelectValue placeholder={loadingCategories ? "載入中..." : "選擇費用用途"} />
                   </SelectTrigger>
                   <SelectContent>
                     {expenseCategories.length > 0 ? (
