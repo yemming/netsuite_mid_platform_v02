@@ -1,0 +1,24 @@
+{
+  "name": "NetSuite AI Nexus",
+  "short_name": "NetSuite AI",
+  "description": "NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0073C5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-icon.svg",
+      "sizes": "180x180",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

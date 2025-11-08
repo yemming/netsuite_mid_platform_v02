@@ -11,7 +11,13 @@ export const metadata: Metadata = {
   description: 'NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration',
   icons: {
     icon: '/icon.svg',
-    apple: '/icon.svg',
+    apple: '/apple-icon.svg',
+  },
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'NetSuite AI Nexus',
   },
 }
 
