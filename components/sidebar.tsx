@@ -58,7 +58,8 @@ const privatePages: MenuItem[] = [
     icon: Receipt,
     children: [
       {
-        name: 'EPM',
+        name: 'OCR To NetSuite',
+        href: '/dashboard/ocr-expense',
         icon: FileText,
       },
       {
