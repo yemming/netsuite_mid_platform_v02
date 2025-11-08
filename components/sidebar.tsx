@@ -192,7 +192,7 @@ export default function Sidebar() {
         {/* Sidebar Content */}
         <div className="flex flex-col h-full overflow-hidden">
           {/* Top Section - User & Workspace - Sticky to match header */}
-          <div className="sticky top-0 z-50 bg-white dark:bg-[#28363F]">
+          <div className="sticky top-[6px] z-50 bg-white dark:bg-[#28363F]">
             <div className="flex items-center gap-2 px-6 h-[38px] border-b border-gray-200 dark:border-[#3a4f5d]">
             <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
               {/* NetSuite Logo Icon */}
@@ -361,7 +361,7 @@ export default function Sidebar() {
       {isCollapsed && (
         <button
           onClick={() => setIsCollapsed(false)}
-          className="fixed left-0 top-[38px] z-[100] p-2 bg-white dark:bg-[#28363F] border-r border-b border-gray-200 dark:border-[#3a4f5d] text-gray-900 dark:text-white rounded-r-lg hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors shadow-lg"
+          className="fixed left-0 top-[44px] z-[100] p-2 bg-white dark:bg-[#28363F] border-r border-b border-gray-200 dark:border-[#3a4f5d] text-gray-900 dark:text-white rounded-r-lg hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors shadow-lg"
           aria-label="顯示側邊欄"
         >
           <Menu className="w-5 h-5" />

@@ -162,7 +162,7 @@ export default function Home() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-gray-900"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-black bg-[#e8ebe9]"
                 placeholder="your@email.com"
               />
             </div>
@@ -179,7 +179,7 @@ export default function Home() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-gray-900"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded focus:ring-2 focus:ring-[#0073C5] focus:border-[#0073C5] transition-colors text-black bg-[#e8ebe9]"
                 placeholder="••••••••"
               />
             </div>
