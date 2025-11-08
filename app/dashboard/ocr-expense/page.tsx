@@ -952,14 +952,14 @@ export default function OCRExpensePage() {
                     type="date"
                     value={formData.expenseDate}
                     onChange={(e) => handleInputChange('expenseDate', e.target.value)}
-                    className="pr-10"
+                    className="pr-10 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-moz-calendar-picker-indicator]:opacity-0 [&::-moz-calendar-picker-indicator]:absolute [&::-moz-calendar-picker-indicator]:right-0 [&::-moz-calendar-picker-indicator]:w-full [&::-moz-calendar-picker-indicator]:h-full [&::-moz-calendar-picker-indicator]:cursor-pointer"
                     style={{
-                      fontSize: '16px', // iOS Safari 需要至少 16px 才不會自動縮放
+                      fontSize: 'clamp(14px, 2.5vw, 16px)', // 響應式字體：桌面 14px，手機 16px
                       paddingRight: '2.5rem',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
-                      WebkitAppearance: 'none', // 移除 Safari 默認樣式
+                      WebkitAppearance: 'none',
                       appearance: 'none',
                       width: '100%',
                       maxWidth: '100%',
@@ -967,7 +967,15 @@ export default function OCRExpensePage() {
                     }}
                     required
                   />
-                  <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <Calendar 
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 cursor-pointer pointer-events-auto z-10" 
+                    onClick={() => {
+                      const dateInput = document.getElementById('expenseDate') as HTMLInputElement;
+                      if (dateInput) {
+                        dateInput.showPicker?.() || dateInput.click();
+                      }
+                    }}
+                  />
                 </div>
               </div>
 
