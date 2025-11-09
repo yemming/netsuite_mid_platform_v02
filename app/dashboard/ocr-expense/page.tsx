@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2, Copy, Trash2, Check, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2, Copy, Trash2, Check, Eye, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -221,6 +221,62 @@ export default function OCRExpensePage() {
   const [expenseLines, setExpenseLines] = useState<ExpenseReportLine[]>([]);
   const [nextRefNo, setNextRefNo] = useState(1);
   const [useMultiCurrency, setUseMultiCurrency] = useState(false);
+  
+  // 拖拽相關 state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  // 拖拽排序行的處理函數
+  const handleRowDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleRowDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+    setDragOverIndex(index);
+  };
+
+  const handleRowDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleRowDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === dropIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    // 重新排序行
+    const newLines = [...expenseLines];
+    const draggedLine = newLines[draggedIndex];
+    newLines.splice(draggedIndex, 1);
+    newLines.splice(dropIndex, 0, draggedLine);
+
+    // 重新編號所有行，從 1 開始依序遞增
+    const renumberedLines = newLines.map((line, i) => ({
+      ...line,
+      refNo: i + 1,
+    }));
+
+    setExpenseLines(renumberedLines);
+
+    // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
+    const maxRefNo = renumberedLines.length > 0
+      ? Math.max(...renumberedLines.map(line => line.refNo || 0))
+      : 0;
+    setNextRefNo(maxRefNo + 1);
+
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleRowDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
 
   const handleInputChange = (field: string, value: any) => {
     setFormData((prev) => ({
@@ -2293,7 +2349,8 @@ export default function OCRExpensePage() {
                 <TableHeader>
                   <TableRow className="bg-gray-100 dark:bg-gray-800">
                     <TableHead className="w-16 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">參考編號</TableHead>
-                    <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
+                    <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">操作</TableHead>
+                    <TableHead className="w-20 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">日期 <span className="text-red-500">*</span></TableHead>
                     <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別 <span className="text-red-500">*</span></TableHead>
                     {useMultiCurrency && <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">外幣金額</TableHead>}
@@ -2308,7 +2365,6 @@ export default function OCRExpensePage() {
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">部門</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">地點</TableHead>
-                    <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2322,7 +2378,15 @@ export default function OCRExpensePage() {
                     expenseLines.map((line, index) => (
                       <TableRow 
                         key={line.id}
-                        className={line.isProcessing ? "opacity-60 animate-pulse bg-blue-50/30 dark:bg-blue-900/10" : ""}
+                        className={`
+                          ${line.isProcessing ? "opacity-60 animate-pulse bg-blue-50/30 dark:bg-blue-900/10" : ""}
+                          ${draggedIndex === index ? "opacity-50" : ""}
+                          ${dragOverIndex === index ? "border-t-2 border-blue-500 dark:border-blue-400" : ""}
+                        `}
+                        onDragOver={(e) => handleRowDragOver(e, index)}
+                        onDragLeave={handleRowDragLeave}
+                        onDrop={(e) => handleRowDrop(e, index)}
+                        onDragEnd={handleRowDragEnd}
                       >
                         <TableCell className="text-center text-sm px-1">
                           {line.isProcessing ? (
@@ -2333,6 +2397,167 @@ export default function OCRExpensePage() {
                           ) : (
                             line.refNo
                           )}
+                        </TableCell>
+                        <TableCell className="px-1">
+                          <div className="flex gap-1 items-center">
+                            <div
+                              draggable
+                              onDragStart={(e) => {
+                                handleRowDragStart(index);
+                                e.dataTransfer.effectAllowed = 'move';
+                                e.dataTransfer.setData('text/html', '');
+                              }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              className="cursor-move p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors touch-none"
+                              title="拖拽移動"
+                            >
+                              <GripVertical className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                // 刪除指定的行
+                                const newLines = expenseLines.filter((_, i) => i !== index);
+                                
+                                // 重新編號所有剩餘的行，從 1 開始
+                                const renumberedLines = newLines.map((line, i) => ({
+                                  ...line,
+                                  refNo: i + 1,
+                                }));
+                                
+                                setExpenseLines(renumberedLines);
+                                
+                                // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
+                                const maxRefNo = renumberedLines.length > 0
+                                  ? Math.max(...renumberedLines.map(line => line.refNo || 0))
+                                  : 0;
+                                setNextRefNo(maxRefNo + 1);
+                              }}
+                              className="h-7 w-7 p-0"
+                              title="刪除"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                // 建立一個空白的 Expense Line
+                                const newLine: ExpenseReportLine = {
+                                  id: `line-${Date.now()}-${Math.random()}`,
+                                  refNo: 0, // 暫時設為 0，稍後會重新編號
+                                  date: formData.expenseDate || '',
+                                  category: '',
+                                  foreignAmount: '',
+                                  currency: formData.receiptCurrency || 'TWD',
+                                  exchangeRate: '1.00',
+                                  amount: '',
+                                  taxCode: '',
+                                  taxRate: '',
+                                  taxAmt: '',
+                                  grossAmt: '',
+                                  memo: '',
+                                  department: '',
+                                  class: '',
+                                  location: '',
+                                  ocrDetail: '',
+                                  ocrData: {
+                                    invoiceTitle: '',
+                                    invoicePeriod: '',
+                                    invoiceNumber: '',
+                                    invoiceDate: '',
+                                    randomCode: '',
+                                    formatCode: '',
+                                    sellerName: '',
+                                    sellerTaxId: '',
+                                    sellerAddress: '',
+                                    buyerName: '',
+                                    buyerTaxId: '',
+                                    buyerAddress: '',
+                                    untaxedAmount: '',
+                                    taxAmount: '',
+                                    totalAmount: '',
+                                    ocrSuccess: false,
+                                    ocrConfidence: 0,
+                                    ocrDocumentType: '',
+                                    ocrErrors: '',
+                                    ocrWarnings: '',
+                                    ocrErrorCount: 0,
+                                    ocrWarningCount: 0,
+                                    ocrQualityGrade: '',
+                                    ocrFileName: '',
+                                    ocrFileId: '',
+                                    ocrWebViewLink: '',
+                                    ocrProcessedAt: '',
+                                  },
+                                  customer: '',
+                                  projectTask: '',
+                                  billable: false,
+                                  attachFile: '',
+                                  receipt: '',
+                                  isEditing: true,
+                                };
+                                
+                                // 插入新行到指定位置
+                                const newLines = [...expenseLines];
+                                newLines.splice(index + 1, 0, newLine);
+                                
+                                // 重新編號所有行，從 1 開始依序遞增
+                                const renumberedLines = newLines.map((line, i) => ({
+                                  ...line,
+                                  refNo: i + 1,
+                                }));
+                                
+                                setExpenseLines(renumberedLines);
+                                
+                                // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
+                                const maxRefNo = renumberedLines.length > 0
+                                  ? Math.max(...renumberedLines.map(line => line.refNo || 0))
+                                  : 0;
+                                setNextRefNo(maxRefNo + 1);
+                              }}
+                              className="h-7 w-7 p-0"
+                              title="插入"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                // 複製當前行
+                                const newLine: ExpenseReportLine = {
+                                  ...line,
+                                  id: `line-${Date.now()}-${Math.random()}`,
+                                  refNo: 0, // 暫時設為 0，稍後會重新編號
+                                  isEditing: true,
+                                };
+                                
+                                // 插入複製的行到當前行下方
+                                const newLines = [...expenseLines];
+                                newLines.splice(index + 1, 0, newLine);
+                                
+                                // 重新編號所有行，從 1 開始依序遞增
+                                const renumberedLines = newLines.map((line, i) => ({
+                                  ...line,
+                                  refNo: i + 1,
+                                }));
+                                
+                                setExpenseLines(renumberedLines);
+                                
+                                // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
+                                const maxRefNo = renumberedLines.length > 0
+                                  ? Math.max(...renumberedLines.map(line => line.refNo || 0))
+                                  : 0;
+                                setNextRefNo(maxRefNo + 1);
+                              }}
+                              className="h-7 w-7 p-0"
+                              title="複製"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell className="text-sm px-1">
                           {line.isProcessing ? (
@@ -2861,87 +3086,6 @@ export default function OCRExpensePage() {
                               </SelectContent>
                             </Select>
                           )}
-                        </TableCell>
-                        <TableCell className="px-1">
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                const newLines = [...expenseLines];
-                                newLines[index].isEditing = false;
-                                setExpenseLines(newLines);
-                              }}
-                              className="h-7 w-7 p-0"
-                              title="確認"
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                // 刪除指定的行
-                                const newLines = expenseLines.filter((_, i) => i !== index);
-                                
-                                // 重新編號所有剩餘的行，從 1 開始
-                                const renumberedLines = newLines.map((line, i) => ({
-                                  ...line,
-                                  refNo: i + 1,
-                                }));
-                                
-                                setExpenseLines(renumberedLines);
-                                
-                                // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
-                                const maxRefNo = renumberedLines.length > 0
-                                  ? Math.max(...renumberedLines.map(line => line.refNo || 0))
-                                  : 0;
-                                setNextRefNo(maxRefNo + 1);
-                              }}
-                              className="h-7 w-7 p-0"
-                              title="刪除"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                const newLine: ExpenseReportLine = {
-                                  ...line,
-                                  id: `line-${Date.now()}-${Math.random()}`,
-                                  refNo: nextRefNo,
-                                  isEditing: true,
-                                };
-                                setNextRefNo(nextRefNo + 1);
-                                const newLines = [...expenseLines];
-                                newLines.splice(index + 1, 0, newLine);
-                                setExpenseLines(newLines);
-                              }}
-                              className="h-7 w-7 p-0"
-                              title="插入"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                const newLine: ExpenseReportLine = {
-                                  ...line,
-                                  id: `line-${Date.now()}-${Math.random()}`,
-                                  refNo: nextRefNo,
-                                  isEditing: true,
-                                };
-                                setNextRefNo(nextRefNo + 1);
-                                setExpenseLines([...expenseLines, newLine]);
-                              }}
-                              className="h-7 w-7 p-0"
-                              title="複製"
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                          </div>
                         </TableCell>
                       </TableRow>
                     ))
