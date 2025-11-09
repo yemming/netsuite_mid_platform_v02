@@ -11,9 +11,6 @@ export async function POST() {
       SELECT 
         id,
         itemid,
-        description,
-        displayname,
-        servicecode,
         isinactive
       FROM shipitem
       ORDER BY id
@@ -24,12 +21,9 @@ export async function POST() {
       return {
         netsuite_internal_id: parseInt(item.id),
         name: item.itemid || '', // itemid 是實際欄位名
-        description: item.description || null,
-        display_name: item.displayname || null,
-        service_code: item.servicecode || null,
+        // 注意：ns_ship_methods 表中沒有 description, display_name, service_code, updated_at 欄位
         is_inactive: !isActive,
         sync_timestamp: syncTimestamp,
-        updated_at: syncTimestamp,
       };
     },
     conflictColumn: 'netsuite_internal_id',

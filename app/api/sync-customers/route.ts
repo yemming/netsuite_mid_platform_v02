@@ -13,8 +13,6 @@ export async function POST() {
         entityid,
         companyname,
         fullname,
-        altname,
-        isperson,
         firstname,
         lastname,
         email,
@@ -27,20 +25,29 @@ export async function POST() {
     `,
     transformFunction: (item: any, syncTimestamp: string) => {
       const isActive = item.isinactive !== 'T';
-      const isPerson = item.isperson === 'T';
       const name = item.companyname || item.fullname || `${item.firstname || ''} ${item.lastname || ''}`.trim() || '';
+
+      // 處理 subsidiary（如果有的話，取第一個值）
+      let subsidiaryValue = null;
+      if (item.subsidiary) {
+        const subsidiaryStr = String(item.subsidiary).trim();
+        if (subsidiaryStr.includes(',')) {
+          const firstId = subsidiaryStr.split(',')[0].trim();
+          subsidiaryValue = firstId ? parseInt(firstId) : null;
+        } else {
+          subsidiaryValue = parseInt(subsidiaryStr);
+        }
+      }
 
       return {
         netsuite_internal_id: parseInt(item.id),
         entity_id: item.entityid || null,
         name: name,
         company_name: item.companyname || null,
-        alt_name: item.altname || null,
-        is_person: isPerson,
-        first_name: item.firstname || null,
-        last_name: item.lastname || null,
+        // 注意：ns_entities_customers 表中沒有 alt_name, is_person, first_name, last_name 欄位
         email: item.email || null,
         phone: item.phone || null,
+        subsidiary_id: subsidiaryValue, // 所屬公司 ID（取第一個值）
         currency_id: item.currency ? parseInt(item.currency) : null,
         terms_id: item.terms ? parseInt(item.terms) : null,
         is_inactive: !isActive,

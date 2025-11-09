@@ -13,8 +13,6 @@ export async function POST() {
         entityid,
         companyname,
         fullname,
-        altname,
-        isperson,
         email,
         phone,
         currency,
@@ -25,18 +23,30 @@ export async function POST() {
     `,
     transformFunction: (item: any, syncTimestamp: string) => {
       const isActive = item.isinactive !== 'T';
-      const isPerson = item.isperson === 'T';
       const name = item.companyname || item.fullname || '';
+
+      // 處理 subsidiary（如果有的話，取第一個值）
+      // 注意：NetSuite SuiteQL 的 vendor 表可能沒有 subsidiary 欄位
+      let subsidiaryValue = null;
+      if (item.subsidiary) {
+        const subsidiaryStr = String(item.subsidiary).trim();
+        if (subsidiaryStr.includes(',')) {
+          const firstId = subsidiaryStr.split(',')[0].trim();
+          subsidiaryValue = firstId ? parseInt(firstId) : null;
+        } else {
+          subsidiaryValue = parseInt(subsidiaryStr);
+        }
+      }
 
       return {
         netsuite_internal_id: parseInt(item.id),
         entity_id: item.entityid || null,
         name: name,
         company_name: item.companyname || null,
-        alt_name: item.altname || null,
-        is_person: isPerson,
+        // 注意：ns_entities_vendors 表中沒有 alt_name, is_person 欄位
         email: item.email || null,
         phone: item.phone || null,
+        subsidiary_id: subsidiaryValue, // 所屬公司 ID（可能為 null）
         currency_id: item.currency ? parseInt(item.currency) : null,
         terms_id: item.terms ? parseInt(item.terms) : null,
         is_inactive: !isActive,

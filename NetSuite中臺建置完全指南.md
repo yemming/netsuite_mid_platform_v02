@@ -12,6 +12,8 @@
 > - 修正 subsidiary 欄位處理方式（從 TEXT 改為 INTEGER，取第一個值）
 > - 修正 Account 欄位名稱（從 account_search_display_name 改為 acct_name）
 > - 記錄 Item 同步方式的修正（混合使用 SuiteQL + REST API）
+> - 更新客戶、供應商、員工、運送方式表的實際結構差異（移除不存在的欄位）
+> - 記錄 Employee 表沒有 fullname 欄位的特殊情況
 
 ---
 
@@ -671,19 +673,15 @@ CREATE TABLE ns_customer (
   entity_id VARCHAR(255),                         -- 客戶編號 (entityid)
   name VARCHAR(255) NOT NULL,                     -- 公司名稱或個人名稱 (companyname 或 fullname)
   company_name VARCHAR(255),                      -- 公司名稱 (companyname)
-  alt_name VARCHAR(255),                          -- 替代名稱 (altname)
-  
-  -- 個人資訊
-  is_person BOOLEAN DEFAULT FALSE,                -- 是否為個人 (isperson = 'T')
-  first_name VARCHAR(100),                        -- 名字 (firstname，個人用)
-  last_name VARCHAR(100),                         -- 姓氏 (lastname，個人用)
+  -- ⚠️ 注意：實際資料庫中沒有 alt_name, is_person, first_name, last_name 欄位
   
   -- 聯絡資訊
   email VARCHAR(255),                             -- 電子郵件 (email)
   phone VARCHAR(100),                             -- 電話 (phone)
   
   -- 預設值
-  -- ⚠️ 重要：subsidiary 欄位在 NetSuite SuiteQL 中不存在！
+  -- ⚠️ 重要：NetSuite SuiteQL 的 customer 表可能沒有 subsidiary 欄位
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（可能為 null）
   currency_id INTEGER,                            -- 預設幣別 (currency)
   terms_id INTEGER,                               -- 付款條件 (terms)
   
@@ -717,17 +715,15 @@ CREATE TABLE ns_vendor (
   entity_id VARCHAR(255),                         -- 供應商編號 (entityid)
   name VARCHAR(255) NOT NULL,                     -- 公司名稱或個人名稱 (companyname 或 fullname)
   company_name VARCHAR(255),                      -- 公司名稱 (companyname)
-  alt_name VARCHAR(255),                          -- 替代名稱 (altname)
-  
-  -- 個人資訊
-  is_person BOOLEAN DEFAULT FALSE,                -- 是否為個人 (isperson = 'T')
+  -- ⚠️ 注意：實際資料庫中沒有 alt_name, is_person 欄位
   
   -- 聯絡資訊
   email VARCHAR(255),                             -- 電子郵件 (email)
   phone VARCHAR(100),                             -- 電話 (phone)
   
   -- 預設值
-  -- ⚠️ 重要：subsidiary 欄位在 NetSuite SuiteQL 中不存在！（與 Customer 相同）
+  -- ⚠️ 重要：NetSuite SuiteQL 的 vendor 表可能沒有 subsidiary 欄位
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（可能為 null）
   currency_id INTEGER,                            -- 預設幣別 (currency)
   terms_id INTEGER,                               -- 付款條件 (terms)
   
@@ -759,20 +755,13 @@ CREATE TABLE ns_employee (
   
   -- 基本資訊
   entity_id VARCHAR(255),                         -- 員工編號 (entityid)
-  first_name VARCHAR(100),                        -- 名字 (firstname)
-  last_name VARCHAR(100),                         -- 姓氏 (lastname)
-  name VARCHAR(255) NOT NULL,                     -- 完整名稱 (fullname: firstname || ' ' || lastname)
+  name VARCHAR(255) NOT NULL,                     -- 完整名稱（由 firstname + lastname 組合，NetSuite SuiteQL 沒有 fullname 欄位）
   email VARCHAR(255),                             -- 電子郵件 (email)
-  title VARCHAR(100),                             -- 職稱 (title)
+  -- ⚠️ 注意：實際資料庫中沒有 first_name, last_name, title, hire_date, employee_status, employee_type 欄位
   
   -- 組織關係
   department_id INTEGER,                          -- 所屬部門 (department)
   subsidiary_id INTEGER,                          -- 所屬公司 (subsidiary，單一 INTEGER，與 Department/Class 不同)
-  
-  -- 雇用資訊
-  hire_date DATE,                                 -- 雇用日期 (hiredate)
-  employee_status VARCHAR(100),                    -- 員工狀態 (employee_status)
-  employee_type VARCHAR(100),                       -- 員工類型 (employeetype)
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -972,13 +961,7 @@ CREATE TABLE ns_shipitem (
   
   -- ⚠️ 重要：NetSuite 使用 itemid 而不是 name
   name VARCHAR(255) NOT NULL,                     -- 運送方式名稱 (itemid，實際欄位名)
-  description TEXT,                               -- 描述 (description)
-  display_name VARCHAR(255),                      -- 顯示名稱 (displayname)
-  service_code VARCHAR(100),                      -- 服務代碼 (servicecode)
-  
-  -- 所屬公司
-  -- ⚠️ 重要：subsidiary 是字串列表，不是單一 INTEGER
-  subsidiary_ids TEXT,                            -- 所屬公司列表 (subsidiary，字串列表)
+  -- ⚠️ 注意：實際資料庫中沒有 description, display_name, service_code, subsidiary_ids, updated_at 欄位
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -3110,6 +3093,10 @@ async function createProductionOrder(
 | `ns_taxitem` | `ns_tax_codes` | 稅碼表 |
 | `ns_expensecategory` | `ns_expense_categories` | 費用類別表 |
 | `ns_item` | `ns_items` | 產品主檔表 |
+| `ns_customer` | `ns_entities_customers` | 客戶表 |
+| `ns_vendor` | `ns_entities_vendors` | 供應商表 |
+| `ns_employee` | `ns_entities_employees` | 員工表 |
+| `ns_shipitem` | `ns_ship_methods` | 運送方式表 |
 
 **建議**：重建資料庫時，請使用實際的表名（複數形式），或統一使用單數形式。目前程式碼使用複數形式的表名。
 
@@ -3389,6 +3376,124 @@ full_name: item.displaynamewithhierarchy || null,
 3. 批次處理（每批 10 個）並行查詢，避免 API 限制
 4. 如果 REST API 查詢失敗，使用 SuiteQL 的資料作為備用
 
+#### 9.1.11 客戶表（ns_entities_customers）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_entities_customers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  entity_id VARCHAR(255),
+  name VARCHAR(255) NOT NULL,
+  company_name VARCHAR(255),
+  email VARCHAR(255),
+  phone VARCHAR(100),
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（可能為 null）
+  currency_id INTEGER,
+  terms_id INTEGER,
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- alt_name, is_person, first_name, last_name
+```
+
+**同步邏輯**：
+- 使用 `companyname` 或 `fullname` 作為 `name`
+- NetSuite SuiteQL 的 `customer` 表可能沒有 `subsidiary` 欄位，所以 `subsidiary_id` 可能為 null
+- 不包含個人資訊欄位（`is_person`, `first_name`, `last_name`）
+
+#### 9.1.12 供應商表（ns_entities_vendors）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_entities_vendors (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  entity_id VARCHAR(255),
+  name VARCHAR(255) NOT NULL,
+  company_name VARCHAR(255),
+  email VARCHAR(255),
+  phone VARCHAR(100),
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（可能為 null）
+  currency_id INTEGER,
+  terms_id INTEGER,
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- alt_name, is_person
+```
+
+**同步邏輯**：
+- 使用 `companyname` 或 `fullname` 作為 `name`
+- NetSuite SuiteQL 的 `vendor` 表可能沒有 `subsidiary` 欄位，所以 `subsidiary_id` 可能為 null
+- 不包含個人資訊欄位（`is_person`）
+
+#### 9.1.13 員工表（ns_entities_employees）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_entities_employees (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  entity_id VARCHAR(255),
+  name VARCHAR(255) NOT NULL,                     -- 由 firstname + lastname 組合
+  email VARCHAR(255),
+  department_id INTEGER,
+  subsidiary_id INTEGER,
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- first_name, last_name, title, hire_date, employee_status, employee_type
+```
+
+**同步邏輯**：
+- ⚠️ **重要**：NetSuite SuiteQL 的 `employee` 表**沒有 `fullname` 欄位**
+- 需要自己組合：`name = firstname + ' ' + lastname`
+- 如果沒有 firstname 和 lastname，則使用 `entityid` 作為備用
+- 不包含職稱、雇用日期等詳細資訊
+
+#### 9.1.14 運送方式表（ns_ship_methods）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_ship_methods (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,                     -- 使用 itemid
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- description, display_name, service_code, subsidiary_ids, updated_at
+```
+
+**同步邏輯**：
+- 只同步基本資訊（名稱、是否停用）
+- 使用 `itemid` 作為 `name`
+- 不包含描述、顯示名稱、服務代碼等詳細資訊
+
 ### 9.2 主要差異與注意事項（原內容保留）
 
 #### 1. Subsidiary 欄位格式差異
@@ -3418,14 +3523,15 @@ full_name: item.displaynamewithhierarchy || null,
 - `full_name` 使用 `displaynamewithhierarchy`
 - `acct_number` 可能為 NULL（NetSuite SuiteQL 中不存在此欄位）
 
-#### 3. Customer/Vendor 無 Subsidiary 欄位
+#### 3. Customer/Vendor/Employee 的 Subsidiary 欄位
 
 **⚠️ 關鍵發現**：
-- Customer 和 Vendor 的 `subsidiary` 欄位在 NetSuite SuiteQL 中**不存在**
-- 需要透過其他方式關聯（如交易記錄中的 subsidiary）
+- Customer 和 Vendor 的 `subsidiary` 欄位在 NetSuite SuiteQL 中**可能不存在**（視 NetSuite 設定而定）
+- Employee 的 `subsidiary` 是單一 INTEGER（與 Department/Class 不同）
 
-**處理方式**：
-- 移除 `subsidiary_id` 欄位
+**實際處理方式（2025-11-09 更新）**：
+- ⚠️ **實際資料庫使用 `subsidiary_id` (INTEGER)**，可能為 null（如果 NetSuite SuiteQL 沒有 subsidiary 欄位）
+- 如果 NetSuite SuiteQL 有 subsidiary 欄位，同步時取第一個值轉換為 INTEGER
 - 如需關聯，可透過交易記錄或使用 REST API 查詢
 
 #### 4. Tax Code 和 Ship Method 使用 itemid
