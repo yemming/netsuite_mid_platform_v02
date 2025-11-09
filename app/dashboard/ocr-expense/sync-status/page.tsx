@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Database, RefreshCw, CheckCircle2, XCircle, AlertCircle, Clock } from 'lucide-react';
+import { Database, RefreshCw, CheckCircle2, XCircle, AlertCircle, Clock, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { StatusLight } from '@/components/ui/status-light';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -20,6 +21,7 @@ interface TableSyncStatus {
 interface SyncAction {
   tableName: string;
   syncing: boolean;
+  pending: boolean; // 待同步狀態
   status: 'success' | 'error' | null;
   message: string;
   data?: any;
@@ -77,10 +79,16 @@ function getTableDetailRoute(tableName: string): string | null {
   return route ? `/dashboard/ocr-expense/sync-status/${route}` : null;
 }
 
+type SortField = 'label' | 'tableName' | 'priority' | 'totalRecords' | 'lastSyncTime' | 'syncStatus';
+type SortDirection = 'asc' | 'desc' | null;
+
 export default function SyncStatusPage() {
   const [tableStatuses, setTableStatuses] = useState<TableSyncStatus[]>([]);
   const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [syncActions, setSyncActions] = useState<Record<string, SyncAction>>({});
+  const [syncingAll, setSyncingAll] = useState(false); // 是否正在執行全部同步
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
   // 載入所有表的同步狀態
   const loadSyncStatuses = async () => {
@@ -116,7 +124,7 @@ export default function SyncStatusPage() {
   const handleSyncTable = async (tableName: string, apiPath: string) => {
     setSyncActions(prev => ({
       ...prev,
-      [tableName]: { tableName, syncing: true, status: null, message: '' },
+      [tableName]: { tableName, syncing: true, pending: false, status: null, message: '' },
     }));
 
     try {
@@ -134,6 +142,7 @@ export default function SyncStatusPage() {
         [tableName]: {
           tableName,
           syncing: false,
+          pending: false,
           status: response.ok && data.success ? 'success' : 'error',
           message: data.message || data.error || '同步失敗',
           data: data.data,
@@ -152,11 +161,97 @@ export default function SyncStatusPage() {
         [tableName]: {
           tableName,
           syncing: false,
+          pending: false,
           status: 'error',
           message: error.message || '網路連線錯誤',
         },
       }));
     }
+  };
+
+  // 全部同步：依序執行所有表的同步
+  const handleSyncAll = async () => {
+    if (syncingAll) return; // 如果正在執行全部同步，則不重複執行
+
+    setSyncingAll(true);
+    
+    // 過濾掉停用的表
+    const enabledTables = TABLE_CONFIG.filter(table => !table.disabled);
+    
+    // 初始化所有表的狀態為「待同步」
+    const initialActions: Record<string, SyncAction> = {};
+    enabledTables.forEach(table => {
+      initialActions[table.name] = {
+        tableName: table.name,
+        syncing: false,
+        pending: true,
+        status: null,
+        message: '待同步',
+      };
+    });
+    setSyncActions(initialActions);
+
+    // 依序執行每張表的同步
+    for (let i = 0; i < enabledTables.length; i++) {
+      const table = enabledTables[i];
+      
+      // 更新當前表為「同步中」
+      setSyncActions(prev => ({
+        ...prev,
+        [table.name]: {
+          ...prev[table.name],
+          syncing: true,
+          pending: false,
+          message: '同步中...',
+        },
+      }));
+
+      try {
+        const response = await fetch(table.api, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const data = await response.json();
+
+        setSyncActions(prev => ({
+          ...prev,
+          [table.name]: {
+            tableName: table.name,
+            syncing: false,
+            pending: false,
+            status: response.ok && data.success ? 'success' : 'error',
+            message: data.message || data.error || '同步失敗',
+            data: data.data,
+          },
+        }));
+
+        // 每張表之間稍作延遲，避免 API 壓力過大
+        if (i < enabledTables.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error: any) {
+        setSyncActions(prev => ({
+          ...prev,
+          [table.name]: {
+            tableName: table.name,
+            syncing: false,
+            pending: false,
+            status: 'error',
+            message: error.message || '網路連線錯誤',
+          },
+        }));
+      }
+    }
+
+    setSyncingAll(false);
+    
+    // 全部完成後重新載入狀態
+    setTimeout(() => {
+      loadSyncStatuses();
+    }, 1500);
   };
 
   // 格式化時間
@@ -190,6 +285,233 @@ export default function SyncStatusPage() {
     return 'text-red-600 dark:text-red-400';
   };
 
+  // 獲取同步狀態燈號
+  const getSyncStatusLight = (tableName: string, syncAction: SyncAction | undefined, status: TableSyncStatus) => {
+    // 如果正在同步中，顯示灰色（處理中）
+    if (syncAction?.syncing) {
+      return (
+        <StatusLight status="pending" size={16} title="同步中..." />
+      );
+    }
+
+    // 如果有同步記錄，優先使用同步記錄的狀態
+    if (syncAction && syncAction.status !== null) {
+      if (syncAction.status === 'success') {
+        // 成功 → 綠燈
+        return (
+          <StatusLight 
+            status="success" 
+            size={16} 
+            title={`上次同步成功: ${syncAction.message || '無訊息'}`} 
+          />
+        );
+      } else if (syncAction.status === 'error') {
+        // 失敗 → 紅燈
+        return (
+          <StatusLight 
+            status="error" 
+            size={16} 
+            title={`上次同步失敗: ${syncAction.message || '未知錯誤'}`} 
+          />
+        );
+      }
+    }
+
+    // 如果沒有同步記錄，根據資料狀態判斷
+    // 檢查資料狀態（從 tableStatuses）
+    if (!status.success) {
+      // 資料查詢失敗 → 紅燈
+      return (
+        <StatusLight 
+          status="error" 
+          size={16} 
+          title={`資料查詢失敗: ${status.error || '未知錯誤'}`} 
+        />
+      );
+    }
+
+    if (status.lastSyncTime) {
+      // 有同步時間，檢查是否過期
+      const syncTime = new Date(status.lastSyncTime);
+      const now = new Date();
+      const diffHours = (now.getTime() - syncTime.getTime()) / 3600000;
+      
+      if (diffHours > 168) {
+        // 超過 7 天 → 紅燈（太久沒同步）
+        return (
+          <StatusLight status="error" size={16} title="超過 7 天未同步" />
+        );
+      } else if (diffHours > 24) {
+        // 超過 1 天 → 黃燈（需要關注）
+        return (
+          <StatusLight status="warning" size={16} title="超過 1 天未同步" />
+        );
+      } else {
+        // 24 小時內 → 綠燈（正常）
+        return (
+          <StatusLight status="success" size={16} title="同步狀態正常" />
+        );
+      }
+    }
+
+    // 沒有同步記錄 → 灰燈（從未同步）
+    return (
+      <StatusLight status="none" size={16} title="從未同步" />
+    );
+  };
+
+  // 獲取同步狀態數值（用於排序）
+  const getSyncStatusValue = (tableName: string, syncAction: SyncAction | undefined, status: TableSyncStatus): number => {
+    // 排序順序：綠燈(3) > 黃燈(2) > 灰燈(1) > 紅燈(0)
+    
+    if (syncAction?.syncing) {
+      return 1; // 處理中
+    }
+
+    if (syncAction) {
+      if (syncAction.status === 'success') return 3; // 成功
+      if (syncAction.status === 'error') return 0; // 失敗
+    }
+
+    if (!status.success) return 0; // 資料查詢失敗
+
+    if (status.lastSyncTime) {
+      const syncTime = new Date(status.lastSyncTime);
+      const now = new Date();
+      const diffHours = (now.getTime() - syncTime.getTime()) / 3600000;
+      
+      if (diffHours > 168) return 0; // 超過 7 天
+      if (diffHours > 24) return 2; // 超過 1 天
+      return 3; // 24 小時內
+    }
+
+    return 1; // 從未同步
+  };
+
+  // 處理排序
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // 如果點擊同一個欄位，切換排序方向
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField(null);
+      } else {
+        setSortDirection('asc');
+      }
+    } else {
+      // 點擊新欄位，設為升序
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // 獲取排序圖標
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 text-gray-400" />;
+    }
+    if (sortDirection === 'asc') {
+      return <ArrowUp className="h-4 w-4 ml-1 text-[#28363F] dark:text-[#5a7885]" />;
+    }
+    if (sortDirection === 'desc') {
+      return <ArrowDown className="h-4 w-4 ml-1 text-[#28363F] dark:text-[#5a7885]" />;
+    }
+    return <ArrowUpDown className="h-4 w-4 ml-1 text-gray-400" />;
+  };
+
+  // 排序表格資料
+  const getSortedTables = () => {
+    if (!sortField || !sortDirection) {
+      return TABLE_CONFIG;
+    }
+
+    return [...TABLE_CONFIG].sort((a, b) => {
+      const statusA = tableStatuses.find(s => s.tableName === a.name) || {
+        tableName: a.name,
+        label: a.label,
+        success: false,
+        totalRecords: 0,
+        lastSyncTime: null,
+        lastUpdateTime: null,
+      };
+      const statusB = tableStatuses.find(s => s.tableName === b.name) || {
+        tableName: b.name,
+        label: b.label,
+        success: false,
+        totalRecords: 0,
+        lastSyncTime: null,
+        lastUpdateTime: null,
+      };
+
+      let valueA: any;
+      let valueB: any;
+
+      switch (sortField) {
+        case 'label':
+          valueA = statusA.label;
+          valueB = statusB.label;
+          break;
+        case 'tableName':
+          valueA = a.name;
+          valueB = b.name;
+          break;
+        case 'priority':
+          // 優先級排序：最高 > 高 > 中 > 低
+          // 支援帶 emoji 的優先級（如 "🔴 最高"）
+          const priorityOrder: Record<string, number> = { 
+            '最高': 4, '🔴 最高': 4,
+            '高': 3, '🔴 高': 3,
+            '中': 2, '🟡 中': 2,
+            '低': 1, '🟢 低': 1
+          };
+          // 提取優先級文字（移除 emoji）
+          const getPriorityValue = (priority: string) => {
+            const cleanPriority = priority.replace(/[🔴🟡🟢]/g, '').trim();
+            return priorityOrder[priority] || priorityOrder[cleanPriority] || 0;
+          };
+          valueA = getPriorityValue(a.priority);
+          valueB = getPriorityValue(b.priority);
+          break;
+        case 'totalRecords':
+          valueA = statusA.totalRecords;
+          valueB = statusB.totalRecords;
+          break;
+        case 'lastSyncTime':
+          valueA = statusA.lastSyncTime ? new Date(statusA.lastSyncTime).getTime() : 0;
+          valueB = statusB.lastSyncTime ? new Date(statusB.lastSyncTime).getTime() : 0;
+          break;
+        case 'syncStatus':
+          const syncActionA = syncActions[a.name];
+          const syncActionB = syncActions[b.name];
+          valueA = getSyncStatusValue(a.name, syncActionA, statusA);
+          valueB = getSyncStatusValue(b.name, syncActionB, statusB);
+          break;
+        default:
+          return 0;
+      }
+
+      // 處理 null/undefined 值
+      if (valueA == null) valueA = sortDirection === 'asc' ? Infinity : -Infinity;
+      if (valueB == null) valueB = sortDirection === 'asc' ? Infinity : -Infinity;
+
+      // 字串比較
+      if (typeof valueA === 'string' && typeof valueB === 'string') {
+        return sortDirection === 'asc'
+          ? valueA.localeCompare(valueB, 'zh-TW')
+          : valueB.localeCompare(valueA, 'zh-TW');
+      }
+
+      // 數值比較
+      if (sortDirection === 'asc') {
+        return valueA > valueB ? 1 : valueA < valueB ? -1 : 0;
+      } else {
+        return valueA < valueB ? 1 : valueA > valueB ? -1 : 0;
+      }
+    });
+  };
+
   return (
     <div className="p-8">
       <div className="mb-8">
@@ -216,13 +538,14 @@ export default function SyncStatusPage() {
                 </div>
               </div>
               <Button
-                onClick={loadSyncStatuses}
-                disabled={loadingStatuses}
-                variant="outline"
+                onClick={handleSyncAll}
+                disabled={loadingStatuses || syncingAll}
+                variant="default"
                 size="sm"
+                className="bg-[#28363F] hover:bg-[#354a56] text-white"
               >
-                <RefreshCw className={`h-4 w-4 mr-2 ${loadingStatuses ? 'animate-spin' : ''}`} />
-                重新整理
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncingAll ? 'animate-spin' : ''}`} />
+                {syncingAll ? '同步中...' : '全部同步'}
               </Button>
             </div>
           </CardHeader>
@@ -237,21 +560,67 @@ export default function SyncStatusPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[200px]">表名稱</TableHead>
-                      <TableHead className="w-[180px]">資料庫表名</TableHead>
-                      <TableHead className="w-[100px]">優先級</TableHead>
-                      <TableHead className="w-[120px]">
-                        <div className="flex justify-end">記錄數</div>
+                      <TableHead className="w-[100px]">
+                        <button
+                          onClick={() => handleSort('syncStatus')}
+                          className="flex items-center hover:text-[#28363F] dark:hover:text-[#5a7885] transition-colors"
+                        >
+                          同步狀態
+                          {getSortIcon('syncStatus')}
+                        </button>
                       </TableHead>
-                      <TableHead className="w-[180px]">最後同步時間</TableHead>
-                      <TableHead className="w-[180px]">最後更新時間</TableHead>
+                      <TableHead className="w-[200px]">
+                        <button
+                          onClick={() => handleSort('label')}
+                          className="flex items-center hover:text-[#28363F] dark:hover:text-[#5a7885] transition-colors"
+                        >
+                          表名稱
+                          {getSortIcon('label')}
+                        </button>
+                      </TableHead>
+                      <TableHead className="w-[180px]">
+                        <button
+                          onClick={() => handleSort('tableName')}
+                          className="flex items-center hover:text-[#28363F] dark:hover:text-[#5a7885] transition-colors"
+                        >
+                          資料庫表名
+                          {getSortIcon('tableName')}
+                        </button>
+                      </TableHead>
+                      <TableHead className="w-[100px]">
+                        <button
+                          onClick={() => handleSort('priority')}
+                          className="flex items-center hover:text-[#28363F] dark:hover:text-[#5a7885] transition-colors"
+                        >
+                          優先級
+                          {getSortIcon('priority')}
+                        </button>
+                      </TableHead>
+                      <TableHead className="w-[120px]">
+                        <button
+                          onClick={() => handleSort('totalRecords')}
+                          className="flex items-center justify-end w-full hover:text-[#28363F] dark:hover:text-[#5a7885] transition-colors"
+                        >
+                          記錄數
+                          {getSortIcon('totalRecords')}
+                        </button>
+                      </TableHead>
+                      <TableHead className="w-[180px]">
+                        <button
+                          onClick={() => handleSort('lastSyncTime')}
+                          className="flex items-center hover:text-[#28363F] dark:hover:text-[#5a7885] transition-colors"
+                        >
+                          最後同步時間
+                          {getSortIcon('lastSyncTime')}
+                        </button>
+                      </TableHead>
                       <TableHead className="w-[120px]">
                         <div className="flex justify-end">操作</div>
                       </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {TABLE_CONFIG.map((table) => {
+                    {getSortedTables().map((table) => {
                       const status = tableStatuses.find(s => s.tableName === table.name) || {
                         tableName: table.name,
                         label: table.label,
@@ -262,9 +631,15 @@ export default function SyncStatusPage() {
                       };
                       const syncAction = syncActions[table.name];
                       const isSyncing = syncAction?.syncing || false;
+                      const isPending = syncAction?.pending || false;
 
                       return (
                         <TableRow key={table.name}>
+                          <TableCell>
+                            <div className="flex items-center justify-center">
+                              {getSyncStatusLight(table.name, syncAction, status)}
+                            </div>
+                          </TableCell>
                           <TableCell className="font-medium">
                             {status.label}
                           </TableCell>
@@ -298,34 +673,35 @@ export default function SyncStatusPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <Clock className={`h-4 w-4 ${getStatusColor(status)}`} />
-                              <span className={getStatusColor(status)}>{formatTime(status.lastSyncTime)}</span>
+                              <Clock className="h-4 w-4 text-foreground" />
+                              <span className="text-foreground">{formatTime(status.lastSyncTime)}</span>
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm text-muted-foreground">
-                              {/* 優先顯示 sync_timestamp，如果沒有則顯示 lastUpdateTime */}
-                              {formatTime(status.lastSyncTime || status.lastUpdateTime)}
-                            </span>
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end">
                               <Button
                                 onClick={() => handleSyncTable(table.name, table.api)}
-                                disabled={isSyncing || table.disabled}
+                                disabled={isSyncing || isPending || table.disabled || syncingAll}
                                 size="sm"
                                 variant="outline"
                                 className={`${
                                   table.disabled
                                     ? 'bg-gray-100 dark:bg-muted text-gray-400 dark:text-muted-foreground cursor-not-allowed'
+                                    : isPending
+                                    ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-700'
                                     : 'bg-[#28363F] hover:bg-[#354a56] text-white border-[#28363F]'
                                 }`}
-                                title={table.disabled ? table.disabledReason : ''}
+                                title={table.disabled ? table.disabledReason : isPending ? '等待同步中...' : ''}
                               >
                                 {isSyncing ? (
                                   <>
                                     <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
                                     同步中
+                                  </>
+                                ) : isPending ? (
+                                  <>
+                                    <Clock className="h-3 w-3 mr-1" />
+                                    待同步
                                   </>
                                 ) : table.disabled ? (
                                   <>
