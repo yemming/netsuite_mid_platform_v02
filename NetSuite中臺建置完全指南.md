@@ -1,10 +1,16 @@
 # NetSuite 串接中臺建置完全指南
 ## 從零到一的實戰手冊
 
-> **文檔版本**: v1.1  
+> **文檔版本**: v1.2  
 > **最後更新**: 2025-11-09  
 > **作者**: Claude x 你的團隊  
 > **適用場景**: POS、EC、WMS、MES 系統串接 NetSuite
+> 
+> **v1.2 更新內容（2025-11-09）**：
+> - 新增「12. 報支審核流程完整實作」章節，詳細記錄報支審核系統的完整研發過程
+> - 重點記錄「資料雙向寫回機制」：Supabase → NetSuite 和 NetSuite → Supabase 的完整流程
+> - 記錄 Supabase Storage 整合、編輯功能、效能優化等實作細節
+> - 新增 API 端點說明和資料流圖
 > 
 > **v1.1 更新內容（2025-11-09）**：
 > - 新增「9.1 實際資料庫結構與指南的差異」章節，記錄實際 Supabase 資料庫結構與指南的差異
@@ -36,6 +42,13 @@
   - [9.4 同步表維護與擴充](#94-同步表維護與擴充)
 - [10. 常見問題與陷阱](#10-常見問題與陷阱)
 - [11. 附錄](#11-附錄)
+- [12. 報支審核流程完整實作](#12-報支審核流程完整實作)
+  - [12.1 系統架構與資料流](#121-系統架構與資料流)
+  - [12.2 資料雙向寫回機制](#122-資料雙向寫回機制)
+  - [12.3 API 端點實作](#123-api-端點實作)
+  - [12.4 前端頁面實作](#124-前端頁面實作)
+  - [12.5 效能優化策略](#125-效能優化策略)
+  - [12.6 錯誤處理與重試機制](#126-錯誤處理與重試機制)
 
 ---
 
@@ -4264,7 +4277,660 @@ ORDER BY created_at DESC LIMIT 10;
 
 ---
 
-## 12. 🎉 結語
+## 12. 報支審核流程完整實作
+
+> **本章節記錄報支審核系統的完整研發過程，重點說明「資料雙向寫回機制」的實作細節。**  
+> **最後更新**: 2025-11-09
+
+### 12.1 系統架構與資料流
+
+報支審核系統採用「中介表 + 審核層」的設計模式，確保資料在寫入 NetSuite 前經過財務人員的審核。
+
+#### 12.1.1 整體架構
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    報支審核系統架構                            │
+└─────────────────────────────────────────────────────────────┘
+
+使用者填寫報支表單
+    ↓
+[建立報支項目 API]
+    ↓
+expense_reviews 表（狀態：pending）
+    ↓
+財務人員審核頁面
+    ├─ 查看待審核報支
+    ├─ 編輯報支資料（可選）
+    └─ 審核決策（通過/拒絕/取消）
+    ↓
+[審核通過]
+    ↓
+[自動同步到 NetSuite API]
+    ↓
+NetSuite Expense Report（建立成功）
+    ↓
+[寫回 expense_reviews 表]
+    ├─ netsuite_internal_id
+    ├─ netsuite_tran_id
+    ├─ netsuite_url
+    └─ netsuite_sync_status = 'success'
+```
+
+#### 12.1.2 資料流圖
+
+**階段 1：提交報支**
+```
+使用者 → 前端表單 → /api/create-expense-report → expense_reviews 表
+                                                      ↓
+                                                 狀態：pending
+                                                 附件：Supabase Storage
+```
+
+**階段 2：財務審核**
+```
+財務人員 → 報支審核頁面 → 查看/編輯 → 審核決策
+                                              ↓
+                                    [更新 expense_reviews]
+                                    review_status = 'approved'
+```
+
+**階段 3：NetSuite 同步（關鍵：資料雙向寫回）**
+```
+expense_reviews 表（已審核通過）
+    ↓
+[查詢主檔 NetSuite ID]
+    ├─ ns_subsidiaries → subsidiary.netsuite_internal_id
+    ├─ ns_entities_employees → employee.netsuite_internal_id
+    ├─ ns_currencies → currency.netsuite_internal_id
+    └─ ns_expense_categories → category.netsuite_internal_id
+    ↓
+[組裝 NetSuite Payload]
+    ↓
+[呼叫 NetSuite REST API]
+    POST /record/v1/expenseReport
+    ↓
+NetSuite 建立 Expense Report
+    ↓
+[NetSuite 返回]
+    ├─ id (Internal ID)
+    ├─ tranId (交易編號)
+    └─ Location header (包含 ID)
+    ↓
+[寫回 expense_reviews 表] ⭐ 關鍵：資料雙向寫回
+    ├─ netsuite_internal_id ← NetSuite 返回的 id
+    ├─ netsuite_tran_id ← NetSuite 返回的 tranId
+    ├─ netsuite_url ← 生成的 NetSuite UI 連結
+    ├─ netsuite_sync_status = 'success'
+    ├─ netsuite_synced_at ← 同步時間
+    ├─ netsuite_request_payload ← 發送的 JSON（除錯用）
+    └─ netsuite_response_payload ← NetSuite 返回的 JSON（除錯用）
+    ↓
+[同時寫入 transaction_references 表]
+    記錄交易對應關係，用於追蹤
+```
+
+### 12.2 資料雙向寫回機制 ⭐ 核心設計
+
+**⚠️ 重要**：這是報支審核系統的核心設計，確保 Supabase 和 NetSuite 之間的資料一致性。
+
+#### 12.2.1 寫回流程詳解
+
+**方向 1：Supabase → NetSuite（寫出）**
+
+```typescript
+// 1. 從 expense_reviews 表讀取資料
+const review = await supabase
+  .from('expense_reviews')
+  .select('*')
+  .eq('id', review_id)
+  .single();
+
+// 2. 查詢主檔的 NetSuite Internal ID（並行查詢以提升效能）
+const [subsidiary, employee, currency, category] = await Promise.all([
+  supabase.from('ns_subsidiaries').select('netsuite_internal_id').eq('id', review.subsidiary_id),
+  supabase.from('ns_entities_employees').select('netsuite_internal_id').eq('id', review.employee_id),
+  supabase.from('ns_currencies').select('netsuite_internal_id').eq('id', review.currency_id),
+  supabase.from('ns_expense_categories').select('netsuite_internal_id').eq('id', review.expense_category_id),
+]);
+
+// 3. 組裝 NetSuite Payload
+const expenseReportPayload = {
+  recordType: 'expenseReport',
+  subsidiary: { id: subsidiary.netsuite_internal_id.toString() },
+  entity: { id: employee.netsuite_internal_id.toString() },
+  currency: { id: currency.netsuite_internal_id.toString() },
+  trandate: review.expense_date,
+  expense: {
+    items: [{
+      expensedate: review.expense_date,
+      category: { id: category.netsuite_internal_id.toString() },
+      amount: review.receipt_amount,
+      currency: { id: currency.netsuite_internal_id.toString() },
+      memo: review.description || '',
+    }]
+  }
+};
+
+// 4. 呼叫 NetSuite API
+const netsuiteResponse = await netsuite.createRecord('expenseReport', expenseReportPayload);
+```
+
+**方向 2：NetSuite → Supabase（寫回）⭐ 關鍵**
+
+```typescript
+// 1. 從 NetSuite 回應中提取資料
+const netsuiteInternalId = parseInt(netsuiteResponse.id); // 或從 Location header 提取
+const netsuiteTranId = netsuiteResponse.tranId;
+
+// 2. 生成 NetSuite UI 連結
+const netsuiteUrl = `https://${accountId}.app.netsuite.com/app/accounting/transactions/exprept.nl?id=${netsuiteInternalId}&whence=`;
+
+// 3. 寫回 expense_reviews 表 ⭐ 關鍵：確保資料雙向同步
+await supabase
+  .from('expense_reviews')
+  .update({
+    netsuite_sync_status: 'success',
+    netsuite_internal_id: netsuiteInternalId,        // ← NetSuite 返回的 ID
+    netsuite_tran_id: netsuiteTranId,                // ← NetSuite 返回的交易編號
+    netsuite_url: netsuiteUrl,                       // ← 生成的 NetSuite UI 連結
+    netsuite_synced_at: new Date().toISOString(),
+    netsuite_sync_error: null,
+    netsuite_request_payload: expenseReportPayload,  // ← 發送的 JSON（除錯用）
+    netsuite_response_payload: netsuiteResponse,     // ← NetSuite 返回的 JSON（除錯用）
+  })
+  .eq('id', review_id);
+
+// 4. 同時寫入 transaction_references 表（追蹤用）
+await supabase
+  .from('transaction_references')
+  .insert({
+    source_system: 'EXPENSE_REVIEW',
+    source_transaction_id: review_id,
+    source_transaction_type: 'ExpenseReport',
+    netsuite_record_type: 'expenseReport',
+    netsuite_internal_id: netsuiteInternalId,        // ← NetSuite 返回的 ID
+    netsuite_tran_id: netsuiteTranId,                // ← NetSuite 返回的交易編號
+    status: 'success',
+    request_payload: expenseReportPayload,
+    response_payload: netsuiteResponse,
+    synced_at: new Date().toISOString(),
+  });
+```
+
+#### 12.2.2 寫回欄位對照表
+
+| Supabase 欄位 | NetSuite 來源 | 說明 |
+|--------------|--------------|------|
+| `netsuite_internal_id` | `netsuiteResponse.id` 或 `Location` header | NetSuite 的 Internal ID（用於後續查詢） |
+| `netsuite_tran_id` | `netsuiteResponse.tranId` | NetSuite 的交易編號（如 ER-12345） |
+| `netsuite_url` | 生成（基於 `netsuite_internal_id`） | NetSuite UI 連結（直接開啟該 Expense Report） |
+| `netsuite_sync_status` | 設定為 `'success'` | 同步狀態標記 |
+| `netsuite_synced_at` | `new Date().toISOString()` | 同步時間戳記 |
+| `netsuite_request_payload` | `expenseReportPayload` | 發送給 NetSuite 的完整 JSON（除錯用） |
+| `netsuite_response_payload` | `netsuiteResponse` | NetSuite 返回的完整 JSON（除錯用） |
+
+#### 12.2.3 為什麼需要寫回？
+
+1. **追蹤對應關係**：可以從 `expense_reviews` 表直接查詢到對應的 NetSuite 記錄
+2. **錯誤排查**：`netsuite_request_payload` 和 `netsuite_response_payload` 可以幫助除錯
+3. **UI 連結**：`netsuite_url` 讓使用者可以直接點擊連結開啟 NetSuite 中的 Expense Report
+4. **狀態管理**：`netsuite_sync_status` 讓前端可以顯示同步狀態（待同步、同步中、成功、失敗）
+5. **避免重複同步**：檢查 `netsuite_sync_status === 'success'` 可以避免重複同步
+
+### 12.3 API 端點實作
+
+#### 12.3.1 建立報支項目 API
+
+**端點**：`POST /api/create-expense-report`
+
+**功能**：將使用者填寫的報支資料寫入 `expense_reviews` 表（狀態為 `pending`）
+
+**資料流**：
+```
+前端表單資料
+    ↓
+驗證必填欄位（employee_id, expense_category_id, subsidiary_id, currency_id）
+    ↓
+上傳附件到 Supabase Storage（如果有的話）
+    ↓
+寫入 expense_reviews 表
+    ├─ review_status = 'pending'
+    ├─ attachment_url = Supabase Storage URL
+    └─ OCR 資料（如果有的話）
+    ↓
+返回成功
+```
+
+**關鍵實作**：
+- 驗證必填欄位是否存在於主檔表中
+- 支援 Supabase Storage 上傳（優先）和 Base64 備用
+- OCR 資料為選填（允許沒有 OCR 的報支）
+
+#### 12.3.2 更新報支審核資料 API
+
+**端點**：`PUT /api/update-expense-review`
+
+**功能**：讓財務人員可以修改報支資料
+
+**關鍵邏輯**：
+- 如果修改了關鍵欄位（`expense_date`, `expense_category_id`, `employee_id`, `subsidiary_id`, `receipt_amount`, `currency_id`）且已審核通過，會重置 NetSuite 同步狀態：
+  ```typescript
+  if (hasCriticalChanges && review_status === 'approved') {
+    updateData.netsuite_sync_status = 'pending';
+    updateData.netsuite_internal_id = null;
+    updateData.netsuite_tran_id = null;
+    updateData.netsuite_url = null;
+    // 需要重新同步到 NetSuite
+  }
+  ```
+- 自動更新名稱欄位（當 ID 改變時，自動查詢對應的名稱）
+
+#### 12.3.3 同步到 NetSuite API ⭐ 核心
+
+**端點**：`POST /api/sync-expense-to-netsuite`
+
+**功能**：將審核通過的報支同步到 NetSuite，並寫回同步結果
+
+**完整流程**：
+
+```typescript
+// 1. 驗證審核狀態
+if (review.review_status !== 'approved') {
+  return error('報支尚未審核通過');
+}
+
+// 2. 檢查是否已經同步過
+if (review.netsuite_sync_status === 'success' && review.netsuite_internal_id) {
+  return error('此報支已經同步到 NetSuite');
+}
+
+// 3. 更新同步狀態為「同步中」
+await supabase
+  .from('expense_reviews')
+  .update({ netsuite_sync_status: 'syncing' })
+  .eq('id', review_id);
+
+// 4. 查詢主檔的 NetSuite Internal ID（並行查詢）
+const [subsidiary, employee, currency, category, department, class, location] = await Promise.all([
+  supabase.from('ns_subsidiaries').select('netsuite_internal_id, base_currency_id').eq('id', review.subsidiary_id),
+  supabase.from('ns_entities_employees').select('netsuite_internal_id').eq('id', review.employee_id),
+  supabase.from('ns_currencies').select('netsuite_internal_id').eq('id', review.currency_id),
+  supabase.from('ns_expense_categories').select('netsuite_internal_id').eq('id', review.expense_category_id),
+  // ... 其他主檔
+]);
+
+// 5. 組裝 NetSuite Payload
+const expenseReportPayload = {
+  recordType: 'expenseReport',
+  subsidiary: { id: subsidiary.netsuite_internal_id.toString() },
+  entity: { id: employee.netsuite_internal_id.toString() },
+  currency: { id: headerCurrencyId.toString() }, // 使用公司的基準幣別
+  trandate: review.expense_date,
+  accountingapproval: false,
+  supervisorapproval: false,
+  expense: {
+    items: [{
+      expensedate: review.expense_date,
+      category: { id: category.netsuite_internal_id.toString() },
+      amount: parseFloat(review.receipt_amount),
+      currency: { id: expenseItemCurrencyId.toString() }, // ⚠️ 重要：expense item 也需要 currency
+      memo: (review.description || '').substring(0, 4000), // NetSuite 限制 4000 字元
+      // 可選欄位
+      department: departmentId ? { id: departmentId.toString() } : undefined,
+      class: classId ? { id: classId.toString() } : undefined,
+      location: locationId ? { id: locationId.toString() } : undefined,
+    }]
+  }
+};
+
+// 6. 呼叫 NetSuite API
+const netsuiteResponse = await netsuite.createRecord('expenseReport', expenseReportPayload);
+
+// 7. 提取 NetSuite 返回的資料
+let netsuiteInternalId: number | null = null;
+if (netsuiteResponse.id) {
+  netsuiteInternalId = parseInt(netsuiteResponse.id);
+} else if (netsuiteResponse.location) {
+  // 從 Location header 提取 ID（204 No Content 回應時）
+  const locationMatch = netsuiteResponse.location.match(/\/(\d+)$/);
+  if (locationMatch) {
+    netsuiteInternalId = parseInt(locationMatch[1]);
+  }
+}
+
+// 8. 生成 NetSuite UI 連結
+const netsuiteUrl = `https://${accountId}.app.netsuite.com/app/accounting/transactions/exprept.nl?id=${netsuiteInternalId}&whence=`;
+
+// 9. 寫回 expense_reviews 表 ⭐ 關鍵：資料雙向寫回
+await supabase
+  .from('expense_reviews')
+  .update({
+    netsuite_sync_status: 'success',
+    netsuite_internal_id: netsuiteInternalId,
+    netsuite_tran_id: netsuiteResponse.tranId || null,
+    netsuite_url: netsuiteUrl,
+    netsuite_synced_at: new Date().toISOString(),
+    netsuite_sync_error: null,
+    netsuite_request_payload: expenseReportPayload,
+    netsuite_response_payload: netsuiteResponse,
+  })
+  .eq('id', review_id);
+
+// 10. 同時寫入 transaction_references 表
+await supabase
+  .from('transaction_references')
+  .insert({
+    source_system: 'EXPENSE_REVIEW',
+    source_transaction_id: review_id,
+    netsuite_record_type: 'expenseReport',
+    netsuite_internal_id: netsuiteInternalId,
+    netsuite_tran_id: netsuiteResponse.tranId || null,
+    status: 'success',
+    request_payload: expenseReportPayload,
+    response_payload: netsuiteResponse,
+    synced_at: new Date().toISOString(),
+  });
+```
+
+**關鍵實作細節**：
+
+1. **並行查詢主檔**：使用 `Promise.all` 同時查詢多個主檔，提升效能
+2. **幣別處理**：
+   - Header 使用公司的基準幣別（`subsidiary.base_currency_id`）
+   - Expense Item 使用報支的幣別（`review.currency_id`）
+   - 如果公司的基準幣別不存在，使用報支的幣別作為備用
+3. **Location 驗證**：確保 location 屬於指定的 subsidiary，否則跳過（避免 NetSuite API 錯誤）
+4. **NetSuite ID 提取**：支援從 `id` 欄位或 `Location` header 提取 Internal ID（處理 204 No Content 回應）
+5. **錯誤處理**：同步失敗時，更新 `netsuite_sync_status = 'failed'` 和 `netsuite_sync_error`
+
+### 12.4 前端頁面實作
+
+#### 12.4.1 報支審核頁面
+
+**路徑**：`/dashboard/ocr-expense/reviews`
+
+**功能**：
+- 顯示待審核/已通過/已拒絕/已取消的報支列表
+- 財務人員可以查看、編輯、審核報支
+- 顯示 NetSuite 同步狀態
+- 手動重試 NetSuite 同步
+
+**關鍵實作**：
+
+1. **效能優化**：
+   - 列表查詢時只選擇必要的欄位，排除大型欄位（`attachment_base64`）
+   - 使用 `useCallback` 和 `useMemo` 避免不必要的重新渲染
+   - 使用 `useRef` 防止重複載入
+
+2. **審批完成後的列表更新**：
+   ```typescript
+   // 立即更新列表中的該項目狀態，而不是重新載入整個列表
+   setReviews(prevReviews => {
+     const updatedReviews = prevReviews.map(review => 
+       review.id === selectedReview.id 
+         ? { ...review, review_status: newStatus, ... }
+         : review
+     );
+     
+     // 如果當前有狀態篩選，且該項目不再符合篩選條件，從列表中移除
+     if (statusFilter !== 'all' && statusFilter !== newStatus) {
+       return updatedReviews.filter(review => review.id !== selectedReview.id);
+     }
+     
+     return updatedReviews;
+   });
+   ```
+
+3. **NetSuite 背景同步**：
+   - 審批通過後，自動在背景同步到 NetSuite
+   - 不顯示同步成功的通知（避免打擾使用者）
+   - 同步狀態會自動更新在列表的「NetSuite 同步」欄位
+
+#### 12.4.2 我的報支頁面
+
+**路徑**：`/dashboard/ocr-expense/my-expenses`
+
+**功能**：
+- 讓使用者查看自己提交的報支
+- 不顯示 NetSuite 同步資訊（end-user 不需要知道）
+- 不提供審批功能（只有財務人員可以審批）
+
+### 12.5 效能優化策略
+
+#### 12.5.1 資料庫查詢優化
+
+1. **列表查詢優化**：
+   ```typescript
+   // ❌ 不建議：查詢所有欄位（包含大型 Base64 資料）
+   const { data } = await supabase.from('expense_reviews').select('*');
+   
+   // ✅ 建議：只選擇列表顯示需要的欄位
+   const { data } = await supabase
+     .from('expense_reviews')
+     .select(`
+       id,
+       expense_date,
+       employee_name,
+       expense_category_name,
+       receipt_amount,
+       review_status,
+       netsuite_sync_status,
+       created_at
+     `);
+   ```
+
+2. **並行查詢主檔**：
+   ```typescript
+   // ✅ 使用 Promise.all 並行查詢，而不是順序查詢
+   const [subsidiary, employee, currency, category] = await Promise.all([
+     supabase.from('ns_subsidiaries').select('...').eq('id', ...),
+     supabase.from('ns_entities_employees').select('...').eq('id', ...),
+     supabase.from('ns_currencies').select('...').eq('id', ...),
+     supabase.from('ns_expense_categories').select('...').eq('id', ...),
+   ]);
+   ```
+
+#### 12.5.2 前端效能優化
+
+1. **使用 useCallback 和 useMemo**：
+   ```typescript
+   const loadReviews = useCallback(async () => {
+     // ... 載入邏輯
+   }, [statusFilter, supabase]);
+   
+   const supabase = useMemo(() => createClient(), []);
+   ```
+
+2. **防止重複載入**：
+   ```typescript
+   const isLoadingReviewsRef = useRef(false);
+   
+   if (isLoadingReviewsRef.current) {
+     return; // 正在載入中，跳過重複請求
+   }
+   ```
+
+3. **減少 console.log**：
+   ```typescript
+   // 只在開發環境或查詢時間過長時記錄
+   if (process.env.NODE_ENV === 'development' || duration > 1000) {
+     console.log(`查詢完成，耗時: ${duration}ms`);
+   }
+   ```
+
+### 12.6 錯誤處理與重試機制
+
+#### 12.6.1 NetSuite API 錯誤處理
+
+**常見錯誤與處理方式**：
+
+1. **Invalid Field Value for location**：
+   - **原因**：Location 不屬於指定的 Subsidiary
+   - **處理**：驗證 location 的 `subsidiary_id`，如果不匹配則跳過 location 欄位（因為它是可選的）
+
+2. **Please enter value(s) for: Currency**：
+   - **原因**：Expense Item 缺少 `currency` 欄位
+   - **處理**：確保 expense item 包含 `currency` 欄位，即使 header 已經有 currency
+
+3. **No one in your chain of command has a sufficient spending limit**：
+   - **原因**：NetSuite 的審批流程限制
+   - **處理**：設定 `accountingapproval: false` 和 `supervisorapproval: false`
+
+4. **204 No Content 回應**：
+   - **原因**：NetSuite API 成功建立記錄但返回空回應
+   - **處理**：從 `Location` header 提取 Internal ID
+
+#### 12.6.2 同步狀態管理
+
+**狀態流程**：
+```
+pending → syncing → success
+                ↓
+             failed (可重試)
+```
+
+**重試機制**：
+- 同步失敗時，更新 `netsuite_sync_status = 'failed'` 和 `netsuite_sync_retry_count`
+- 財務人員可以手動點擊「同步到 NetSuite」按鈕重試
+- 前端會檢查 `netsuite_sync_status`，避免重複同步
+
+### 12.7 Supabase Storage 整合
+
+#### 12.7.1 Storage Bucket 設定
+
+**Bucket 名稱**：`expense-receipts`
+
+**設定**：
+- 類型：Private（需要認證才能存取）
+- RLS 政策：允許已認證使用者上傳和讀取自己的檔案
+
+**檔案命名規則**：`{user_id}/{timestamp}_{filename}.{ext}`
+
+#### 12.7.2 上傳流程
+
+```typescript
+// 1. 上傳到 Supabase Storage
+const filePath = `${userId}/${Date.now()}_${file.name}`;
+const { data: uploadData, error: uploadError } = await supabase.storage
+  .from('expense-receipts')
+  .upload(filePath, file);
+
+if (uploadError) {
+  // 如果上傳失敗，使用 Base64 備用
+  const base64 = await fileToBase64(file);
+  // 存入 attachment_base64
+} else {
+  // 上傳成功，取得 URL
+  const { data: { publicUrl } } = supabase.storage
+    .from('expense-receipts')
+    .getPublicUrl(filePath);
+  // 存入 attachment_url
+}
+```
+
+#### 12.7.3 讀取流程
+
+```typescript
+// 優先使用 Supabase Storage URL
+if (review.attachment_url) {
+  // 如果是 Private bucket，需要生成 Signed URL
+  const { data: { signedUrl } } = await supabase.storage
+    .from('expense-receipts')
+    .createSignedUrl(filePath, 3600); // 1 小時有效
+  // 使用 signedUrl 顯示圖片
+} else if (review.attachment_base64) {
+  // 備用：使用 Base64
+  // 使用 base64 顯示圖片
+}
+```
+
+### 12.8 資料驗證與完整性檢查
+
+#### 12.8.1 建立報支時的驗證
+
+```typescript
+// 驗證必填欄位是否存在於主檔表中
+const validations = await Promise.all([
+  supabase.from('ns_entities_employees').select('id').eq('id', employeeId).maybeSingle(),
+  supabase.from('ns_expense_categories').select('id').eq('id', expenseCategoryId).maybeSingle(),
+  supabase.from('ns_subsidiaries').select('id').eq('id', subsidiaryId).maybeSingle(),
+  supabase.from('ns_currencies').select('id').eq('id', currencyId).maybeSingle(),
+]);
+
+// 如果任何驗證失敗，返回錯誤
+if (validations.some(v => !v.data)) {
+  return error('無效的欄位值');
+}
+```
+
+#### 12.8.2 同步到 NetSuite 前的驗證
+
+```typescript
+// 1. 檢查審核狀態
+if (review.review_status !== 'approved') {
+  return error('報支尚未審核通過');
+}
+
+// 2. 檢查是否已經同步過
+if (review.netsuite_sync_status === 'success' && review.netsuite_internal_id) {
+  return error('此報支已經同步到 NetSuite');
+}
+
+// 3. 檢查是否正在同步中
+if (review.netsuite_sync_status === 'syncing') {
+  return error('此報支正在同步中，請稍候');
+}
+
+// 4. 驗證主檔 ID 是否存在
+if (!subsidiaryId || !employeeId || !currencyId || !expenseCategoryId) {
+  return error('缺少必要的主檔資料');
+}
+```
+
+### 12.9 開發過程中的關鍵決策
+
+#### 12.9.1 為什麼使用中介表（expense_reviews）？
+
+1. **審核流程**：需要財務人員審核後才能寫入 NetSuite
+2. **資料修正**：審核前可以修改報支資料
+3. **錯誤處理**：同步失敗時，資料仍在 Supabase，可以重試
+4. **追蹤對應**：可以追蹤每筆報支的審核狀態和 NetSuite 同步狀態
+
+#### 12.9.2 為什麼需要寫回 NetSuite 資料？
+
+1. **追蹤對應關係**：可以從 `expense_reviews` 表直接查詢到對應的 NetSuite 記錄
+2. **UI 連結**：`netsuite_url` 讓使用者可以直接點擊連結開啟 NetSuite 中的 Expense Report
+3. **狀態管理**：`netsuite_sync_status` 讓前端可以顯示同步狀態
+4. **避免重複同步**：檢查 `netsuite_sync_status === 'success'` 可以避免重複同步
+5. **錯誤排查**：`netsuite_request_payload` 和 `netsuite_response_payload` 可以幫助除錯
+
+#### 12.9.3 為什麼使用 Supabase Storage 而不是 Base64？
+
+1. **效能**：Base64 會增加資料庫大小和查詢時間
+2. **成本**：Supabase Storage 的成本比資料庫儲存更便宜
+3. **擴展性**：可以輕鬆擴展到大量附件
+4. **安全性**：Private bucket 可以控制存取權限
+
+### 12.10 檢查清單
+
+**建置完成後請確認**：
+
+- [ ] `expense_reviews` 表已建立並包含所有必要欄位
+- [ ] `netsuite_url` 欄位已新增到 `expense_reviews` 表
+- [ ] Supabase Storage bucket `expense-receipts` 已建立並設定 RLS
+- [ ] `/api/create-expense-report` API 已實作並測試通過
+- [ ] `/api/update-expense-review` API 已實作並測試通過
+- [ ] `/api/sync-expense-to-netsuite` API 已實作並測試通過
+- [ ] 報支審核頁面可以正常顯示和審核報支
+- [ ] NetSuite 同步成功後，`expense_reviews` 表的 `netsuite_internal_id` 和 `netsuite_url` 已正確寫回
+- [ ] `transaction_references` 表已正確記錄交易對應關係
+- [ ] 前端可以正確顯示 NetSuite 同步狀態
+- [ ] 附件可以正常上傳到 Supabase Storage 並顯示
+
+---
+
+## 13. 🎉 結語
 
 恭喜你！如果你跟著這份指南一步步做完，你現在已經有：
 
