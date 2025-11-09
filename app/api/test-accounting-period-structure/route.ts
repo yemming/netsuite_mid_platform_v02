@@ -74,7 +74,7 @@ export async function GET() {
     // 分析所有資料的欄位
     const fieldAnalysis: Record<string, any> = {};
     allKeys.forEach(key => {
-      const values = items.map((item: any) => item[key]).filter(v => v !== null && v !== undefined);
+      const values = items.map((item: any) => item[key]).filter((v: any) => v !== null && v !== undefined);
       fieldAnalysis[key] = {
         type: typeof firstItem[key],
         sampleValue: firstItem[key],
