@@ -156,31 +156,9 @@ export class NetSuiteAPIClient {
         items: Array<{ name: string; links: Array<{ rel: string; href: string }> }>;
       }>('/services/rest/record/v1/metadata-catalog');
       
-      // 嘗試取得公司名稱
-      let companyName = '未知公司';
-      try {
-        // 使用 SuiteQL 查詢公司資訊
-        // NetSuite SuiteQL 使用 FETCH FIRST n ROWS ONLY 而不是 LIMIT
-        const suiteqlResult = await this.executeSuiteQL(
-          "SELECT companyname FROM companyinformation FETCH FIRST 1 ROWS ONLY"
-        );
-        
-        if (suiteqlResult.items && suiteqlResult.items.length > 0) {
-          companyName = suiteqlResult.items[0].companyname || '未知公司';
-        }
-      } catch (suiteqlError) {
-        // 如果 SuiteQL 失敗，嘗試其他方法
-        console.log('SuiteQL 查詢失敗，嘗試其他方法:', suiteqlError);
-        try {
-          // 嘗試從 Account Information API 取得
-          const accountInfo = await this.request('/services/rest/record/v1/metadata-catalog');
-          // 如果上述方法都失敗，使用 Account ID 作為顯示名稱
-          companyName = this.config.accountId;
-        } catch {
-          // 最後備選方案：使用 Account ID
-          companyName = this.config.accountId;
-        }
-      }
+      // 取得公司名稱（使用 Account ID 作為顯示名稱）
+      // 注意：companyinformation 表在 SuiteQL 中不可用，直接使用 Account ID
+      const companyName = this.config.accountId;
       
       return {
         success: true,
