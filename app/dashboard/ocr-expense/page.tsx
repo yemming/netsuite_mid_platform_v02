@@ -67,6 +67,7 @@ interface ExpenseReportLine {
     ocrFileId: string;
     ocrWebViewLink: string;
     ocrProcessedAt: string;
+    attachmentImageData?: string; // 附件圖片的 base64 數據（用於在 OCR 明細中顯示）
   };
   customer: string; // 客戶
   projectTask: string; // 專案任務
@@ -74,6 +75,7 @@ interface ExpenseReportLine {
   attachFile: string; // 附加檔案
   receipt: string; // 收據
   isEditing: boolean; // 是否正在編輯
+  isProcessing?: boolean; // 是否正在 OCR 處理中
 }
 
 export default function OCRExpensePage() {
@@ -181,6 +183,20 @@ export default function OCRExpensePage() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentJobIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 多附件 OCR 任務追蹤
+  const [multiOcrTasks, setMultiOcrTasks] = useState<Map<number, {
+    jobId: string;
+    status: 'processing' | 'completed' | 'error';
+    fileIndex: number;
+    fileName: string;
+  }>>(new Map());
+  const multiOcrPollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const multiOcrTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // 追蹤已經處理過的 jobId，避免重複建立 expense line
+  const processedJobIdsRef = useRef<Set<string>>(new Set());
+  // 追蹤已經建立 expense line 的 fileIndex，避免重複建立
+  const createdExpenseLineFileIndexesRef = useRef<Set<number>>(new Set());
   // 表單選項資料（一次載入所有）
   const [formOptions, setFormOptions] = useState<{
     employees: Array<{ id: string; name: string; netsuite_internal_id: number }>;
@@ -371,6 +387,15 @@ export default function OCRExpensePage() {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      // 清理多附件 OCR 的輪詢和超時
+      multiOcrPollingIntervalsRef.current.forEach((interval) => {
+        clearInterval(interval);
+      });
+      multiOcrPollingIntervalsRef.current.clear();
+      multiOcrTimeoutsRef.current.forEach((timeout) => {
+        clearTimeout(timeout);
+      });
+      multiOcrTimeoutsRef.current.clear();
     };
   }, []);
 
@@ -412,23 +437,40 @@ export default function OCRExpensePage() {
 
   // 取消 OCR 處理
   const handleCancelOCR = () => {
-    // 停止輪詢
+    // 停止單一附件的輪詢和超時
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
-    // 停止超時
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-    // 重置狀態
+    // 重置單一附件狀態
     setOcrProcessing(false);
     setOcrJobId(null);
     currentJobIdRef.current = null;
+    
+    // 停止所有多附件 OCR 的輪詢和超時
+    multiOcrPollingIntervalsRef.current.forEach((interval) => {
+      clearInterval(interval);
+    });
+    multiOcrPollingIntervalsRef.current.clear();
+    multiOcrTimeoutsRef.current.forEach((timeout) => {
+      clearTimeout(timeout);
+    });
+    multiOcrTimeoutsRef.current.clear();
+    
+    // 重置多附件任務狀態
+    setMultiOcrTasks(new Map());
+    
+    // 清空已處理的 jobId 記錄
+    processedJobIdsRef.current.clear();
+    // 清空已建立 expense line 的 fileIndex 記錄
+    createdExpenseLineFileIndexesRef.current.clear();
   };
 
-  // 處理 OCR 結果
+  // 處理 OCR 結果（單一附件，填入 formData）
   const processOCRResult = (ocrResult: any) => {
     // 處理 output 對象中的發票數據
     if (ocrResult.output && typeof ocrResult.output === 'object') {
@@ -474,7 +516,171 @@ export default function OCRExpensePage() {
     handleInputChange('ocrProcessedAt', ocrResult.processedAt || '');
   };
 
-  // 輪詢檢查 OCR 結果
+  // 將 OCR 結果轉換為 expense line 的 ocrData 格式
+  const convertOCRResultToLineData = (ocrResult: any): ExpenseReportLine['ocrData'] => {
+    const ocrData = ocrResult.output || {};
+    
+    return {
+      invoiceTitle: ocrData['發票標題'] || '',
+      invoicePeriod: ocrData['發票期別'] || '',
+      invoiceNumber: ocrData['發票號碼'] || '',
+      invoiceDate: ocrData['開立時間'] || '',
+      randomCode: ocrData['隨機碼'] || '',
+      formatCode: ocrData['格式代號'] || '',
+      sellerName: ocrData['賣方名稱'] || '',
+      sellerTaxId: ocrData['賣方統編'] || '',
+      sellerAddress: ocrData['賣方地址'] || '',
+      buyerName: ocrData['買方名稱'] || '',
+      buyerTaxId: ocrData['買方統編'] || '',
+      buyerAddress: ocrData['買方地址'] || '',
+      untaxedAmount: ocrData['未稅銷售額'] || '',
+      taxAmount: ocrData['稅額'] || '',
+      totalAmount: ocrData['總計金額'] || '',
+      ocrSuccess: ocrResult.success ?? false,
+      ocrConfidence: ocrResult.confidence ?? 0,
+      ocrDocumentType: ocrResult.documentType || '',
+      ocrErrors: ocrResult.errors || '',
+      ocrWarnings: ocrResult.warnings || '',
+      ocrErrorCount: ocrResult.errorCount ?? 0,
+      ocrWarningCount: ocrResult.warningCount ?? 0,
+      ocrQualityGrade: ocrResult.qualityGrade || '',
+      ocrFileName: ocrResult.fileName || '',
+      ocrFileId: ocrResult.fileId || '',
+      ocrWebViewLink: ocrResult.webViewLink || '',
+      ocrProcessedAt: ocrResult.processedAt || '',
+    };
+  };
+
+  // 建立 expense line 並填入 OCR 結果
+  const createExpenseLineFromOCR = (ocrResult: any, fileIndex: number) => {
+    // 檢查這個 fileIndex 是否已經建立過 expense line
+    if (createdExpenseLineFileIndexesRef.current.has(fileIndex)) {
+      return;
+    }
+    
+    // 標記為已建立（在建立之前就標記，防止競態條件）
+    createdExpenseLineFileIndexesRef.current.add(fileIndex);
+    
+    // 取得對應的圖片數據
+    const file = attachments[fileIndex];
+    let imageData: string | undefined = undefined;
+    
+    // 從 previewImages 中取得對應的圖片數據
+    if (file && previewImages.length > 0) {
+      const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
+      const imageIndex = imageFiles.indexOf(file);
+      if (imageIndex >= 0 && imageIndex < previewImages.length) {
+        imageData = previewImages[imageIndex];
+      }
+    }
+    
+    const ocrData = convertOCRResultToLineData(ocrResult);
+    const ocrOutput = ocrResult.output || {};
+    const uniqueId = ocrData.ocrFileId || `fileIndex_${fileIndex}_${Date.now()}_${Math.random()}`;
+    
+    // 將圖片數據添加到 ocrData 中
+    const ocrDataWithImage = {
+      ...ocrData,
+      attachmentImageData: imageData,
+    };
+    
+    // 使用函數式更新確保 refNo 的正確順序
+    setExpenseLines(prev => {
+      // 找到第一個 isProcessing 為 true 的行並替換它
+      const processingIndex = prev.findIndex(line => line.isProcessing);
+      
+      if (processingIndex !== -1) {
+        // 取得正在處理行的參考編號（保持原來的編號）
+        const processingRefNo = prev[processingIndex].refNo;
+        
+        const newLine: ExpenseReportLine = {
+          id: `line-${uniqueId}`,
+          refNo: processingRefNo, // 使用正在處理行的參考編號，保持連續性
+          date: formData.expenseDate,
+          category: formData.type || '',
+          foreignAmount: '',
+          currency: formData.receiptCurrency || 'TWD',
+          exchangeRate: '1.00',
+          amount: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          taxCode: '',
+          taxRate: '',
+          taxAmt: ocrOutput['稅額'] || '',
+          grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          memo: formData.description || '',
+          department: formData.department || '',
+          class: formData.class || '',
+          location: formData.expenseLocation || '',
+          ocrDetail: ocrOutput['發票號碼'] || ocrData.ocrFileName || '',
+          ocrData: ocrDataWithImage,
+          customer: '',
+          projectTask: '',
+          billable: false,
+          attachFile: '',
+          receipt: '',
+          isEditing: true,
+          isProcessing: false, // 清除處理中標記
+        };
+        
+        // 替換正在處理的行
+        const updated = [...prev];
+        updated[processingIndex] = newLine;
+        return updated;
+      }
+      
+      // 如果沒有找到正在處理的行，檢查是否已經有相同的 expense line
+      const existingLine = prev.find(line => 
+        line.id === `line-${uniqueId}` || 
+        (ocrData.ocrFileId && line.ocrData?.ocrFileId === ocrData.ocrFileId)
+      );
+      
+      if (existingLine) {
+        // 已經存在，不新增
+        return prev;
+      }
+      
+      // 如果沒有找到正在處理的行，使用 nextRefNo 創建新行
+      // 這種情況不應該發生，但為了安全起見還是處理
+      setNextRefNo(prevRefNo => {
+        const newLine: ExpenseReportLine = {
+          id: `line-${uniqueId}`,
+          refNo: prevRefNo,
+          date: formData.expenseDate,
+          category: formData.type || '',
+          foreignAmount: '',
+          currency: formData.receiptCurrency || 'TWD',
+          exchangeRate: '1.00',
+          amount: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          taxCode: '',
+          taxRate: '',
+          taxAmt: ocrOutput['稅額'] || '',
+          grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          memo: formData.description || '',
+          department: formData.department || '',
+          class: formData.class || '',
+          location: formData.expenseLocation || '',
+          ocrDetail: ocrOutput['發票號碼'] || ocrData.ocrFileName || '',
+          ocrData: ocrDataWithImage,
+          customer: '',
+          projectTask: '',
+          billable: false,
+          attachFile: '',
+          receipt: '',
+          isEditing: true,
+          isProcessing: false,
+        };
+        
+        setExpenseLines(prevLines => [...prevLines, newLine]);
+        return prevRefNo + 1;
+      });
+      
+      return prev;
+    });
+    
+    // 注意：不再在這裡移除附件，改為在 handleMultiFileOCR 完成後統一移除
+    // 這樣可以避免 fileIndex 改變導致的問題
+  };
+
+  // 輪詢檢查 OCR 結果（單一附件）
   const pollOCRResult = async (jobId: string) => {
     try {
       const response = await fetch(`/api/ocr-callback?jobId=${jobId}`);
@@ -538,43 +744,33 @@ export default function OCRExpensePage() {
     }
   };
 
-  const handleAIOCR = async () => {
-    if (!previewImage) {
-      alert('請先上傳收據圖片');
-      return;
-    }
+  // 注意：pollMultiOCRResult 函數已移除，現在統一使用 processSingleAttachmentOCR 中的輪詢邏輯
 
+  // 處理單一附件的 OCR（填入 formData）
+  const handleSingleFileOCR = async (file: File, imageDataUrl: string) => {
     const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_OCR;
     if (!webhookUrl) {
       alert('Webhook URL 未設定，請檢查環境變數設定');
       return;
     }
 
-    // 生成唯一的 job ID
     const jobId = `ocr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     setOcrJobId(jobId);
     currentJobIdRef.current = jobId;
     setOcrProcessing(true);
 
     try {
-      // 將 base64 圖片轉換為 Blob
       let blob: Blob;
-      
-      if (previewImage.startsWith('data:')) {
-        // 如果是 base64 格式，直接轉換為 Blob
-        const response = await fetch(previewImage);
+      if (imageDataUrl.startsWith('data:')) {
+        const response = await fetch(imageDataUrl);
         blob = await response.blob();
       } else {
-        // 如果是 URL 格式
-        const response = await fetch(previewImage);
+        const response = await fetch(imageDataUrl);
         blob = await response.blob();
       }
 
-      // 構建回調 URL
       const callbackUrl = `${window.location.origin}/api/ocr-callback`;
       
-      // 發送請求到 N8N
-      // 注意：如果 N8N 是同步返回結果，我們也會處理；如果是異步，則通過輪詢獲取
       fetch(webhookUrl, {
         method: 'POST',
         headers: {
@@ -585,18 +781,14 @@ export default function OCRExpensePage() {
         body: blob,
       })
       .then(async (response) => {
-        // 如果 N8N 同步返回結果，嘗試處理
         if (response.ok) {
           try {
             const contentType = response.headers.get('content-type');
             if (contentType && contentType.includes('application/json')) {
               const result = await response.json();
-              // 檢查是否包含 OCR 結果
               if (Array.isArray(result) && result.length > 0 && result[0].output) {
-                // N8N 同步返回了結果，直接處理
                 console.log('收到 N8N 同步響應，直接處理結果');
                 
-                // 停止輪詢和超時
                 if (pollingIntervalRef.current) {
                   clearInterval(pollingIntervalRef.current);
                   pollingIntervalRef.current = null;
@@ -606,7 +798,6 @@ export default function OCRExpensePage() {
                   timeoutRef.current = null;
                 }
                 
-                // 先保存到 API（模擬回調，以便統一處理）
                 try {
                   await fetch(callbackUrl, {
                     method: 'POST',
@@ -616,14 +807,11 @@ export default function OCRExpensePage() {
                     },
                     body: JSON.stringify(result),
                   });
-                  // 保存成功後，通過輪詢機制獲取（這樣可以統一處理流程）
-                  // 但我們也可以直接處理
                   processOCRResult(result[0]);
                   setOcrProcessing(false);
                   setOcrJobId(null);
                   currentJobIdRef.current = null;
                 } catch (e) {
-                  // 如果回調失敗，直接處理結果
                   processOCRResult(result[0]);
                   setOcrProcessing(false);
                   setOcrJobId(null);
@@ -632,24 +820,19 @@ export default function OCRExpensePage() {
               }
             }
           } catch (e) {
-            // 忽略解析錯誤，繼續輪詢
             console.log('N8N 響應不是 JSON 格式，繼續輪詢');
           }
         }
       })
       .catch((error) => {
         console.error('發送 OCR 請求錯誤:', error);
-        // 即使發送失敗，也開始輪詢（N8N 可能會通過其他方式回調）
       });
 
-      // 立即開始輪詢結果（每 2 秒檢查一次）
       pollingIntervalRef.current = setInterval(() => {
         pollOCRResult(jobId);
       }, 2000);
 
-      // 設置超時（5 分鐘後停止輪詢）
       timeoutRef.current = setTimeout(() => {
-        // 檢查是否還是同一個 job
         if (currentJobIdRef.current === jobId) {
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current);
@@ -678,6 +861,529 @@ export default function OCRExpensePage() {
       currentJobIdRef.current = null;
       alert(`OCR 處理失敗: ${error instanceof Error ? error.message : '未知錯誤'}`);
     }
+  };
+
+  // 處理單一附件的 OCR（等待完成後返回結果）
+  const processSingleAttachmentOCR = async (
+    file: File,
+    fileIndex: number,
+    attachmentNumber: number
+  ): Promise<{ success: boolean; result?: any; error?: string }> => {
+    const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_OCR;
+    if (!webhookUrl) {
+      return { success: false, error: 'Webhook URL 未設定' };
+    }
+
+    // 將檔案轉換為 base64
+    const imageDataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        resolve(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // 生成唯一的 job ID（使用更精確的時間戳和隨機數）
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    const jobId = `ocr_multi_${timestamp}_${fileIndex}_${random}`;
+    
+    console.log(`[processSingleAttachmentOCR] 附件 ${attachmentNumber} - fileIndex: ${fileIndex}, jobId: ${jobId}`);
+    
+    // 更新任務狀態為處理中
+    setMultiOcrTasks(prev => {
+      const newMap = new Map(prev);
+      newMap.set(fileIndex, {
+        jobId,
+        status: 'processing',
+        fileIndex,
+        fileName: file.name,
+      });
+      return newMap;
+    });
+
+    try {
+      // 將 base64 圖片轉換為 Blob
+      let blob: Blob;
+      if (imageDataUrl.startsWith('data:')) {
+        const response = await fetch(imageDataUrl);
+        blob = await response.blob();
+      } else {
+        const response = await fetch(imageDataUrl);
+        blob = await response.blob();
+      }
+
+      const callbackUrl = `${window.location.origin}/api/ocr-callback`;
+      
+      // 建立 Promise 來等待 OCR 結果
+      return new Promise((resolve) => {
+        let isResolved = false;
+        let pollingInterval: NodeJS.Timeout | null = null;
+        let timeout: NodeJS.Timeout | null = null;
+        let shouldStartPolling = true; // 標記是否應該啟動輪詢
+
+        // 清理函數
+        const cleanup = () => {
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+          }
+          if (timeout) {
+            clearTimeout(timeout);
+            timeout = null;
+          }
+        };
+
+        // 處理 OCR 結果
+        const handleOCRResult = (ocrResult: any) => {
+          console.log(`[handleOCRResult] 被呼叫 - 附件 ${attachmentNumber}, fileIndex: ${fileIndex}, isResolved: ${isResolved}`);
+          
+          // 第一層防護：檢查是否已經解析過
+          if (isResolved) {
+            console.warn(`[handleOCRResult] 附件 ${attachmentNumber} OCR 結果已處理過，跳過重複處理！`);
+            return;
+          }
+          
+          // 第二層防護：檢查 fileIndex 是否已建立 expense line
+          if (createdExpenseLineFileIndexesRef.current.has(fileIndex)) {
+            console.warn(`[handleOCRResult] 附件 ${attachmentNumber} (fileIndex: ${fileIndex}) 已經建立過 expense line，跳過重複處理！`);
+            isResolved = true;
+            shouldStartPolling = false;
+            cleanup();
+            resolve({ success: true, result: ocrResult });
+            return;
+          }
+          
+          // 第三層防護：檢查 jobId 是否已處理過（雙重檢查）
+          if (processedJobIdsRef.current.has(jobId)) {
+            console.warn(`[handleOCRResult] 附件 ${attachmentNumber} (jobId: ${jobId}) 已經處理過，跳過重複處理！`);
+            isResolved = true;
+            shouldStartPolling = false;
+            cleanup();
+            resolve({ success: true, result: ocrResult });
+            return;
+          }
+          
+          // 立即設置標記，防止競態條件
+          isResolved = true;
+          shouldStartPolling = false; // 停止輪詢
+          processedJobIdsRef.current.add(jobId); // 標記 jobId 為已處理
+          cleanup();
+          
+          console.log(`[handleOCRResult] 附件 ${attachmentNumber} (fileIndex: ${fileIndex}) 開始建立 expense line`);
+          
+          // 建立 expense line（只建立一次）
+          createExpenseLineFromOCR(ocrResult, fileIndex);
+          
+          // 更新任務狀態為完成，並檢查是否所有任務都完成
+          setMultiOcrTasks(prev => {
+            const newMap = new Map(prev);
+            const task = newMap.get(fileIndex);
+            if (task) {
+              newMap.set(fileIndex, {
+                ...task,
+                status: 'completed',
+              });
+            }
+            
+            // 檢查是否所有任務都已完成或失敗
+            const allTasks = Array.from(newMap.values());
+            const allTasksDone = allTasks.length > 0 && allTasks.every(
+              t => t.status === 'completed' || t.status === 'error'
+            );
+            
+            // 如果所有任務完成，延遲清空狀態（讓 UI 有時間顯示完成狀態）
+            if (allTasksDone) {
+              console.log('所有任務已完成，準備清空任務狀態');
+              setTimeout(() => {
+                setMultiOcrTasks(new Map());
+              }, 1000); // 1 秒後清空，讓用戶看到完成狀態
+            }
+            
+            return newMap;
+          });
+          
+          console.log(`附件 ${attachmentNumber} expense line 建立完成`);
+          resolve({ success: true, result: ocrResult });
+        };
+
+        // 處理錯誤
+        const handleError = (error: string) => {
+          if (isResolved) return;
+          isResolved = true;
+          shouldStartPolling = false; // 停止輪詢
+          cleanup();
+          
+          // 更新任務狀態為錯誤
+          setMultiOcrTasks(prev => {
+            const newMap = new Map(prev);
+            const task = newMap.get(fileIndex);
+            if (task) {
+              newMap.set(fileIndex, {
+                ...task,
+                status: 'error',
+              });
+            }
+            return newMap;
+          });
+          
+          resolve({ success: false, error });
+        };
+
+        // 發送請求到 N8N
+        fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': blob.type || 'image/jpeg',
+            'X-Job-Id': jobId,
+            'X-Callback-Url': callbackUrl,
+          },
+          body: blob,
+        })
+        .then(async (response) => {
+          // 如果 N8N 同步返回結果，直接處理
+          if (response.ok) {
+            try {
+              const contentType = response.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                const result = await response.json();
+                if (Array.isArray(result) && result.length > 0 && result[0].output) {
+                  console.log(`[processSingleAttachmentOCR] 附件 ${attachmentNumber} (fileIndex: ${fileIndex}, jobId: ${jobId}) 收到 N8N 同步響應`);
+                  
+                  // 立即設置防護標記，防止重複處理
+                  isResolved = true;
+                  shouldStartPolling = false;
+                  processedJobIdsRef.current.add(jobId);
+                  cleanup();
+                  
+                  // 檢查 fileIndex 是否已經建立過 expense line
+                  if (createdExpenseLineFileIndexesRef.current.has(fileIndex)) {
+                    resolve({ success: true, result: result[0] });
+                    return;
+                  }
+                  
+                  // 立即建立 expense line（不等待 API 保存）
+                  createExpenseLineFromOCR(result[0], fileIndex);
+                  
+                  // 更新任務狀態為完成
+                  setMultiOcrTasks(prev => {
+                    const newMap = new Map(prev);
+                    const task = newMap.get(fileIndex);
+                    if (task) {
+                      newMap.set(fileIndex, { ...task, status: 'completed' });
+                    }
+                    return newMap;
+                  });
+                  
+                  // 異步保存到 API（不阻塞，背景處理）
+                  fetch(callbackUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'X-Job-Id': jobId,
+                    },
+                    body: JSON.stringify(result),
+                  }).catch(() => {}); // 靜默處理錯誤，不影響主流程
+                  
+                  resolve({ success: true, result: result[0] });
+                  return; // 直接返回，不啟動輪詢
+                }
+              }
+            } catch (e) {
+              console.log(`附件 ${attachmentNumber} N8N 響應不是 JSON 格式，繼續輪詢`);
+            }
+          }
+          
+          // 如果沒有同步返回結果，且應該啟動輪詢，才開始輪詢
+          // 重要：再次檢查 isResolved 和 processedJobIdsRef，防止在同步響應處理過程中已經設置了
+          if (shouldStartPolling && !isResolved && !processedJobIdsRef.current.has(jobId)) {
+            console.log(`附件 ${attachmentNumber} 開始輪詢 OCR 結果`);
+            
+            // 輪詢檢查結果（每 2 秒檢查一次）
+            pollingInterval = setInterval(async () => {
+              // 如果已經處理過，停止輪詢
+              if (isResolved || !shouldStartPolling) {
+                cleanup();
+                return;
+              }
+            try {
+              // 再次檢查是否已經處理過（防止在輪詢過程中同步響應已經處理）
+              if (processedJobIdsRef.current.has(jobId) || isResolved) {
+                cleanup();
+                return;
+              }
+              
+              const pollResponse = await fetch(`/api/ocr-callback?jobId=${jobId}`);
+              
+              if (pollResponse.status === 404) {
+                // 結果尚未準備好，繼續輪詢
+                return;
+              }
+
+              if (!pollResponse.ok) {
+                throw new Error('查詢 OCR 結果失敗');
+              }
+
+              const pollResult = await pollResponse.json();
+
+              if (pollResult.status === 'completed' && pollResult.data) {
+                // 再次檢查是否已經處理過（防止競態條件）
+                if (processedJobIdsRef.current.has(jobId) || isResolved) {
+                  cleanup();
+                  return;
+                }
+                
+                // 立即標記為已處理
+                processedJobIdsRef.current.add(jobId);
+                
+                // 處理結果
+                let ocrResult: any = null;
+                if (Array.isArray(pollResult.data) && pollResult.data.length > 0) {
+                  ocrResult = pollResult.data[0];
+                } else if (pollResult.data && pollResult.data.output) {
+                  ocrResult = pollResult.data;
+                } else if (typeof pollResult.data === 'object' && pollResult.data !== null) {
+                  ocrResult = pollResult.data;
+                }
+
+                if (ocrResult) {
+                  handleOCRResult(ocrResult);
+                }
+              } else if (pollResult.status === 'error') {
+                // 標記為已處理（即使是錯誤）
+                processedJobIdsRef.current.add(jobId);
+                handleError(pollResult.error || '未知錯誤');
+              }
+            } catch (error) {
+              console.error(`輪詢附件 ${attachmentNumber} OCR 結果錯誤:`, error);
+              // 繼續輪詢，不中斷
+            }
+            }, 2000);
+
+            // 設置超時（5 分鐘後停止輪詢）
+            timeout = setTimeout(() => {
+              if (!isResolved) {
+                handleError('OCR 處理超時');
+              }
+            }, 5 * 60 * 1000);
+          }
+        })
+        .catch((error) => {
+          console.error(`附件 ${attachmentNumber} 發送 OCR 請求錯誤:`, error);
+          handleError(error instanceof Error ? error.message : '發送 OCR 請求失敗');
+        });
+      });
+    } catch (error) {
+      console.error(`附件 ${attachmentNumber} OCR 處理錯誤:`, error);
+      setMultiOcrTasks(prev => {
+        const newMap = new Map(prev);
+        const task = newMap.get(fileIndex);
+        if (task) {
+          newMap.set(fileIndex, {
+            ...task,
+            status: 'error',
+          });
+        }
+        return newMap;
+      });
+      return { success: false, error: error instanceof Error ? error.message : '未知錯誤' };
+    }
+  };
+
+  // 處理多個附件的 OCR（串行處理，一次處理一個）
+  const handleMultiFileOCR = async () => {
+    const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_OCR;
+    if (!webhookUrl) {
+      alert('Webhook URL 未設定，請檢查環境變數設定');
+      return;
+    }
+
+    // 過濾出圖片檔案
+    const imageFiles = attachments.filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      alert('請先上傳收據圖片');
+      return;
+    }
+
+    // 清空已處理的 jobId 記錄（為新的批次做準備）
+    processedJobIdsRef.current.clear();
+    // 清空已建立 expense line 的 fileIndex 記錄（為新的批次做準備）
+    createdExpenseLineFileIndexesRef.current.clear();
+
+    // 初始化所有任務狀態
+    const newTasks = new Map<number, {
+      jobId: string;
+      status: 'processing' | 'completed' | 'error';
+      fileIndex: number;
+      fileName: string;
+    }>();
+    
+    // 先初始化所有任務為 processing 狀態
+    imageFiles.forEach((file, i) => {
+      const fileIndex = attachments.indexOf(file);
+      newTasks.set(fileIndex, {
+        jobId: '',
+        status: 'processing',
+        fileIndex,
+        fileName: file.name,
+      });
+    });
+    setMultiOcrTasks(newTasks);
+    
+    // 計算當前 expense lines 的最大參考編號，基於現有資料來決定新的參考編號
+    setExpenseLines(prevLines => {
+      // 找出現有 expense lines 的最大參考編號
+      const maxRefNo = prevLines.length > 0 
+        ? Math.max(...prevLines.map(line => line.refNo || 0))
+        : 0;
+      
+      // 計算新的起始參考編號（從最大編號 + 1 開始）
+      const startRefNo = maxRefNo + 1;
+      
+      // 創建「正在辨識中」的 expense lines（模糊效果）
+      const processingLines: ExpenseReportLine[] = imageFiles.map((file, i) => {
+        const fileIndex = attachments.indexOf(file);
+        return {
+          id: `processing-${fileIndex}-${Date.now()}-${i}`,
+          refNo: startRefNo + i, // 使用基於現有資料計算的起始編號
+        date: formData.expenseDate,
+        category: '',
+        foreignAmount: '',
+        currency: formData.receiptCurrency || 'TWD',
+        exchangeRate: '1.00',
+        amount: '',
+        taxCode: '',
+        taxRate: '',
+        taxAmt: '',
+        grossAmt: '',
+        memo: '',
+        department: '',
+        class: '',
+        location: '',
+        ocrDetail: '',
+        ocrData: {
+          invoiceTitle: '',
+          invoicePeriod: '',
+          invoiceNumber: '',
+          invoiceDate: '',
+          randomCode: '',
+          formatCode: '',
+          sellerName: '',
+          sellerTaxId: '',
+          sellerAddress: '',
+          buyerName: '',
+          buyerTaxId: '',
+          buyerAddress: '',
+          untaxedAmount: '',
+          taxAmount: '',
+          totalAmount: '',
+          ocrSuccess: false,
+          ocrConfidence: 0,
+          ocrDocumentType: '',
+          ocrErrors: '',
+          ocrWarnings: '',
+          ocrErrorCount: 0,
+          ocrWarningCount: 0,
+          ocrQualityGrade: '',
+          ocrFileName: '',
+          ocrFileId: '',
+          ocrWebViewLink: '',
+          ocrProcessedAt: '',
+        },
+        customer: '',
+        projectTask: '',
+        billable: false,
+        attachFile: '',
+        receipt: '',
+        isEditing: false,
+        isProcessing: true, // 標記為正在處理中
+      };
+      });
+      
+      // 更新 nextRefNo 為下一個可用的參考編號
+      setNextRefNo(startRefNo + imageFiles.length);
+      
+      // 添加「正在辨識中」的行
+      return [...prevLines, ...processingLines];
+    });
+
+    // 追蹤已處理的檔案（使用檔案名稱作為唯一標識，因為 fileIndex 會改變）
+    const processedFiles = new Set<string>();
+    
+    // 串行處理每個附件：一次處理一個，完成後再處理下一個
+    for (let i = 0; i < imageFiles.length; i++) {
+      const file = imageFiles[i];
+      // 使用檔案名稱作為標識，因為 fileIndex 會隨著附件被移除而改變
+      const fileKey = `${file.name}_${file.size}_${file.lastModified}`;
+      
+      // 找到當前的 fileIndex（因為前面的檔案可能已經被移除）
+      const currentFileIndex = attachments.findIndex(f => 
+        f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
+      );
+      
+      if (currentFileIndex === -1) {
+        // 檔案已經被移除，跳過
+        continue;
+      }
+      
+      // 等待當前附件 OCR 完成
+      const result = await processSingleAttachmentOCR(file, currentFileIndex, i + 1);
+      
+      if (result.success) {
+        processedFiles.add(fileKey);
+      } else {
+        alert(`附件 ${i + 1} OCR 處理失敗: ${result.error || '未知錯誤'}`);
+      }
+    }
+
+    // 所有附件處理完成後，統一清空所有已處理的附件
+    setAttachments(prev => {
+      const updated = prev.filter(file => {
+        const fileKey = `${file.name}_${file.size}_${file.lastModified}`;
+        return !processedFiles.has(fileKey);
+      });
+      
+      // 如果所有附件都被處理了，清空預覽
+      if (updated.length === 0) {
+        setPreviewImage(null);
+        setPreviewImages([]);
+        setPreviewImageIndex(0);
+      } else {
+        // 重新載入預覽圖片
+        loadPreviewImages(updated);
+      }
+      
+      return updated;
+    });
+    
+    // 最後檢查：如果還有任務狀態，再次檢查並清空
+    setMultiOcrTasks(prev => {
+      const allTasks = Array.from(prev.values());
+      const allTasksDone = allTasks.length > 0 && allTasks.every(
+        task => task.status === 'completed' || task.status === 'error'
+      );
+      
+      if (allTasksDone) {
+        // 立即清空任務狀態
+        return new Map();
+      } else {
+        return prev;
+      }
+    });
+  };
+
+  const handleAIOCR = async () => {
+    // 統一使用多附件處理邏輯，這樣單一附件和多附件都會建立 expense line
+    const imageFiles = attachments.filter(file => file.type.startsWith('image/'));
+    
+    if (imageFiles.length === 0) {
+      alert('請先上傳收據圖片');
+      return;
+    }
+    
+    // 無論單一附件還是多附件，都使用 handleMultiFileOCR 來處理
+    // 這樣每個附件都會建立一個 expense line
+    await handleMultiFileOCR();
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -1450,24 +2156,26 @@ export default function OCRExpensePage() {
                 {/* AI OCR Button */}
                 <Button
                   onClick={handleAIOCR}
-                  disabled={!previewImage || ocrProcessing}
+                  disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
                   className="w-full text-white"
                   style={{ backgroundColor: '#1a5490' }}
                   onMouseEnter={(e) => {
-                    if (!ocrProcessing && previewImage) {
+                    if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
                       e.currentTarget.style.backgroundColor = '#174880';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (!ocrProcessing && previewImage) {
+                    if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
                       e.currentTarget.style.backgroundColor = '#1a5490';
                     }
                   }}
                 >
-                  {ocrProcessing ? (
+                  {ocrProcessing || multiOcrTasks.size > 0 ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      等待 OCR 辨識結果...
+                      {multiOcrTasks.size > 0 
+                        ? `處理中 (${Array.from(multiOcrTasks.values()).filter(t => t.status === 'completed').length}/${multiOcrTasks.size})`
+                        : '等待 OCR 辨識結果...'}
                     </>
                   ) : (
                     <>
@@ -1478,12 +2186,16 @@ export default function OCRExpensePage() {
                 </Button>
                 
                 {/* OCR 處理中的載入提示 */}
-                {ocrProcessing && (
+                {(ocrProcessing || multiOcrTasks.size > 0) && (
                   <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>正在處理 OCR 辨識，請稍候...</span>
+                        <span>
+                          {multiOcrTasks.size > 0
+                            ? `正在處理 ${multiOcrTasks.size} 個附件的 OCR 辨識，請稍候...`
+                            : '正在處理 OCR 辨識，請稍候...'}
+                        </span>
                       </div>
                       <Button
                         variant="outline"
@@ -1496,8 +2208,42 @@ export default function OCRExpensePage() {
                       </Button>
                     </div>
                     <p className="text-sm text-blue-600 dark:text-blue-400 mt-1 ml-6">
-                      辨識結果將自動填入表單
+                      {multiOcrTasks.size > 0
+                        ? '辨識結果將自動建立對應的費用明細行'
+                        : '辨識結果將自動填入表單'}
                     </p>
+                    {/* 多附件處理狀態列表 */}
+                    {multiOcrTasks.size > 0 && (
+                      <div className="mt-3 space-y-1">
+                        {Array.from(multiOcrTasks.entries()).map(([fileIndex, task]) => {
+                          const file = attachments[fileIndex];
+                          return (
+                            <div
+                              key={fileIndex}
+                              className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400"
+                            >
+                              {task.status === 'processing' && (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              )}
+                              {task.status === 'completed' && (
+                                <Check className="h-3 w-3 text-green-600" />
+                              )}
+                              {task.status === 'error' && (
+                                <X className="h-3 w-3 text-red-600" />
+                              )}
+                              <span className="truncate flex-1">
+                                {file?.name || task.fileName}
+                              </span>
+                              <span className="text-blue-500">
+                                {task.status === 'processing' && '處理中...'}
+                                {task.status === 'completed' && '已完成'}
+                                {task.status === 'error' && '失敗'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1574,23 +2320,41 @@ export default function OCRExpensePage() {
                     </TableRow>
                   ) : (
                     expenseLines.map((line, index) => (
-                      <TableRow key={line.id}>
-                        <TableCell className="text-center text-sm px-1">{line.refNo}</TableCell>
+                      <TableRow 
+                        key={line.id}
+                        className={line.isProcessing ? "opacity-60 animate-pulse bg-blue-50/30 dark:bg-blue-900/10" : ""}
+                      >
+                        <TableCell className="text-center text-sm px-1">
+                          {line.isProcessing ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                              <span className="text-gray-400">{line.refNo}</span>
+                            </div>
+                          ) : (
+                            line.refNo
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-sm px-1.5 w-full"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                }}
-                              >
-                                <Eye className="h-3 w-3 mr-1" />
-                                {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? '查看 OCR' : '無 OCR'}
-                              </Button>
-                            </DialogTrigger>
+                          {line.isProcessing ? (
+                            <div className="flex items-center justify-center gap-2 text-gray-400 text-sm">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>正在辨識中...</span>
+                            </div>
+                          ) : (
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-sm px-1.5 w-full"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                  }}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? '查看 OCR' : '無 OCR'}
+                                </Button>
+                              </DialogTrigger>
                             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                               <DialogHeader>
                                 <DialogTitle>OCR 識別結果 - 明細 #{line.refNo}</DialogTitle>
@@ -1600,95 +2364,192 @@ export default function OCRExpensePage() {
                               </DialogHeader>
                               {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? (
                                 <div className="space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                      <Label className="text-sm font-semibold">發票標題</Label>
-                                      <p className="text-sm">{line.ocrData.invoiceTitle || 'N/A'}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-sm font-semibold">發票期間</Label>
-                                      <p className="text-sm">{line.ocrData.invoicePeriod || 'N/A'}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-sm font-semibold">發票號碼</Label>
-                                      <p className="text-sm">{line.ocrData.invoiceNumber || 'N/A'}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-sm font-semibold">發票日期</Label>
-                                      <p className="text-sm">{line.ocrData.invoiceDate || 'N/A'}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-sm font-semibold">隨機碼</Label>
-                                      <p className="text-sm">{line.ocrData.randomCode || 'N/A'}</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label className="text-sm font-semibold">格式代碼</Label>
-                                      <p className="text-sm">{line.ocrData.formatCode || 'N/A'}</p>
-                                    </div>
-                                  </div>
-                                  <div className="border-t pt-4">
-                                    <h3 className="text-sm font-semibold mb-2">賣方資訊</h3>
+                                  {/* 第一部分：OCR 發票資訊（最上面） */}
+                                  <div>
+                                    <h3 className="text-sm font-semibold mb-4">發票資訊</h3>
                                     <div className="grid grid-cols-2 gap-4">
                                       <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">賣方名稱</Label>
-                                        <p className="text-sm">{line.ocrData.sellerName || 'N/A'}</p>
+                                        <Label className="text-sm font-semibold">發票標題</Label>
+                                        <p className="text-sm">{line.ocrData.invoiceTitle || 'N/A'}</p>
                                       </div>
                                       <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">賣方統編</Label>
-                                        <p className="text-sm">{line.ocrData.sellerTaxId || 'N/A'}</p>
+                                        <Label className="text-sm font-semibold">發票期間</Label>
+                                        <p className="text-sm">{line.ocrData.invoicePeriod || 'N/A'}</p>
                                       </div>
-                                      <div className="space-y-2 col-span-2">
-                                        <Label className="text-sm font-semibold">賣方地址</Label>
-                                        <p className="text-sm">{line.ocrData.sellerAddress || 'N/A'}</p>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">發票號碼</Label>
+                                        <p className="text-sm">{line.ocrData.invoiceNumber || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">發票日期</Label>
+                                        <p className="text-sm">{line.ocrData.invoiceDate || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">隨機碼</Label>
+                                        <p className="text-sm">{line.ocrData.randomCode || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">格式代碼</Label>
+                                        <p className="text-sm">{line.ocrData.formatCode || 'N/A'}</p>
                                       </div>
                                     </div>
-                                  </div>
-                                  <div className="border-t pt-4">
-                                    <h3 className="text-sm font-semibold mb-2">買方資訊</h3>
-                                    <div className="grid grid-cols-2 gap-4">
-                                      <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">買方名稱</Label>
-                                        <p className="text-sm">{line.ocrData.buyerName || 'N/A'}</p>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">買方統編</Label>
-                                        <p className="text-sm">{line.ocrData.buyerTaxId || 'N/A'}</p>
-                                      </div>
-                                      <div className="space-y-2 col-span-2">
-                                        <Label className="text-sm font-semibold">買方地址</Label>
-                                        <p className="text-sm">{line.ocrData.buyerAddress || 'N/A'}</p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="border-t pt-4">
-                                    <h3 className="text-sm font-semibold mb-2">金額資訊</h3>
-                                    <div className="grid grid-cols-3 gap-4">
-                                      <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">未稅金額</Label>
-                                        <p className="text-sm">{line.ocrData.untaxedAmount || 'N/A'}</p>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">稅額</Label>
-                                        <p className="text-sm">{line.ocrData.taxAmount || 'N/A'}</p>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-sm font-semibold">總金額</Label>
-                                        <p className="text-sm font-bold">{line.ocrData.totalAmount || 'N/A'}</p>
+                                    <div className="border-t pt-4 mt-4">
+                                      <h3 className="text-sm font-semibold mb-2">賣方資訊</h3>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">賣方名稱</Label>
+                                          <p className="text-sm">{line.ocrData.sellerName || 'N/A'}</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">賣方統編</Label>
+                                          <p className="text-sm">{line.ocrData.sellerTaxId || 'N/A'}</p>
+                                        </div>
+                                        <div className="space-y-2 col-span-2">
+                                          <Label className="text-sm font-semibold">賣方地址</Label>
+                                          <p className="text-sm">{line.ocrData.sellerAddress || 'N/A'}</p>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                  {line.ocrData.ocrWebViewLink && (
                                     <div className="border-t pt-4">
-                                      <a
-                                        href={line.ocrData.ocrWebViewLink}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-800 text-sm underline"
-                                      >
-                                        查看原始檔案
-                                      </a>
+                                      <h3 className="text-sm font-semibold mb-2">買方資訊</h3>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">買方名稱</Label>
+                                          <p className="text-sm">{line.ocrData.buyerName || 'N/A'}</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">買方統編</Label>
+                                          <p className="text-sm">{line.ocrData.buyerTaxId || 'N/A'}</p>
+                                        </div>
+                                        <div className="space-y-2 col-span-2">
+                                          <Label className="text-sm font-semibold">買方地址</Label>
+                                          <p className="text-sm">{line.ocrData.buyerAddress || 'N/A'}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="border-t pt-4">
+                                      <h3 className="text-sm font-semibold mb-2">金額資訊</h3>
+                                      <div className="grid grid-cols-3 gap-4">
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">未稅金額</Label>
+                                          <p className="text-sm">{line.ocrData.untaxedAmount || 'N/A'}</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">稅額</Label>
+                                          <p className="text-sm">{line.ocrData.taxAmount || 'N/A'}</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label className="text-sm font-semibold">總金額</Label>
+                                          <p className="text-sm font-bold">{line.ocrData.totalAmount || 'N/A'}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {line.ocrData.ocrWebViewLink && (
+                                      <div className="border-t pt-4">
+                                        <a
+                                          href={line.ocrData.ocrWebViewLink}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-blue-600 hover:text-blue-800 text-sm underline"
+                                        >
+                                          查看原始檔案
+                                        </a>
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  {/* 第二部分：附件圖片（中間） */}
+                                  {line.ocrData.attachmentImageData && (
+                                    <div className="border-t pt-4">
+                                      <h3 className="text-sm font-semibold mb-4">附件圖片</h3>
+                                      <div className="flex justify-center">
+                                        <img
+                                          src={line.ocrData.attachmentImageData}
+                                          alt="收據附件"
+                                          className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm"
+                                        />
+                                      </div>
                                     </div>
                                   )}
+                                  
+                                  {/* 第三部分：AI 辨識結果（最下面） */}
+                                  <div className="border-t pt-4">
+                                    <h3 className="text-sm font-semibold mb-4">AI 辨識結果</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">辨識狀態</Label>
+                                        <p className="text-sm">
+                                          {line.ocrData.ocrSuccess ? (
+                                            <span className="text-green-600 dark:text-green-400">✓ 成功</span>
+                                          ) : (
+                                            <span className="text-red-600 dark:text-red-400">✗ 失敗</span>
+                                          )}
+                                        </p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">辨識信心度</Label>
+                                        <p className="text-sm">
+                                          {line.ocrData.ocrConfidence > 0 ? `${(line.ocrData.ocrConfidence * 100).toFixed(1)}%` : 'N/A'}
+                                        </p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">文件類型</Label>
+                                        <p className="text-sm">{line.ocrData.ocrDocumentType || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">品質等級</Label>
+                                        <p className="text-sm">{line.ocrData.ocrQualityGrade || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">錯誤數量</Label>
+                                        <p className="text-sm">
+                                          {line.ocrData.ocrErrorCount > 0 ? (
+                                            <span className="text-red-600 dark:text-red-400">{line.ocrData.ocrErrorCount}</span>
+                                          ) : (
+                                            <span className="text-green-600 dark:text-green-400">0</span>
+                                          )}
+                                        </p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">警告數量</Label>
+                                        <p className="text-sm">
+                                          {line.ocrData.ocrWarningCount > 0 ? (
+                                            <span className="text-yellow-600 dark:text-yellow-400">{line.ocrData.ocrWarningCount}</span>
+                                          ) : (
+                                            <span className="text-green-600 dark:text-green-400">0</span>
+                                          )}
+                                        </p>
+                                      </div>
+                                      <div className="space-y-2 col-span-2">
+                                        <Label className="text-sm font-semibold">檔案名稱</Label>
+                                        <p className="text-sm">{line.ocrData.ocrFileName || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">處理時間</Label>
+                                        <p className="text-sm">{line.ocrData.ocrProcessedAt || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">檔案 ID</Label>
+                                        <p className="text-sm font-mono text-xs">{line.ocrData.ocrFileId || 'N/A'}</p>
+                                      </div>
+                                      {line.ocrData.ocrErrors && (
+                                        <div className="space-y-2 col-span-2">
+                                          <Label className="text-sm font-semibold text-red-600 dark:text-red-400">錯誤訊息</Label>
+                                          <p className="text-sm text-red-600 dark:text-red-400 whitespace-pre-wrap bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                                            {line.ocrData.ocrErrors}
+                                          </p>
+                                        </div>
+                                      )}
+                                      {line.ocrData.ocrWarnings && (
+                                        <div className="space-y-2 col-span-2">
+                                          <Label className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">警告訊息</Label>
+                                          <p className="text-sm text-yellow-600 dark:text-yellow-400 whitespace-pre-wrap bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
+                                            {line.ocrData.ocrWarnings}
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="text-center py-8">
@@ -1698,9 +2559,13 @@ export default function OCRExpensePage() {
                               )}
                             </DialogContent>
                           </Dialog>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <div className="relative">
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <div className="relative">
                             <Input
                               type="date"
                               value={line.date || formData.expenseDate}
@@ -1715,9 +2580,13 @@ export default function OCRExpensePage() {
                               className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400 pointer-events-none z-10" 
                             />
                           </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Select
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Select
                             value={line.category}
                             onValueChange={(value) => {
                               const newLines = [...expenseLines];
@@ -1736,26 +2605,34 @@ export default function OCRExpensePage() {
                               ))}
                             </SelectContent>
                           </Select>
+                          )}
                         </TableCell>
                         {useMultiCurrency && (
                           <TableCell className="text-sm px-1">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={line.foreignAmount}
-                              onChange={(e) => {
-                                const newLines = [...expenseLines];
-                                newLines[index].foreignAmount = e.target.value;
-                                setExpenseLines(newLines);
-                              }}
-                              className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              placeholder="0.00"
-                            />
+                            {line.isProcessing ? (
+                              <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                            ) : (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.foreignAmount}
+                                onChange={(e) => {
+                                  const newLines = [...expenseLines];
+                                  newLines[index].foreignAmount = e.target.value;
+                                  setExpenseLines(newLines);
+                                }}
+                                className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="0.00"
+                              />
+                            )}
                           </TableCell>
                         )}
                         <TableCell className="text-sm px-1">
-                          <Select
-                            value={line.currency || formData.receiptCurrency}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Select
+                              value={line.currency || formData.receiptCurrency}
                             onValueChange={(value) => {
                               const newLines = [...expenseLines];
                               newLines[index].currency = value;
@@ -1773,28 +2650,36 @@ export default function OCRExpensePage() {
                               ))}
                             </SelectContent>
                           </Select>
+                          )}
                         </TableCell>
                         {useMultiCurrency && (
                           <TableCell className="text-sm px-1">
-                            <Input
-                              type="number"
-                              step="0.0001"
-                              value={line.exchangeRate || '1.00'}
-                              onChange={(e) => {
-                                const newLines = [...expenseLines];
-                                newLines[index].exchangeRate = e.target.value;
-                                setExpenseLines(newLines);
-                              }}
-                              className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              placeholder="1.00"
-                            />
+                            {line.isProcessing ? (
+                              <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                            ) : (
+                              <Input
+                                type="number"
+                                step="0.0001"
+                                value={line.exchangeRate || '1.00'}
+                                onChange={(e) => {
+                                  const newLines = [...expenseLines];
+                                  newLines[index].exchangeRate = e.target.value;
+                                  setExpenseLines(newLines);
+                                }}
+                                className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="1.00"
+                              />
+                            )}
                           </TableCell>
                         )}
                         <TableCell className="text-sm px-1">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={line.amount}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.amount}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
                               newLines[index].amount = e.target.value;
@@ -1807,10 +2692,14 @@ export default function OCRExpensePage() {
                             className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                           />
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Input
-                            value={line.taxCode}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Input
+                              value={line.taxCode}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
                               newLines[index].taxCode = e.target.value;
@@ -1819,12 +2708,16 @@ export default function OCRExpensePage() {
                             className="h-7 text-sm px-1.5"
                             placeholder="稅碼"
                           />
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={line.taxRate}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.taxRate}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
                               newLines[index].taxRate = e.target.value;
@@ -1840,12 +2733,16 @@ export default function OCRExpensePage() {
                             className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.0%"
                           />
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={line.taxAmt}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.taxAmt}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
                               newLines[index].taxAmt = e.target.value;
@@ -1858,20 +2755,28 @@ export default function OCRExpensePage() {
                             className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                           />
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={line.grossAmt}
-                            readOnly
-                            className="h-7 text-sm bg-gray-50 dark:bg-gray-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            placeholder="0.00"
-                          />
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={line.grossAmt}
+                              readOnly
+                              className="h-7 text-sm bg-gray-50 dark:bg-gray-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              placeholder="0.00"
+                            />
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Input
-                            value={line.memo}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Input
+                              value={line.memo}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
                               newLines[index].memo = e.target.value;
@@ -1880,10 +2785,14 @@ export default function OCRExpensePage() {
                             className="h-7 text-sm px-1.5 w-full"
                             placeholder="備註"
                           />
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Select
-                            value={line.department}
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Select
+                              value={line.department}
                             onValueChange={(value) => {
                               const newLines = [...expenseLines];
                               newLines[index].department = value;
@@ -1901,48 +2810,57 @@ export default function OCRExpensePage() {
                               ))}
                             </SelectContent>
                           </Select>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Select
-                            value={line.class}
-                            onValueChange={(value) => {
-                              const newLines = [...expenseLines];
-                              newLines[index].class = value;
-                              setExpenseLines(newLines);
-                            }}
-                          >
-                            <SelectTrigger className="h-7 text-sm px-1.5">
-                              <SelectValue placeholder="選擇類別" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {formOptions.classes.map((cls) => (
-                                <SelectItem key={cls.id} value={cls.id}>
-                                  {cls.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Select
+                              value={line.class}
+                              onValueChange={(value) => {
+                                const newLines = [...expenseLines];
+                                newLines[index].class = value;
+                                setExpenseLines(newLines);
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-sm px-1.5">
+                                <SelectValue placeholder="選擇類別" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {formOptions.classes.map((cls) => (
+                                  <SelectItem key={cls.id} value={cls.id}>
+                                    {cls.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
-                          <Select
-                            value={line.location}
-                            onValueChange={(value) => {
-                              const newLines = [...expenseLines];
-                              newLines[index].location = value;
-                              setExpenseLines(newLines);
-                            }}
-                          >
-                            <SelectTrigger className="h-7 text-sm px-1.5">
-                              <SelectValue placeholder="選擇地點" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {formOptions.locations.map((loc) => (
-                                <SelectItem key={loc.id} value={loc.id}>
-                                  {loc.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {line.isProcessing ? (
+                            <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          ) : (
+                            <Select
+                              value={line.location}
+                              onValueChange={(value) => {
+                                const newLines = [...expenseLines];
+                                newLines[index].location = value;
+                                setExpenseLines(newLines);
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-sm px-1.5">
+                                <SelectValue placeholder="選擇地點" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {formOptions.locations.map((loc) => (
+                                  <SelectItem key={loc.id} value={loc.id}>
+                                    {loc.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </TableCell>
                         <TableCell className="px-1">
                           <div className="flex gap-1">
@@ -1963,8 +2881,22 @@ export default function OCRExpensePage() {
                               variant="ghost"
                               size="sm"
                               onClick={() => {
+                                // 刪除指定的行
                                 const newLines = expenseLines.filter((_, i) => i !== index);
-                                setExpenseLines(newLines);
+                                
+                                // 重新編號所有剩餘的行，從 1 開始
+                                const renumberedLines = newLines.map((line, i) => ({
+                                  ...line,
+                                  refNo: i + 1,
+                                }));
+                                
+                                setExpenseLines(renumberedLines);
+                                
+                                // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
+                                const maxRefNo = renumberedLines.length > 0
+                                  ? Math.max(...renumberedLines.map(line => line.refNo || 0))
+                                  : 0;
+                                setNextRefNo(maxRefNo + 1);
                               }}
                               className="h-7 w-7 p-0"
                               title="刪除"
@@ -2111,4 +3043,5 @@ export default function OCRExpensePage() {
     </div>
   );
 }
+
 

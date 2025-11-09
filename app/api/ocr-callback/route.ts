@@ -71,6 +71,14 @@ export async function POST(request: Request) {
     }
 
     if (result) {
+      // 檢查是否已經存在（防止 N8N 重複回調）
+      const existingResult = ocrResults.get(jobId);
+      if (existingResult && existingResult.status === 'completed') {
+        console.warn(`[ocr-callback] jobId ${jobId} 已經存在結果，N8N 可能重複回調了！`);
+        return NextResponse.json({ success: true, message: '結果已存在（重複回調）', jobId });
+      }
+      
+      console.log(`[ocr-callback] 保存 OCR 結果 - jobId: ${jobId}, timestamp: ${Date.now()}`);
       ocrResults.set(jobId, {
         status: 'completed',
         data: result,
