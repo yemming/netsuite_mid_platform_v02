@@ -221,6 +221,28 @@ export default function OCRExpensePage() {
   const [expenseLines, setExpenseLines] = useState<ExpenseReportLine[]>([]);
   const [nextRefNo, setNextRefNo] = useState(1);
   const [useMultiCurrency, setUseMultiCurrency] = useState(false);
+
+  // 當 expenseLines 改變且未使用多幣別時，自動更新收據金額
+  useEffect(() => {
+    if (!useMultiCurrency) {
+      // 計算所有 expense lines 的總金額
+      const total = expenseLines.reduce((sum, line) => {
+        const grossAmt = parseFloat(line.grossAmt || '0') || 0;
+        return sum + grossAmt;
+      }, 0);
+      const totalAmount = total.toFixed(2);
+      setFormData(prev => {
+        // 只有當金額改變時才更新，避免不必要的重新渲染
+        if (prev.receiptAmount !== totalAmount) {
+          return {
+            ...prev,
+            receiptAmount: totalAmount,
+          };
+        }
+        return prev;
+      });
+    }
+  }, [expenseLines, useMultiCurrency]);
   
   // 拖拽相關 state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -276,6 +298,99 @@ export default function OCRExpensePage() {
   const handleRowDragEnd = () => {
     setDraggedIndex(null);
     setDragOverIndex(null);
+  };
+
+  // 更新 OCR 資料的處理函數
+  const handleOcrDataChange = (lineIndex: number, field: string, value: string) => {
+    setExpenseLines(prev => {
+      const newLines = [...prev];
+      if (newLines[lineIndex]) {
+        newLines[lineIndex] = {
+          ...newLines[lineIndex],
+          ocrData: {
+            ...newLines[lineIndex].ocrData,
+            [field]: value,
+          },
+        };
+      }
+      return newLines;
+    });
+  };
+
+  // 在指定行下方插入空白行的函數
+  const insertBlankLineAfter = (index: number) => {
+    const newLine: ExpenseReportLine = {
+      id: `line-${Date.now()}-${Math.random()}`,
+      refNo: 0, // 暫時設為 0，稍後會重新編號
+      date: formData.expenseDate || '',
+      category: '',
+      foreignAmount: '',
+      currency: formData.receiptCurrency || 'TWD',
+      exchangeRate: '1.00',
+      amount: '', // 空白，不複製上一行的金額
+      taxCode: '',
+      taxRate: '',
+      taxAmt: '', // 空白，不複製上一行的稅額
+      grossAmt: '', // 空白，不複製上一行的總金額
+      memo: '',
+      department: '',
+      class: '',
+      location: '',
+      ocrDetail: '',
+      ocrData: {
+        invoiceTitle: '',
+        invoicePeriod: '',
+        invoiceNumber: '',
+        invoiceDate: '',
+        randomCode: '',
+        formatCode: '',
+        sellerName: '',
+        sellerTaxId: '',
+        sellerAddress: '',
+        buyerName: '',
+        buyerTaxId: '',
+        buyerAddress: '',
+        untaxedAmount: '',
+        taxAmount: '',
+        totalAmount: '',
+        ocrSuccess: false,
+        ocrConfidence: 0,
+        ocrDocumentType: '',
+        ocrErrors: '',
+        ocrWarnings: '',
+        ocrErrorCount: 0,
+        ocrWarningCount: 0,
+        ocrQualityGrade: '',
+        ocrFileName: '',
+        ocrFileId: '',
+        ocrWebViewLink: '',
+        ocrProcessedAt: '',
+      },
+      customer: '',
+      projectTask: '',
+      billable: false,
+      attachFile: '',
+      receipt: '',
+      isEditing: true,
+    };
+    
+    // 插入新行到指定位置
+    const newLines = [...expenseLines];
+    newLines.splice(index + 1, 0, newLine);
+    
+    // 重新編號所有行，從 1 開始依序遞增
+    const renumberedLines = newLines.map((line, i) => ({
+      ...line,
+      refNo: i + 1,
+    }));
+    
+    setExpenseLines(renumberedLines);
+    
+    // 更新 nextRefNo 為下一個可用的編號（基於重新編號後的最大編號）
+    const maxRefNo = renumberedLines.length > 0
+      ? Math.max(...renumberedLines.map(line => line.refNo || 0))
+      : 0;
+    setNextRefNo(maxRefNo + 1);
   };
 
   const handleInputChange = (field: string, value: any) => {
@@ -559,7 +674,10 @@ export default function OCRExpensePage() {
 
     // 處理頂層元數據欄位
     handleInputChange('ocrSuccess', ocrResult.success ?? false);
-    handleInputChange('ocrConfidence', ocrResult.confidence ?? 0);
+    // 統一 confidence 格式：如果 > 1 表示是百分比（如 85），轉換為小數（0.85）
+    const confidence = ocrResult.confidence ?? 0;
+    const normalizedConfidence = confidence > 1 ? confidence / 100 : confidence;
+    handleInputChange('ocrConfidence', normalizedConfidence);
     handleInputChange('ocrDocumentType', ocrResult.documentType || '');
     handleInputChange('ocrErrors', ocrResult.errors || '');
     handleInputChange('ocrWarnings', ocrResult.warnings || '');
@@ -593,7 +711,11 @@ export default function OCRExpensePage() {
       taxAmount: ocrData['稅額'] || '',
       totalAmount: ocrData['總計金額'] || '',
       ocrSuccess: ocrResult.success ?? false,
-      ocrConfidence: ocrResult.confidence ?? 0,
+      // 統一 confidence 格式：如果 > 1 表示是百分比（如 85），轉換為小數（0.85）
+      ocrConfidence: (() => {
+        const confidence = ocrResult.confidence ?? 0;
+        return confidence > 1 ? confidence / 100 : confidence;
+      })(),
       ocrDocumentType: ocrResult.documentType || '',
       ocrErrors: ocrResult.errors || '',
       ocrWarnings: ocrResult.warnings || '',
@@ -1885,6 +2007,8 @@ export default function OCRExpensePage() {
                     placeholder="0.00"
                     className="flex-1"
                     required
+                    readOnly={!useMultiCurrency}
+                    title={!useMultiCurrency ? "收據金額會自動加總所有行的總金額" : ""}
                   />
                 </div>
               </div>
@@ -2350,7 +2474,7 @@ export default function OCRExpensePage() {
                   <TableRow className="bg-gray-100 dark:bg-gray-800">
                     <TableHead className="w-16 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">參考編號</TableHead>
                     <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">操作</TableHead>
-                    <TableHead className="w-20 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
+                    <TableHead className="w-14 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">日期 <span className="text-red-500">*</span></TableHead>
                     <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別 <span className="text-red-500">*</span></TableHead>
                     {useMultiCurrency && <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">外幣金額</TableHead>}
@@ -2382,7 +2506,41 @@ export default function OCRExpensePage() {
                           ${line.isProcessing ? "opacity-60 animate-pulse bg-blue-50/30 dark:bg-blue-900/10" : ""}
                           ${draggedIndex === index ? "opacity-50" : ""}
                           ${dragOverIndex === index ? "border-t-2 border-blue-500 dark:border-blue-400" : ""}
+                          cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50
                         `}
+                        onClick={(e) => {
+                          // 如果點擊的是按鈕或輸入框，不觸發行的點擊事件
+                          const target = e.target as HTMLElement;
+                          if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('textarea') || target.closest('[role="dialog"]')) {
+                            return;
+                          }
+                          // 如果有 OCR 圖片，顯示在預覽區域
+                          if (line.ocrData?.attachmentImageData) {
+                            setPreviewImage(line.ocrData.attachmentImageData);
+                            setZoom(1);
+                            setPosition({ x: 0, y: 0 });
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          // 當按下 Enter 鍵時，在當前行下方插入新行
+                          // 只有在輸入框、文字區域或下拉選單中按下 Enter 時才觸發
+                          const target = e.target as HTMLElement;
+                          if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              insertBlankLineAfter(index);
+                              // 延遲一下，讓新行渲染後再聚焦到新行的第一個輸入框
+                              setTimeout(() => {
+                                const newRowIndex = index + 1;
+                                const newRowInputs = document.querySelectorAll(`tr[data-row-index="${newRowIndex}"] input, tr[data-row-index="${newRowIndex}"] select`);
+                                if (newRowInputs.length > 0) {
+                                  (newRowInputs[0] as HTMLElement).focus();
+                                }
+                              }, 100);
+                            }
+                          }
+                        }}
+                        data-row-index={index}
                         onDragOver={(e) => handleRowDragOver(e, index)}
                         onDragLeave={handleRowDragLeave}
                         onDrop={(e) => handleRowDrop(e, index)}
@@ -2452,11 +2610,11 @@ export default function OCRExpensePage() {
                                   foreignAmount: '',
                                   currency: formData.receiptCurrency || 'TWD',
                                   exchangeRate: '1.00',
-                                  amount: '',
+                                  amount: '', // 空白，不複製上一行的金額
                                   taxCode: '',
                                   taxRate: '',
-                                  taxAmt: '',
-                                  grossAmt: '',
+                                  taxAmt: '', // 空白，不複製上一行的稅額
+                                  grossAmt: '', // 空白，不複製上一行的總金額
                                   memo: '',
                                   department: '',
                                   class: '',
@@ -2571,13 +2729,26 @@ export default function OCRExpensePage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className="h-7 text-sm px-1.5 w-full"
+                                  className={`h-7 text-sm px-3 w-full ${
+                                    line.ocrData.ocrFileName || line.ocrData.invoiceNumber
+                                      ? 'rounded-full bg-[#F4A460] hover:bg-[#E9967A] border-[#F4A460] text-white dark:bg-[#4A90E2] dark:hover:bg-[#357ABD] dark:border-[#4A90E2] dark:text-white'
+                                      : 'rounded-full bg-white hover:bg-gray-50 border-gray-300 text-gray-900 dark:bg-transparent dark:hover:bg-gray-800/50 dark:border-white dark:text-white'
+                                  }`}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                   }}
                                 >
-                                  <Eye className="h-3 w-3 mr-1" />
-                                  {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? '查看 OCR' : '無 OCR'}
+                                  {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <Eye className="h-3 w-3 text-white" />
+                                      <span className="text-white font-medium">查看 OCR</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1.5">
+                                      <Eye className="h-3 w-3 text-gray-900 dark:text-white" />
+                                      <span className="text-gray-900 dark:text-white font-medium">無 OCR</span>
+                                    </div>
+                                  )}
                                 </Button>
                               </DialogTrigger>
                             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -2595,27 +2766,57 @@ export default function OCRExpensePage() {
                                     <div className="grid grid-cols-2 gap-4">
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">發票標題</Label>
-                                        <p className="text-sm">{line.ocrData.invoiceTitle || 'N/A'}</p>
+                                        <Input
+                                          value={line.ocrData.invoiceTitle || ''}
+                                          onChange={(e) => handleOcrDataChange(index, 'invoiceTitle', e.target.value)}
+                                          className="text-sm"
+                                          placeholder="N/A"
+                                        />
                                       </div>
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">發票期間</Label>
-                                        <p className="text-sm">{line.ocrData.invoicePeriod || 'N/A'}</p>
+                                        <Input
+                                          value={line.ocrData.invoicePeriod || ''}
+                                          onChange={(e) => handleOcrDataChange(index, 'invoicePeriod', e.target.value)}
+                                          className="text-sm"
+                                          placeholder="N/A"
+                                        />
                                       </div>
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">發票號碼</Label>
-                                        <p className="text-sm">{line.ocrData.invoiceNumber || 'N/A'}</p>
+                                        <Input
+                                          value={line.ocrData.invoiceNumber || ''}
+                                          onChange={(e) => handleOcrDataChange(index, 'invoiceNumber', e.target.value)}
+                                          className="text-sm"
+                                          placeholder="N/A"
+                                        />
                                       </div>
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">發票日期</Label>
-                                        <p className="text-sm">{line.ocrData.invoiceDate || 'N/A'}</p>
+                                        <Input
+                                          type="date"
+                                          value={line.ocrData.invoiceDate || ''}
+                                          onChange={(e) => handleOcrDataChange(index, 'invoiceDate', e.target.value)}
+                                          className="text-sm"
+                                        />
                                       </div>
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">隨機碼</Label>
-                                        <p className="text-sm">{line.ocrData.randomCode || 'N/A'}</p>
+                                        <Input
+                                          value={line.ocrData.randomCode || ''}
+                                          onChange={(e) => handleOcrDataChange(index, 'randomCode', e.target.value)}
+                                          className="text-sm"
+                                          placeholder="N/A"
+                                        />
                                       </div>
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">格式代碼</Label>
-                                        <p className="text-sm">{line.ocrData.formatCode || 'N/A'}</p>
+                                        <Input
+                                          value={line.ocrData.formatCode || ''}
+                                          onChange={(e) => handleOcrDataChange(index, 'formatCode', e.target.value)}
+                                          className="text-sm"
+                                          placeholder="N/A"
+                                        />
                                       </div>
                                     </div>
                                     <div className="border-t pt-4 mt-4">
@@ -2623,15 +2824,30 @@ export default function OCRExpensePage() {
                                       <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">賣方名稱</Label>
-                                          <p className="text-sm">{line.ocrData.sellerName || 'N/A'}</p>
+                                          <Input
+                                            value={line.ocrData.sellerName || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'sellerName', e.target.value)}
+                                            className="text-sm"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">賣方統編</Label>
-                                          <p className="text-sm">{line.ocrData.sellerTaxId || 'N/A'}</p>
+                                          <Input
+                                            value={line.ocrData.sellerTaxId || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'sellerTaxId', e.target.value)}
+                                            className="text-sm"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                         <div className="space-y-2 col-span-2">
                                           <Label className="text-sm font-semibold">賣方地址</Label>
-                                          <p className="text-sm">{line.ocrData.sellerAddress || 'N/A'}</p>
+                                          <Textarea
+                                            value={line.ocrData.sellerAddress || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'sellerAddress', e.target.value)}
+                                            className="text-sm min-h-[60px]"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                       </div>
                                     </div>
@@ -2640,15 +2856,30 @@ export default function OCRExpensePage() {
                                       <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">買方名稱</Label>
-                                          <p className="text-sm">{line.ocrData.buyerName || 'N/A'}</p>
+                                          <Input
+                                            value={line.ocrData.buyerName || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'buyerName', e.target.value)}
+                                            className="text-sm"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">買方統編</Label>
-                                          <p className="text-sm">{line.ocrData.buyerTaxId || 'N/A'}</p>
+                                          <Input
+                                            value={line.ocrData.buyerTaxId || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'buyerTaxId', e.target.value)}
+                                            className="text-sm"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                         <div className="space-y-2 col-span-2">
                                           <Label className="text-sm font-semibold">買方地址</Label>
-                                          <p className="text-sm">{line.ocrData.buyerAddress || 'N/A'}</p>
+                                          <Textarea
+                                            value={line.ocrData.buyerAddress || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'buyerAddress', e.target.value)}
+                                            className="text-sm min-h-[60px]"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                       </div>
                                     </div>
@@ -2657,15 +2888,33 @@ export default function OCRExpensePage() {
                                       <div className="grid grid-cols-3 gap-4">
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">未稅金額</Label>
-                                          <p className="text-sm">{line.ocrData.untaxedAmount || 'N/A'}</p>
+                                          <Input
+                                            type="text"
+                                            value={line.ocrData.untaxedAmount || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'untaxedAmount', e.target.value)}
+                                            className="text-sm"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">稅額</Label>
-                                          <p className="text-sm">{line.ocrData.taxAmount || 'N/A'}</p>
+                                          <Input
+                                            type="text"
+                                            value={line.ocrData.taxAmount || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'taxAmount', e.target.value)}
+                                            className="text-sm"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                         <div className="space-y-2">
                                           <Label className="text-sm font-semibold">總金額</Label>
-                                          <p className="text-sm font-bold">{line.ocrData.totalAmount || 'N/A'}</p>
+                                          <Input
+                                            type="text"
+                                            value={line.ocrData.totalAmount || ''}
+                                            onChange={(e) => handleOcrDataChange(index, 'totalAmount', e.target.value)}
+                                            className="text-sm font-bold"
+                                            placeholder="N/A"
+                                          />
                                         </div>
                                       </div>
                                     </div>
@@ -2714,7 +2963,13 @@ export default function OCRExpensePage() {
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">辨識信心度</Label>
                                         <p className="text-sm">
-                                          {line.ocrData.ocrConfidence > 0 ? `${(line.ocrData.ocrConfidence * 100).toFixed(1)}%` : 'N/A'}
+                                          {line.ocrData.ocrConfidence > 0 ? (() => {
+                                            // 如果 confidence > 1，表示已經是百分比格式，直接顯示
+                                            // 如果 confidence <= 1，表示是小數格式，乘以 100
+                                            const confidence = line.ocrData.ocrConfidence;
+                                            const percentage = confidence > 1 ? confidence : confidence * 100;
+                                            return `${percentage.toFixed(1)}%`;
+                                          })() : 'N/A'}
                                         </p>
                                       </div>
                                       <div className="space-y-2">
@@ -2904,7 +3159,7 @@ export default function OCRExpensePage() {
                             <Input
                               type="number"
                               step="0.01"
-                              value={line.amount}
+                              value={line.amount && parseFloat(line.amount) !== 0 ? line.amount : ''}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
                               newLines[index].amount = e.target.value;
@@ -2989,9 +3244,9 @@ export default function OCRExpensePage() {
                             <Input
                               type="number"
                               step="0.01"
-                              value={line.grossAmt}
+                              value={line.grossAmt && parseFloat(line.grossAmt) !== 0 ? line.grossAmt : ''}
                               readOnly
-                              className="h-7 text-sm bg-gray-50 dark:bg-gray-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className="h-7 text-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               placeholder="0.00"
                             />
                           )}
@@ -3107,11 +3362,11 @@ export default function OCRExpensePage() {
                     foreignAmount: '',
                     currency: formData.receiptCurrency || 'TWD',
                     exchangeRate: '1.00',
-                    amount: formData.receiptAmount || '',
+                    amount: '', // 空白，不複製收據金額
                     taxCode: '',
                     taxRate: '',
-                    taxAmt: '',
-                    grossAmt: formData.receiptAmount || '',
+                    taxAmt: '', // 空白，不複製稅額
+                    grossAmt: '', // 空白，不複製總金額
                     memo: formData.description || '',
                     department: formData.department || '',
                     class: formData.class || '',
