@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2, Copy, Trash2, Check, Eye } from 'lucide-react';
+import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2, Copy, Trash2, Check, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -134,7 +134,45 @@ export default function OCRExpensePage() {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImageIndex, setPreviewImageIndex] = useState<number>(0);
+  const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
+
+  // 當附件改變時，自動載入預覽圖片
+  useEffect(() => {
+    const loadImages = async () => {
+      if (attachments.length > 0) {
+        const imageFiles = attachments.filter(file => file.type.startsWith('image/'));
+        const promises = imageFiles.map(file => {
+          return new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              resolve(e.target?.result as string);
+            };
+            reader.readAsDataURL(file);
+          });
+        });
+        const images = await Promise.all(promises);
+        setPreviewImages(images);
+        if (images.length > 0) {
+          setPreviewImageIndex(prevIndex => {
+            const newIndex = prevIndex >= images.length ? 0 : prevIndex;
+            setPreviewImage(images[newIndex]);
+            return newIndex;
+          });
+        } else {
+          setPreviewImage(null);
+          setPreviewImageIndex(0);
+        }
+      } else {
+        setPreviewImages([]);
+        setPreviewImage(null);
+        setPreviewImageIndex(0);
+      }
+    };
+    loadImages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachments.length]); // 只在附件數量改變時觸發
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -175,43 +213,114 @@ export default function OCRExpensePage() {
     }));
   };
 
+  // 將所有圖片附件轉換為 base64 預覽
+  const loadPreviewImages = async (files: File[]) => {
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    const promises = imageFiles.map(file => {
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          resolve(e.target?.result as string);
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    const images = await Promise.all(promises);
+    setPreviewImages(images);
+    if (images.length > 0) {
+      // 如果當前沒有預覽圖片，顯示第一張
+      if (!previewImage) {
+        setPreviewImage(images[0]);
+        setPreviewImageIndex(0);
+      } else {
+        // 如果有預覽圖片，檢查當前索引是否有效
+        if (previewImageIndex >= images.length) {
+          setPreviewImageIndex(0);
+          setPreviewImage(images[0]);
+        } else {
+          setPreviewImage(images[previewImageIndex]);
+        }
+      }
+    } else {
+      setPreviewImage(null);
+      setPreviewImageIndex(0);
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files);
-      // 優化：只保留最新上傳的圖片（一筆報支對應一張發票）
-      // 如果上傳多個文件，只取第一個圖片文件
-      const firstImage = newFiles.find(file => file.type.startsWith('image/'));
-      if (firstImage) {
-        // 清除舊的附件，只保留新上傳的圖片
-        setAttachments([firstImage]);
-        
-        // 自動預覽新圖片
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          setPreviewImage(e.target?.result as string);
-          setZoom(1);
-          setPosition({ x: 0, y: 0 });
-        };
-        reader.readAsDataURL(firstImage);
-      } else {
-        // 如果沒有圖片，清除所有附件
-        setAttachments([]);
-        setPreviewImage(null);
+      // 支援多個附件：將新檔案添加到現有附件列表中
+      const imageFiles = newFiles.filter(file => file.type.startsWith('image/') || file.type === 'application/pdf');
+      if (imageFiles.length > 0) {
+        // 將新檔案添加到現有附件列表
+        setAttachments(prev => {
+          const updated = [...prev, ...imageFiles];
+          loadPreviewImages(updated);
+          return updated;
+        });
       }
+      // 重置 input，讓使用者可以再次選擇同一個檔案
+      e.target.value = '';
     }
   };
 
   const handleRemoveFile = (index: number) => {
     setAttachments((prev) => {
       const newAttachments = prev.filter((_, i) => i !== index);
-      // 如果移除的是當前預覽的圖片，清除預覽
-      if (newAttachments.length === 0 || !newAttachments.find(f => f.type.startsWith('image/'))) {
-        setPreviewImage(null);
+      // 重新載入預覽圖片
+      loadPreviewImages(newAttachments);
+      return newAttachments;
+    });
+  };
+
+  // 切換到上一張圖片
+  const handlePreviousImage = () => {
+    if (previewImages.length > 0) {
+      const newIndex = previewImageIndex === 0 ? previewImages.length - 1 : previewImageIndex - 1;
+      setPreviewImageIndex(newIndex);
+      setPreviewImage(previewImages[newIndex]);
+      setZoom(1);
+      setPosition({ x: 0, y: 0 });
+    }
+  };
+
+  // 切換到下一張圖片
+  const handleNextImage = () => {
+    if (previewImages.length > 0) {
+      const newIndex = previewImageIndex === previewImages.length - 1 ? 0 : previewImageIndex + 1;
+      setPreviewImageIndex(newIndex);
+      setPreviewImage(previewImages[newIndex]);
+      setZoom(1);
+      setPosition({ x: 0, y: 0 });
+    }
+  };
+
+  // 點擊附件時切換到對應的圖片預覽
+  const handleAttachmentClick = (fileIndex: number) => {
+    const file = attachments[fileIndex];
+    if (file && file.type.startsWith('image/')) {
+      // 找到該檔案在所有圖片中的索引
+      const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
+      const imageIndex = imageFiles.findIndex(f => f === file);
+      if (imageIndex !== -1) {
+        setPreviewImageIndex(imageIndex);
+        setPreviewImage(previewImages[imageIndex]);
         setZoom(1);
         setPosition({ x: 0, y: 0 });
       }
-      return newAttachments;
-    });
+    }
+  };
+
+  // 檢查附件是否為當前預覽的圖片
+  const isAttachmentSelected = (fileIndex: number) => {
+    const file = attachments[fileIndex];
+    if (file && file.type.startsWith('image/')) {
+      const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
+      const imageIndex = imageFiles.findIndex(f => f === file);
+      return imageIndex === previewImageIndex;
+    }
+    return false;
   };
 
   const handleZoomIn = () => {
@@ -575,24 +684,15 @@ export default function OCRExpensePage() {
     e.preventDefault();
     if (e.dataTransfer.files) {
       const newFiles = Array.from(e.dataTransfer.files);
-      // 優化：只保留最新上傳的圖片（一筆報支對應一張發票）
-      const firstImage = newFiles.find(file => file.type.startsWith('image/'));
-      if (firstImage) {
-        // 清除舊的附件，只保留新上傳的圖片
-        setAttachments([firstImage]);
-        
-        // 自動預覽新圖片
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          setPreviewImage(e.target?.result as string);
-          setZoom(1);
-          setPosition({ x: 0, y: 0 });
-        };
-        reader.readAsDataURL(firstImage);
-      } else {
-        // 如果沒有圖片，清除所有附件
-        setAttachments([]);
-        setPreviewImage(null);
+      // 支援多個附件：將新檔案添加到現有附件列表中
+      const imageFiles = newFiles.filter(file => file.type.startsWith('image/') || file.type === 'application/pdf');
+      if (imageFiles.length > 0) {
+        // 將新檔案添加到現有附件列表
+        setAttachments(prev => {
+          const updated = [...prev, ...imageFiles];
+          loadPreviewImages(updated);
+          return updated;
+        });
       }
     }
   };
@@ -770,9 +870,9 @@ export default function OCRExpensePage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left Column - Form Fields */}
-            <div className="space-y-4">
+            <div className="space-y-1">
               {/* Expense Date */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="expenseDate" className="text-sm font-semibold">
                   報支日期 <span className="text-red-500">*</span>
                 </Label>
@@ -813,7 +913,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Type */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="type" className="text-sm font-semibold">
                   費用用途 <span className="text-red-500">*</span>
                 </Label>
@@ -842,7 +942,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Employee */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="employee" className="text-sm font-semibold">
                   員工 <span className="text-red-500">*</span>
                 </Label>
@@ -871,7 +971,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Subsidiary */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="subsidiary" className="text-sm font-semibold">
                   公司別 <span className="text-red-500">*</span>
                 </Label>
@@ -900,7 +1000,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Expense Location */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="expenseLocation" className="text-sm font-semibold">
                   地點
                 </Label>
@@ -929,7 +1029,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Department */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="department" className="text-sm font-semibold">
                   部門
                 </Label>
@@ -958,7 +1058,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Class */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="class" className="text-sm font-semibold">
                   類別
                 </Label>
@@ -987,7 +1087,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Receipt Amount */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="receiptAmount" className="text-sm font-semibold">
                   收據金額 <span className="text-red-500">*</span>
                 </Label>
@@ -1028,7 +1128,7 @@ export default function OCRExpensePage() {
               </div>
 
               {/* Description */}
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="description" className="text-sm font-semibold">
                   描述
                 </Label>
@@ -1050,21 +1150,22 @@ export default function OCRExpensePage() {
                 <div
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
-                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex-1 min-h-[175px] flex flex-col"
+                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex-1 min-h-[150px] flex flex-col"
                 >
                   <input
                     type="file"
                     id="file-upload"
                     accept="image/*,.pdf"
                     onChange={handleFileUpload}
+                    multiple
                     className="hidden"
                   />
                   <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-4 flex-1">
                     {/* Decorative Icon - Leaves with Paperclip */}
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 ml-2">
                       <svg
-                        width="64"
-                        height="64"
+                        width="120"
+                        height="120"
                         viewBox="0 0 64 64"
                         fill="none"
                         xmlns="http://www.w3.org/2000/svg"
@@ -1076,7 +1177,7 @@ export default function OCRExpensePage() {
                             d="M24 18 Q20 22 20 28 Q20 38 26 44 Q32 50 38 46 Q42 42 42 36 Q42 30 38 26 Q34 22 30 20 Q28 18 24 18 Z"
                             fill="#16A34A"
                             className="dark:fill-green-600"
-                            opacity="0.85"
+                            opacity="1.0"
                           />
                           <path
                             d="M24 18 Q20 22 20 28 Q20 38 26 44 Q32 50 38 46 Q42 42 42 36 Q42 30 38 26 Q34 22 30 20 Q28 18 24 18"
@@ -1084,7 +1185,7 @@ export default function OCRExpensePage() {
                             stroke="#0F5132"
                             className="dark:stroke-green-800"
                             strokeWidth="0.5"
-                            opacity="0.4"
+                            opacity="0.6"
                           />
                           {/* Veins on green leaf */}
                           <path
@@ -1092,21 +1193,21 @@ export default function OCRExpensePage() {
                             stroke="#0F5132"
                             className="dark:stroke-green-800"
                             strokeWidth="0.5"
-                            opacity="0.3"
+                            opacity="0.5"
                           />
                           <path
                             d="M26 24 L34 32"
                             stroke="#0F5132"
                             className="dark:stroke-green-800"
                             strokeWidth="0.5"
-                            opacity="0.3"
+                            opacity="0.5"
                           />
                           <path
                             d="M34 24 L26 32"
                             stroke="#0F5132"
                             className="dark:stroke-green-800"
                             strokeWidth="0.5"
-                            opacity="0.3"
+                            opacity="0.5"
                           />
                         </g>
                         
@@ -1116,7 +1217,7 @@ export default function OCRExpensePage() {
                             d="M0 0 Q-4 4 -4 10 Q-4 20 2 26 Q8 32 14 28 Q18 24 18 18 Q18 12 14 8 Q10 4 6 2 Q4 0 0 0 Z"
                             fill="#F59E0B"
                             className="dark:fill-amber-500"
-                            opacity="0.9"
+                            opacity="1.0"
                           />
                           <path
                             d="M0 0 Q-4 4 -4 10 Q-4 20 2 26 Q8 32 14 28 Q18 24 18 18 Q18 12 14 8 Q10 4 6 2 Q4 0 0 0"
@@ -1124,7 +1225,7 @@ export default function OCRExpensePage() {
                             stroke="#D97706"
                             className="dark:stroke-amber-600"
                             strokeWidth="0.5"
-                            opacity="0.5"
+                            opacity="0.7"
                           />
                           {/* Veins on yellow leaf */}
                           <path
@@ -1132,21 +1233,21 @@ export default function OCRExpensePage() {
                             stroke="#D97706"
                             className="dark:stroke-amber-600"
                             strokeWidth="0.5"
-                            opacity="0.4"
+                            opacity="0.6"
                           />
                           <path
                             d="M2 6 L10 14"
                             stroke="#D97706"
                             className="dark:stroke-amber-600"
                             strokeWidth="0.5"
-                            opacity="0.4"
+                            opacity="0.6"
                           />
                           <path
                             d="M10 6 L2 14"
                             stroke="#D97706"
                             className="dark:stroke-amber-600"
                             strokeWidth="0.5"
-                            opacity="0.4"
+                            opacity="0.6"
                           />
                         </g>
                         
@@ -1175,51 +1276,70 @@ export default function OCRExpensePage() {
                     </div>
                     
                     {/* Text Content */}
-                    <div className="flex-1 text-left">
+                    <div className="flex-1 text-center">
                       <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 font-medium">
                         將發票圖片拖曳到此處或點擊上傳
                       </p>
                       <p className="text-sm text-gray-500 dark:text-gray-500">
-                        支援圖片格式（上傳新圖片會自動替換舊的）
+                        支援圖片格式，可上傳多個附件
                       </p>
                     </div>
                   </label>
                   {attachments.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                      {attachments.map((file, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded"
-                        >
-                          <span className="text-sm truncate flex-1">{file.name}</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveFile(index)}
-                            className="h-6 w-6 p-0"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {attachments.map((file, index) => {
+                          const isSelected = isAttachmentSelected(index);
+                          const isImage = file.type.startsWith('image/');
+                          return (
+                            <div
+                              key={index}
+                              onClick={() => isImage && handleAttachmentClick(index)}
+                              className={`flex items-center gap-1.5 px-2 py-1 border rounded-full text-xs transition-colors ${
+                                isSelected
+                                  ? 'bg-purple-600 dark:bg-purple-700 border-purple-600 dark:border-purple-700 cursor-pointer'
+                                  : isImage
+                                  ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-200 dark:hover:bg-purple-800/50'
+                                  : 'bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-700'
+                              }`}
+                            >
+                              <span
+                                className={`text-xs truncate max-w-[100px] ${
+                                  isSelected
+                                    ? 'text-white'
+                                    : 'text-purple-700 dark:text-purple-300'
+                                }`}
+                              >
+                                {file.name}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveFile(index);
+                                }}
+                                className={`h-4 w-4 p-0 rounded-full ${
+                                  isSelected
+                                    ? 'hover:bg-purple-700 dark:hover:bg-purple-800'
+                                    : 'hover:bg-purple-200 dark:hover:bg-purple-800'
+                                }`}
+                              >
+                                <X
+                                  className={`h-2.5 w-2.5 ${
+                                    isSelected
+                                      ? 'text-white'
+                                      : 'text-purple-600 dark:text-purple-400'
+                                  }`}
+                                />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* Receipt Missing */}
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="receiptMissing"
-                  checked={formData.receiptMissing}
-                  onCheckedChange={(checked) =>
-                    handleInputChange('receiptMissing', checked)
-                  }
-                  className="border-gray-300 dark:border-gray-600"
-                />
-                <Label htmlFor="receiptMissing" className="font-normal cursor-pointer">
-                  收據遺失
-                </Label>
               </div>
 
               {/* Image Preview */}
@@ -1227,11 +1347,11 @@ export default function OCRExpensePage() {
                 <Label className="text-sm font-semibold">圖片預覽</Label>
                 <div
                   className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
-                  style={{ minHeight: '400px', height: '400px' }}
+                  style={{ minHeight: '350px', height: '350px' }}
                   onWheel={handleWheel}
                 >
                   {previewImage ? (
-                    <div className="relative w-full h-full" style={{ minHeight: '400px', height: '400px' }}>
+                    <div className="relative w-full h-full" style={{ minHeight: '350px', height: '350px' }}>
                       {/* Zoom Controls */}
                       <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-lg p-1 border border-gray-200 dark:border-gray-700">
                         <Button
@@ -1265,6 +1385,28 @@ export default function OCRExpensePage() {
                         </Button>
                       </div>
 
+                      {/* Navigation Arrows */}
+                      {previewImages.length > 1 && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handlePreviousImage}
+                            className="absolute left-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
+                          >
+                            <ChevronLeft className="h-5 w-5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleNextImage}
+                            className="absolute right-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
+                          >
+                            <ChevronRight className="h-5 w-5" />
+                          </Button>
+                        </>
+                      )}
+
                       {/* Image Container */}
                       <div
                         className="w-full h-full flex items-center justify-center overflow-hidden cursor-move"
@@ -1273,8 +1415,8 @@ export default function OCRExpensePage() {
                         onMouseUp={handleMouseUp}
                         onMouseLeave={handleMouseUp}
                         style={{
-                          minHeight: '400px',
-                          height: '400px',
+                          minHeight: '350px',
+                          height: '350px',
                         }}
                       >
                         <img
@@ -1289,9 +1431,16 @@ export default function OCRExpensePage() {
                           draggable={false}
                         />
                       </div>
+
+                      {/* Image Counter */}
+                      {previewImages.length > 1 && (
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/50 text-white px-3 py-1 rounded-full text-xs">
+                          {previewImageIndex + 1} / {previewImages.length}
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full min-h-[400px] gap-3" style={{ height: '400px' }}>
+                    <div className="flex flex-col items-center justify-center h-full min-h-[350px] gap-3" style={{ height: '350px' }}>
                       <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
                       <p className="text-gray-400 dark:text-gray-500 text-center text-sm">圖片預覽</p>
                     </div>
