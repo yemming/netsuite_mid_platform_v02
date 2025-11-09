@@ -1,10 +1,17 @@
 # NetSuite 串接中臺建置完全指南
 ## 從零到一的實戰手冊
 
-> **文檔版本**: v1.0  
-> **最後更新**: 2025-11-04  
+> **文檔版本**: v1.1  
+> **最後更新**: 2025-11-09  
 > **作者**: Claude x 你的團隊  
 > **適用場景**: POS、EC、WMS、MES 系統串接 NetSuite
+> 
+> **v1.1 更新內容（2025-11-09）**：
+> - 新增「9.1 實際資料庫結構與指南的差異」章節，記錄實際 Supabase 資料庫結構與指南的差異
+> - 更新所有表的 CREATE TABLE 語句，反映實際資料庫結構
+> - 修正 subsidiary 欄位處理方式（從 TEXT 改為 INTEGER，取第一個值）
+> - 修正 Account 欄位名稱（從 account_search_display_name 改為 acct_name）
+> - 記錄 Item 同步方式的修正（混合使用 SuiteQL + REST API）
 
 ---
 
@@ -444,10 +451,10 @@ CREATE TABLE ns_department (
 
 CREATE INDEX idx_departments_internal_id ON ns_department(netsuite_internal_id);
 CREATE INDEX idx_departments_name ON ns_department(name);
--- 注意：subsidiary_ids 是 TEXT，無法直接建立索引，如需查詢可考慮使用 GIN 索引或函數索引
+CREATE INDEX idx_departments_subsidiary_id ON ns_department(subsidiary_id);
 
 COMMENT ON TABLE ns_department IS 'NetSuite 部門主檔';
-COMMENT ON COLUMN ns_department.subsidiary_ids IS '所屬公司 ID 列表（字串格式，如 "1, 3, 4"），需要解析後使用';
+COMMENT ON COLUMN ns_department.subsidiary_id IS '所屬公司 ID（從 NetSuite subsidiary 字串列表取第一個值轉換為 INTEGER）';
 COMMENT ON COLUMN ns_department.full_name IS '完整階層名稱（查詢用）';
 ```
 
@@ -466,8 +473,9 @@ CREATE TABLE ns_classification (
   -- 基本資訊
   name VARCHAR(255) NOT NULL,                     -- "硬體事業部" (name)
   
-  -- ⚠️ 重要：subsidiary 是字串列表，不是單一 INTEGER（與 Department 相同）
-  subsidiary_ids TEXT,                            -- 所屬公司列表 (subsidiary，字串列表)
+  -- ⚠️ 重要：NetSuite SuiteQL 中 subsidiary 是字串列表（如 "1, 3, 4"）
+  -- 但實際資料庫使用 subsidiary_id (INTEGER)，取第一個值
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（取第一個值）
   
   -- 階層結構
   parent_id INTEGER,
@@ -501,27 +509,18 @@ CREATE TABLE ns_location (
   -- 基本資訊
   name VARCHAR(255) NOT NULL,                     -- "台北倉" (name)
   
-  -- ⚠️ 重要：subsidiary 是字串列表，不是單一 INTEGER
-  subsidiary_ids TEXT,                            -- 所屬公司列表 (subsidiary，字串列表)
+  -- ⚠️ 重要：NetSuite SuiteQL 中 subsidiary 是字串列表（如 "1, 3, 4"）
+  -- 但實際資料庫使用 subsidiary_id (INTEGER)，取第一個值
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（取第一個值）
   
-  -- 階層結構
-  parent_id INTEGER,                              -- 父地點 ID (parent)
-  full_name VARCHAR(500),                         -- 完整名稱 (fullname)
+  -- ⚠️ 注意：實際資料庫中沒有以下欄位：
+  -- parent_id, full_name, main_address_id, location_type,
+  -- make_inventory_available, make_inventory_available_store,
+  -- latitude, longitude, tran_prefix
   
-  -- 地址資訊
-  main_address_id INTEGER,                        -- 主要地址 ID (mainaddress)
-  
-  -- 地點類型與設定
-  location_type VARCHAR(100),                     -- 地點類型 (locationtype)
-  make_inventory_available BOOLEAN DEFAULT TRUE,   -- 是否讓庫存可用 (makeinventoryavailable = 'T')
-  make_inventory_available_store BOOLEAN DEFAULT FALSE, -- 是否讓庫存可用於商店 (makeinventoryavailablestore)
-  
-  -- 地理資訊（可選）
-  latitude DECIMAL(10,7),                         -- 緯度 (latitude)
-  longitude DECIMAL(10,7),                         -- 經度 (longitude)
-  
-  -- 交易設定
-  tran_prefix VARCHAR(50),                        -- 交易前綴 (tranprefix)
+  -- ✅ 實際資料庫中有但指南中沒有：
+  address_text TEXT,                              -- 地址文字
+  use_bins BOOLEAN,                               -- 是否使用儲位
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -534,8 +533,9 @@ CREATE INDEX idx_locations_internal_id ON ns_location(netsuite_internal_id);
 CREATE INDEX idx_locations_name ON ns_location(name);
 
 COMMENT ON TABLE ns_location IS 'NetSuite 地點主檔（倉庫/門市/辦公室）';
-COMMENT ON COLUMN ns_location.subsidiary_ids IS '所屬公司 ID 列表（字串格式，如 "1"），需要解析後使用';
-COMMENT ON COLUMN ns_location.location_type IS '地點類型（如 Warehouse, Store, Office）';
+COMMENT ON COLUMN ns_location.subsidiary_id IS '所屬公司 ID（從 NetSuite subsidiary 字串列表取第一個值轉換為 INTEGER）';
+COMMENT ON COLUMN ns_location.address_text IS '地址文字';
+COMMENT ON COLUMN ns_location.use_bins IS '是否使用儲位';
 ```
 
 #### 4.2.6 會計科目（Accounts）⭐ 財務核心
@@ -552,21 +552,20 @@ CREATE TABLE ns_account (
   
   -- ⚠️ 重要：acctnumber 和 acctname 在 NetSuite SuiteQL 中不存在！
   -- 實際欄位是 accountsearchdisplayname 和 displaynamewithhierarchy
-  account_search_display_name VARCHAR(255),        -- 帳戶搜尋顯示名稱 (accountsearchdisplayname)
-  display_name_with_hierarchy VARCHAR(500),        -- 階層顯示名稱 (displaynamewithhierarchy，如 "Salaries & Wages : Bonus")
+  -- 但實際資料庫使用 acct_number 和 acct_name
+  acct_number VARCHAR(255),                       -- 科目編號（可能為 NULL，NetSuite SuiteQL 中不存在）
+  acct_name VARCHAR(255) NOT NULL,               -- 科目名稱（使用 displaynamewithhierarchy 或 accountsearchdisplayname）
+  full_name VARCHAR(500),                        -- 完整階層名稱（使用 displaynamewithhierarchy）
   
   -- 科目類型
   acct_type VARCHAR(100),                         -- 科目類型 (accttype: Income, Expense, Asset, Liability, Equity)
   
-  -- 階層結構
-  parent_id INTEGER,                            -- 父帳戶 ID (parent)
+  -- ⚠️ 注意：實際資料庫中沒有 parent_id 和 is_summary 欄位
   
   -- 所屬公司
-  -- ⚠️ 重要：subsidiary 是字串列表，不是單一 INTEGER
-  subsidiary_ids TEXT,                          -- 所屬公司列表 (subsidiary，字串列表)
-  
-  -- 摘要帳戶標記
-  is_summary BOOLEAN DEFAULT FALSE,             -- 是否為摘要帳戶 (issummary = 'T')
+  -- ⚠️ 重要：NetSuite SuiteQL 中 subsidiary 是字串列表（如 "1, 3, 4"）
+  -- 但實際資料庫使用 subsidiary_id (INTEGER)，取第一個值
+  subsidiary_id INTEGER,                          -- 所屬公司 ID（取第一個值）
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,             -- isinactive = 'F'
@@ -576,15 +575,17 @@ CREATE TABLE ns_account (
 );
 
 CREATE INDEX idx_accounts_internal_id ON ns_account(netsuite_internal_id);
-CREATE INDEX idx_accounts_display_name ON ns_account(account_search_display_name);
+CREATE INDEX idx_accounts_acct_name ON ns_account(acct_name);
 CREATE INDEX idx_accounts_type ON ns_account(acct_type);
-CREATE INDEX idx_accounts_hierarchy ON ns_account(display_name_with_hierarchy);
+CREATE INDEX idx_accounts_full_name ON ns_account(full_name);
+CREATE INDEX idx_accounts_subsidiary_id ON ns_account(subsidiary_id);
 
 COMMENT ON TABLE ns_account IS 'NetSuite 會計科目主檔';
-COMMENT ON COLUMN ns_account.account_search_display_name IS '帳戶搜尋顯示名稱（對應 NetSuite accountsearchdisplayname）';
-COMMENT ON COLUMN ns_account.display_name_with_hierarchy IS '階層顯示名稱（對應 NetSuite displaynamewithhierarchy，如 "Salaries & Wages : Bonus"）';
+COMMENT ON COLUMN ns_account.acct_number IS '科目編號（可能為 NULL，NetSuite SuiteQL 中不存在此欄位）';
+COMMENT ON COLUMN ns_account.acct_name IS '科目名稱（使用 NetSuite displaynamewithhierarchy 或 accountsearchdisplayname）';
+COMMENT ON COLUMN ns_account.full_name IS '完整階層名稱（使用 NetSuite displaynamewithhierarchy，如 "Salaries & Wages : Bonus"）';
 COMMENT ON COLUMN ns_account.acct_type IS '科目類型：Income(收入)/Expense(費用)/Asset(資產)/Liability(負債)/Equity(權益)';
-COMMENT ON COLUMN ns_account.subsidiary_ids IS '所屬公司 ID 列表（字串格式），需要解析後使用';
+COMMENT ON COLUMN ns_account.subsidiary_id IS '所屬公司 ID（從 NetSuite subsidiary 字串列表取第一個值轉換為 INTEGER）';
 ```
 
 #### 4.2.7 產品主檔（Items）⭐ 交易核心
@@ -603,7 +604,7 @@ CREATE TABLE ns_item (
   item_id VARCHAR(255) NOT NULL,                  -- 料號 (itemid)
   name VARCHAR(255) NOT NULL,                     -- 顯示名稱 (displayname)
   display_name VARCHAR(255),                      -- 顯示名稱 (displayname，與 name 相同)
-  full_name VARCHAR(500),                         -- 完整名稱 (fullname)
+  -- ⚠️ 注意：實際資料庫中沒有 full_name 欄位
   
   -- 產品類型
   item_type VARCHAR(100),                         -- 產品類型 (itemtype: Inventory, Non-Inventory, Service, Kit, Assembly)
@@ -615,26 +616,17 @@ CREATE TABLE ns_item (
   purchase_description TEXT,                      -- 採購描述 (purchasedescription)
   
   -- 價格與成本
-  base_price DECIMAL(15,2),                       -- 基本售價 (baseprice)
+  base_price DECIMAL(15,2),                       -- 基本售價 (baseprice，從 REST API 取得)
   cost_estimate DECIMAL(15,2),                    -- 估計成本（可選）
-  costing_method VARCHAR(50),                     -- 成本計算方法 (costingmethod)
+  -- ⚠️ 注意：實際資料庫中沒有 costing_method 欄位
   
   -- 預設會計科目（可在交易時覆寫）
   income_account_id INTEGER,                      -- 銷貨收入科目 (incomeaccount)
   expense_account_id INTEGER,                     -- 銷貨成本科目 (expenseaccount)
   asset_account_id INTEGER,                       -- 存貨科目 (assetaccount)
   
-  -- 階層結構（用於矩陣項目）
-  parent_id INTEGER,                              -- 父項目 ID (parent)
-  
-  -- 所屬公司
-  -- ⚠️ 重要：subsidiary 是字串列表，不是單一 INTEGER
-  subsidiary_ids TEXT,                            -- 所屬公司列表 (subsidiary，字串列表)
-  
-  -- 預設 Segment（可在交易時覆寫）
-  default_class_id INTEGER,                       -- 預設類別 (class)
-  default_department_id INTEGER,                  -- 預設部門 (department)
-  default_location_id INTEGER,                    -- 預設地點 (location)
+  -- ⚠️ 注意：實際資料庫中沒有以下欄位：
+  -- parent_id, subsidiary_ids, default_class_id, default_department_id, default_location_id
   
   -- 稅務
   tax_schedule_id INTEGER,                        -- 稅務排程 ID (可選)
@@ -658,8 +650,9 @@ CREATE INDEX idx_items_type ON ns_item(item_type);
 CREATE INDEX idx_items_is_assembly ON ns_item(is_assembly) WHERE is_assembly = TRUE;
 
 COMMENT ON TABLE ns_item IS 'NetSuite 產品/服務主檔';
-COMMENT ON COLUMN ns_item.item_type IS '產品類型：Inventory(庫存品)/Non-Inventory(非庫存品)/Service(服務)/Kit(套裝)/Assembly(組合品)';
+COMMENT ON COLUMN ns_item.item_type IS '產品類型（優先使用 SuiteQL 的 itemtype，因為它更準確）：InvtPart(庫存品)/NonInvtPart(非庫存品)/Service(服務)/Kit(套裝)/Assembly(組合品)/GiftCert(禮品卡)/Markup(加價)/Discount(折扣)/Group(群組)';
 COMMENT ON COLUMN ns_item.is_assembly IS '是否為需要生產的組合品（MES 用）';
+COMMENT ON COLUMN ns_item.base_price IS '基本售價（從 REST API 取得，SuiteQL 不支援價格欄位）';
 ```
 
 #### 4.2.8 客戶主檔（Customers）
@@ -809,18 +802,13 @@ CREATE TABLE ns_taxitem (
   
   -- ⚠️ 重要：NetSuite 使用 itemid 而不是 name
   name VARCHAR(255) NOT NULL,                     -- 稅碼名稱 (itemid，實際欄位名)
-  full_name VARCHAR(500),                         -- 完整名稱 (fullname，階層)
   
   -- 稅碼資訊
   rate DECIMAL(5,2),                              -- 稅率 (rate)
   description TEXT,                               -- 描述 (description)
   
-  -- 階層結構
-  parent_id INTEGER,                              -- 父稅碼 ID (parent)
-  
-  -- 會計科目
-  tax_account_id INTEGER,                        -- 稅務帳戶 (taxaccount)
-  sale_account_id INTEGER,                        -- 銷售帳戶 (saleaccount)
+  -- ⚠️ 注意：實際資料庫中沒有以下欄位：
+  -- full_name, parent_id, tax_account_id, sale_account_id, updated_at
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -852,13 +840,8 @@ CREATE TABLE ns_expensecategory (
   -- ⚠️ 重要：NetSuite 使用 expenseacct 而不是 account
   expense_account_id INTEGER,                     -- 對應的會計科目 ID (expenseacct)
   
-  -- 所屬公司
-  -- ⚠️ 重要：subsidiary 是字串列表，不是單一 INTEGER
-  subsidiary_ids TEXT,                            -- 所屬公司列表 (subsidiary，字串列表)
-  
-  -- 費率設定
-  default_rate DECIMAL(15,2),                    -- 預設費率 (defaultrate)
-  rate_required BOOLEAN DEFAULT FALSE,            -- 是否要求費率 (raterequired = 'T')
+  -- ⚠️ 注意：實際資料庫中沒有以下欄位：
+  -- subsidiary_ids, default_rate, rate_required, updated_at
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -890,10 +873,8 @@ CREATE TABLE ns_term (
   discount_percent DECIMAL(5,2),                  -- 提前付款折扣 (discountpercent)
   days_until_expiry INTEGER,                      -- 折扣期限 (daysuntilexpiry)
   
-  -- 日期驅動設定
-  is_date_driven BOOLEAN DEFAULT FALSE,           -- 是否為日期驅動 (datedriven = 'T')
-  due_next_month_if_within_days INTEGER,           -- 幾天內到期則下月到期 (duenextmonthifwithindays)
-  day_of_month_net_due INTEGER,                    -- 到期月份日期 (dayofmonthnetdue)
+  -- ⚠️ 注意：實際資料庫中沒有以下欄位：
+  -- is_date_driven, due_next_month_if_within_days, day_of_month_net_due, updated_at
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -3109,9 +3090,306 @@ async function createProductionOrder(
 
 ## 9. 實際欄位對照總結
 
-> **重要**：本章節總結了實際 NetSuite SuiteQL 和 REST API 查詢結果與指南的差異，請務必參考。
+> **重要**：本章節總結了實際 NetSuite SuiteQL 和 REST API 查詢結果與指南的差異，以及實際 Supabase 資料庫結構與指南的差異，請務必參考。
 
-### 9.1 主要差異與注意事項
+### 9.1 實際資料庫結構與指南的差異（2025-11-09 更新）
+
+> **⚠️ 重要**：以下是在實際同步過程中發現的資料庫結構差異，實際建立的表結構與指南中的定義有所不同。重建資料庫時請參考此章節。
+
+#### 9.1.1 表命名差異
+
+**實際表名使用複數形式，但指南中使用單數形式**：
+
+| 指南中的表名 | 實際 Supabase 表名 | 說明 |
+|------------|------------------|------|
+| `ns_department` | `ns_departments` | 部門表 |
+| `ns_classification` | `ns_classes` | 類別表 |
+| `ns_location` | `ns_locations` | 地點表 |
+| `ns_account` | `ns_accounts` | 會計科目表 |
+| `ns_term` | `ns_terms` | 付款條件表 |
+| `ns_taxitem` | `ns_tax_codes` | 稅碼表 |
+| `ns_expensecategory` | `ns_expense_categories` | 費用類別表 |
+| `ns_item` | `ns_items` | 產品主檔表 |
+
+**建議**：重建資料庫時，請使用實際的表名（複數形式），或統一使用單數形式。目前程式碼使用複數形式的表名。
+
+#### 9.1.2 部門表（ns_departments）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_departments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  
+  -- ⚠️ 修正：使用 subsidiary_id (INTEGER)，不是 subsidiary_ids (TEXT)
+  subsidiary_id INTEGER,                              -- 所屬公司 ID（取第一個值）
+  
+  parent_id INTEGER,                                  -- 上層部門
+  full_name VARCHAR(500),                            -- 完整階層名稱
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：include_children
+```
+
+**同步邏輯**：
+- NetSuite 的 `subsidiary` 欄位是字串列表（如 "1, 3, 4"）
+- 同步時取第一個值轉換為 INTEGER 存入 `subsidiary_id`
+- 如果有多個公司，只儲存第一個
+
+#### 9.1.3 類別表（ns_classes）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_classes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  
+  -- ⚠️ 修正：使用 subsidiary_id (INTEGER)，不是 subsidiary_ids (TEXT)
+  subsidiary_id INTEGER,                              -- 所屬公司 ID（取第一個值）
+  
+  parent_id INTEGER,                                  -- 上層類別
+  full_name VARCHAR(500),                            -- 完整階層名稱
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**同步邏輯**：與部門表相同，`subsidiary` 字串列表取第一個值。
+
+#### 9.1.4 地點表（ns_locations）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_locations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  
+  -- ⚠️ 修正：使用 subsidiary_id (INTEGER)，不是 subsidiary_ids (TEXT)
+  subsidiary_id INTEGER,                              -- 所屬公司 ID（取第一個值）
+  
+  -- ✅ 實際有但指南中沒有
+  address_text TEXT,                                  -- 地址文字
+  use_bins BOOLEAN,                                   -- 是否使用儲位
+  
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- parent_id, full_name, main_address_id, location_type,
+-- make_inventory_available, make_inventory_available_store,
+-- latitude, longitude, tran_prefix
+```
+
+**同步邏輯**：
+- 只同步基本資訊（名稱、公司別、地址、儲位設定）
+- 不包含階層結構和地理資訊
+
+#### 9.1.5 會計科目表（ns_accounts）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  
+  -- ⚠️ 修正：使用 acct_number 和 acct_name，不是 account_search_display_name
+  acct_number VARCHAR(255),                          -- 科目編號（可能為 NULL）
+  acct_name VARCHAR(255) NOT NULL,                   -- 科目名稱（使用 displaynamewithhierarchy 或 accountsearchdisplayname）
+  full_name VARCHAR(500),                            -- 完整階層名稱（使用 displaynamewithhierarchy）
+  
+  acct_type VARCHAR(100),                            -- 科目類型
+  subsidiary_id INTEGER,                              -- 所屬公司 ID（取第一個值）
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：parent_id, is_summary
+-- ❌ 指南中使用但實際沒有：account_search_display_name, display_name_with_hierarchy, subsidiary_ids
+```
+
+**同步邏輯**：
+- 使用 `displaynamewithhierarchy` 作為 `acct_name`（如果沒有則使用 `accountsearchdisplayname`）
+- `full_name` 使用 `displaynamewithhierarchy`
+- `subsidiary` 字串列表取第一個值轉換為 INTEGER
+
+#### 9.1.6 付款條件表（ns_terms）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_terms (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  days_until_net_due INTEGER,
+  discount_percent DECIMAL(5,2),
+  days_until_expiry INTEGER,
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- is_date_driven, due_next_month_if_within_days, day_of_month_net_due, updated_at
+```
+
+**同步邏輯**：
+- 只同步基本付款條件資訊
+- 不包含日期驅動相關欄位
+
+#### 9.1.7 稅碼表（ns_tax_codes）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_tax_codes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,                       -- 稅碼名稱（使用 itemid）
+  rate DECIMAL(5,2),                                 -- 稅率
+  description TEXT,                                  -- 描述
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- full_name, parent_id, tax_account_id, sale_account_id, updated_at
+```
+
+**同步邏輯**：
+- 只同步基本稅碼資訊（名稱、稅率、描述）
+- 不包含階層結構和會計科目
+
+#### 9.1.8 費用類別表（ns_expense_categories）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_expense_categories (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  expense_account_id INTEGER,                        -- 對應的會計科目 ID
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- subsidiary_ids, default_rate, rate_required, updated_at
+```
+
+**同步邏輯**：
+- 只同步基本費用類別資訊（名稱、對應會計科目）
+- 不包含費率設定和公司別
+
+#### 9.1.9 產品主檔表（ns_items）實際結構
+
+**實際欄位與指南的差異**：
+
+```sql
+-- 實際建立的表結構
+CREATE TABLE ns_items (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  netsuite_internal_id INTEGER UNIQUE NOT NULL,
+  item_id VARCHAR(255) NOT NULL,                    -- 料號
+  name VARCHAR(255) NOT NULL,                       -- 顯示名稱
+  display_name VARCHAR(255),                        -- 顯示名稱
+  item_type VARCHAR(100),                           -- 產品類型（來自 SuiteQL itemtype）
+  description TEXT,
+  sales_description TEXT,
+  purchase_description TEXT,
+  base_price DECIMAL(15,2),                         -- 基本售價（從 REST API 取得）
+  cost_estimate DECIMAL(15,2),                      -- 估計成本
+  income_account_id INTEGER,                         -- 銷貨收入科目
+  expense_account_id INTEGER,                        -- 銷貨成本科目
+  asset_account_id INTEGER,                          -- 存貨科目
+  tax_schedule_id INTEGER,                           -- 稅務排程 ID
+  is_assembly BOOLEAN DEFAULT FALSE,                -- 是否為組合品
+  build_time DECIMAL(10,2),                          -- 生產時間
+  default_build_location_id INTEGER,                 -- 預設生產地點
+  is_inactive BOOLEAN DEFAULT FALSE,
+  sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ❌ 指南中有但實際沒有：
+-- full_name, costing_method, subsidiary_ids, parent_id,
+-- default_class_id, default_department_id, default_location_id
+```
+
+**同步邏輯**：
+- 使用混合方式：先用 SuiteQL 查詢所有 items（確保取得所有 95 筆），再用 REST API 查詢每個 item 的詳細資訊（含價格）
+- `item_type` 優先使用 SuiteQL 的 `itemtype`，因為它更準確
+- 不包含階層結構和預設 Segment
+
+#### 9.1.10 同步實作的重要修正
+
+**Subsidiary 欄位處理**：
+
+雖然 NetSuite SuiteQL 中 `subsidiary` 是字串列表（如 "1, 3, 4"），但實際資料庫使用 `subsidiary_id` (INTEGER) 儲存第一個值：
+
+```typescript
+// 同步時的處理邏輯
+let subsidiaryValue = null;
+if (item.subsidiary) {
+  const subsidiaryStr = String(item.subsidiary).trim();
+  if (subsidiaryStr.includes(',')) {
+    const firstId = subsidiaryStr.split(',')[0].trim();
+    subsidiaryValue = firstId ? parseInt(firstId) : null;
+  } else {
+    subsidiaryValue = parseInt(subsidiaryStr);
+  }
+}
+```
+
+**Account 欄位名稱修正**：
+
+實際資料庫使用 `acct_number` 和 `acct_name`，而不是指南中的 `account_search_display_name` 和 `display_name_with_hierarchy`：
+
+```typescript
+// 同步時的處理邏輯
+acct_name: item.displaynamewithhierarchy || item.accountsearchdisplayname || null,
+full_name: item.displaynamewithhierarchy || null,
+```
+
+**Item 同步方式修正**：
+
+由於 REST API 的 record type 映射不完整，無法查詢到所有 items，改用混合方式：
+
+1. 先用 SuiteQL 查詢所有 items（確保取得所有 95 筆）
+2. 再用 REST API 查詢每個 item 的詳細資訊（含價格）
+3. 批次處理（每批 10 個）並行查詢，避免 API 限制
+4. 如果 REST API 查詢失敗，使用 SuiteQL 的資料作為備用
+
+### 9.2 主要差異與注意事項（原內容保留）
 
 #### 1. Subsidiary 欄位格式差異
 
@@ -3120,10 +3398,11 @@ async function createProductionOrder(
 - 只有 Employee 的 `subsidiary` 是單一 INTEGER
 - Customer 和 Vendor 的 `subsidiary` 欄位**不存在**
 
-**處理方式**：
-- 使用 `TEXT` 類型儲存字串列表
-- 查詢時需要解析字串列表（如 `'1, 3, 4'` → `[1, 3, 4]`）
-- 無法直接建立外鍵索引，可考慮使用 GIN 索引或函數索引
+**實際處理方式（2025-11-09 更新）**：
+- ⚠️ **實際資料庫使用 `subsidiary_id` (INTEGER)**，不是 `subsidiary_ids` (TEXT)
+- 同步時從字串列表中取第一個值轉換為 INTEGER
+- 如果有多個公司，只儲存第一個公司 ID
+- 可以建立外鍵索引（因為是 INTEGER）
 
 #### 2. Account 欄位名稱差異
 
@@ -3133,9 +3412,11 @@ async function createProductionOrder(
   - `accountsearchdisplayname` - 帳戶搜尋顯示名稱
   - `displaynamewithhierarchy` - 階層顯示名稱（如 "Salaries & Wages : Bonus"）
 
-**處理方式**：
-- 使用 `account_search_display_name` 和 `display_name_with_hierarchy` 欄位
-- 查詢時使用 `displaynamewithhierarchy` 或 `accountsearchdisplayname`
+**實際處理方式（2025-11-09 更新）**：
+- ⚠️ **實際資料庫使用 `acct_number` 和 `acct_name`**，不是 `account_search_display_name` 和 `display_name_with_hierarchy`
+- `acct_name` 使用 `displaynamewithhierarchy`（如果沒有則使用 `accountsearchdisplayname`）
+- `full_name` 使用 `displaynamewithhierarchy`
+- `acct_number` 可能為 NULL（NetSuite SuiteQL 中不存在此欄位）
 
 #### 3. Customer/Vendor 無 Subsidiary 欄位
 
@@ -3204,7 +3485,7 @@ async function createProductionOrder(
 - REST API 中某些欄位是物件（如 `assembly`, `subsidiary`, `fiscalCalendar`）
 - 需要從物件中取得 `id` 或透過 `links` 取得
 
-### 9.3 同步實作建議
+### 9.3 欄位類型轉換注意事項
 
 1. **優先使用 SuiteQL**：對於支援 SuiteQL 的表，優先使用 SuiteQL 查詢（效能較好）
 2. **REST API 備用**：對於不支援 SuiteQL 的表，使用 REST API
@@ -3212,7 +3493,7 @@ async function createProductionOrder(
 4. **物件欄位處理**：對於 REST API 的物件欄位，需要實作提取邏輯
 5. **錯誤處理**：所有 API 呼叫都要有錯誤處理和重試機制
 
-### 9.4 同步表維護與擴充
+### 9.4 同步實作建議
 
 > **適用場景**：當系統成長需要新增或移除同步表時（例如：新增 BOM 表、移除舊表）
 

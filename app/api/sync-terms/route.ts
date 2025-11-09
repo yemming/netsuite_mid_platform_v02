@@ -21,7 +21,7 @@ export async function POST() {
     `,
     transformFunction: (item: any, syncTimestamp: string) => {
       const isActive = item.isinactive !== 'T';
-      const isDateDriven = item.datedriven === 'T';
+      // 注意：ns_terms 表中沒有 is_date_driven 和 updated_at 欄位
 
       return {
         netsuite_internal_id: parseInt(item.id),
@@ -29,10 +29,10 @@ export async function POST() {
         days_until_net_due: item.daysuntilnetdue ? parseInt(item.daysuntilnetdue) : null,
         discount_percent: item.discountpercent ? parseFloat(item.discountpercent) : null,
         days_until_expiry: item.daysuntilexpiry ? parseInt(item.daysuntilexpiry) : null,
-        is_date_driven: isDateDriven,
+        // 注意：ns_terms 表中沒有 is_date_driven 欄位
         is_inactive: !isActive,
         sync_timestamp: syncTimestamp,
-        updated_at: syncTimestamp,
+        // 注意：ns_terms 表中沒有 updated_at 欄位
       };
     },
     conflictColumn: 'netsuite_internal_id',

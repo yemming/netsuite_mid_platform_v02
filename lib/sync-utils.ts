@@ -90,19 +90,41 @@ export async function getTableSyncStatus(tableName: string) {
     const supabase = await createClient();
 
     // 查詢最新的同步記錄
+    // 注意：某些表可能沒有 updated_at 欄位（如 ns_terms），所以先查詢 sync_timestamp
     const { data, error } = await supabase
       .from(tableName)
-      .select('sync_timestamp, updated_at')
+      .select('sync_timestamp, updated_at, created_at')
       .order('sync_timestamp', { ascending: false })
       .limit(1);
 
     if (error) {
+      // 如果查詢 updated_at 失敗，可能是表沒有這個欄位，改用只查詢 sync_timestamp
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from(tableName)
+        .select('sync_timestamp, created_at')
+        .order('sync_timestamp', { ascending: false })
+        .limit(1);
+
+      if (fallbackError) {
+        return {
+          success: false,
+          error: fallbackError.message,
+          totalRecords: 0,
+          lastSyncTime: null,
+          lastUpdateTime: null,
+        };
+      }
+
+      // 統計總記錄數
+      const { count } = await supabase
+        .from(tableName)
+        .select('*', { count: 'exact', head: true });
+
       return {
-        success: false,
-        error: error.message,
-        totalRecords: 0,
-        lastSyncTime: null,
-        lastUpdateTime: null,
+        success: true,
+        totalRecords: count || 0,
+        lastSyncTime: fallbackData && fallbackData.length > 0 ? fallbackData[0].sync_timestamp : null,
+        lastUpdateTime: fallbackData && fallbackData.length > 0 ? (fallbackData[0].updated_at || fallbackData[0].created_at) : null,
       };
     }
 
@@ -115,7 +137,7 @@ export async function getTableSyncStatus(tableName: string) {
       success: true,
       totalRecords: count || 0,
       lastSyncTime: data && data.length > 0 ? data[0].sync_timestamp : null,
-      lastUpdateTime: data && data.length > 0 ? data[0].updated_at : null,
+      lastUpdateTime: data && data.length > 0 ? (data[0].updated_at || data[0].created_at) : null,
     };
   } catch (error: any) {
     return {

@@ -27,15 +27,12 @@ export async function POST() {
       return {
         netsuite_internal_id: parseInt(item.id),
         name: item.itemid || '', // itemid 是實際欄位名
-        full_name: item.fullname || null,
+        // 注意：ns_tax_codes 表中沒有 full_name、parent_id、tax_account_id、sale_account_id、updated_at 欄位
         rate: item.rate ? parseFloat(item.rate) : null,
         description: item.description || null,
-        parent_id: item.parent ? parseInt(item.parent) : null,
-        tax_account_id: item.taxaccount ? parseInt(item.taxaccount) : null,
-        sale_account_id: item.saleaccount ? parseInt(item.saleaccount) : null,
         is_inactive: !isActive,
         sync_timestamp: syncTimestamp,
-        updated_at: syncTimestamp,
+        // 注意：ns_tax_codes 表中沒有 updated_at 欄位
       };
     },
     conflictColumn: 'netsuite_internal_id',

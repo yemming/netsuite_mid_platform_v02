@@ -90,14 +90,62 @@ export class NetSuiteAPIClient {
       body: body ? JSON.stringify(body) : undefined,
     });
 
+    // 先讀取回應內容
+    const responseText = await response.text();
+    
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `NetSuite API error (${response.status}): ${errorText}`
-      );
+      // 檢查是否為 HTML 錯誤頁面
+      if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+        // 嘗試從 HTML 中提取錯誤訊息
+        const titleMatch = responseText.match(/<title>(.*?)<\/title>/i);
+        const title = titleMatch ? titleMatch[1] : 'NetSuite 錯誤頁面';
+        
+        throw new Error(
+          `NetSuite API error (${response.status}): ${title}。NetSuite 返回了 HTML 錯誤頁面，可能是：1) REST Web 服務權限未開啟 2) 端點不存在 3) 認證失敗。請檢查 NetSuite 權限設定。`
+        );
+      }
+      
+      // 嘗試解析 JSON 錯誤
+      try {
+        const errorJson = JSON.parse(responseText);
+        const errorDetail = errorJson.error || errorJson.message || responseText;
+        throw new Error(
+          `NetSuite API error (${response.status}): ${errorDetail}`
+        );
+      } catch {
+        // 如果不是 JSON，直接使用文字（限制長度避免過長）
+        throw new Error(
+          `NetSuite API error (${response.status}): ${responseText.substring(0, 500)}`
+        );
+      }
     }
 
-    return response.json();
+    // 成功回應：檢查是否為 JSON
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      try {
+        return JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          `NetSuite API 返回了聲稱是 JSON 但無法解析的回應: ${responseText.substring(0, 200)}`
+        );
+      }
+    } else {
+      // 如果不是 JSON，可能是 HTML 或其他格式
+      if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+        throw new Error(
+          `NetSuite API 返回了 HTML 頁面而不是 JSON。可能是權限問題或端點不存在。`
+        );
+      }
+      // 嘗試解析為 JSON（某些 API 可能沒有正確設定 Content-Type）
+      try {
+        return JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          `NetSuite API 返回了非 JSON 格式的回應: ${responseText.substring(0, 200)}`
+        );
+      }
+    }
   }
 
   // 測試連線並取得公司名稱

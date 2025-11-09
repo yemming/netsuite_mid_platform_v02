@@ -20,14 +20,12 @@ export async function POST() {
     `,
     transformFunction: (item: any, syncTimestamp: string) => {
       const isActive = item.isinactive !== 'T';
-      const rateRequired = item.raterequired === 'T';
 
       return {
         netsuite_internal_id: parseInt(item.id),
         name: item.name || '',
         expense_account_id: item.expenseacct ? parseInt(item.expenseacct) : null,
-        default_rate: item.defaultrate ? parseFloat(item.defaultrate) : null,
-        rate_required: rateRequired,
+        // 注意：ns_expense_categories 表中沒有 default_rate、rate_required、subsidiary_ids 欄位
         is_inactive: !isActive,
         sync_timestamp: syncTimestamp,
       };

@@ -204,6 +204,7 @@ export default function SyncStatusPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[200px]">表名稱</TableHead>
+                      <TableHead className="w-[180px]">資料庫表名</TableHead>
                       <TableHead className="w-[100px]">優先級</TableHead>
                       <TableHead className="w-[120px]">
                         <div className="flex justify-end">記錄數</div>
@@ -241,6 +242,11 @@ export default function SyncStatusPage() {
                             ) : (
                               status.label
                             )}
+                          </TableCell>
+                          <TableCell>
+                            <code className="text-xs bg-gray-100 dark:bg-[#3a4f5d] px-2 py-1 rounded font-mono">
+                              {table.name}
+                            </code>
                           </TableCell>
                           <TableCell>
                             <span className="text-xs">{table.priority}</span>
