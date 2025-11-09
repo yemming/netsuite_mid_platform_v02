@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     const netsuite = getNetSuiteAPIClient();
 
     // 查詢相關主檔的 NetSuite Internal ID（並行查詢以提升效能）
-    const queries: Promise<any>[] = [];
+    const queries: PromiseLike<any>[] = [];
     
     // 1. Subsidiary（需要取得 base_currency_id 用於 header）
     let subsidiaryId: number | null = null;
@@ -321,11 +321,12 @@ export async function POST(request: Request) {
     // 組裝 NetSuite Expense Report Payload
     // ⚠️ 重要：根據成功範例，accountingapproval 和 supervisorapproval 應該設為 false
     // Header 層級的 currency 使用公司的基準幣別
+    // 注意：此時 subsidiaryId, employeeId, headerCurrencyId 已經通過驗證，不會為 null
     const expenseReportPayload: any = {
       recordType: 'expenseReport',
-      subsidiary: { id: subsidiaryId.toString() },
-      entity: { id: employeeId.toString() },
-      currency: { id: headerCurrencyId.toString() }, // Header 使用公司基準幣別
+      subsidiary: { id: String(subsidiaryId) },
+      entity: { id: String(employeeId) },
+      currency: { id: String(headerCurrencyId) }, // Header 使用公司基準幣別
       trandate: review.expense_date, // 使用小寫 trandate（參考 Payroll 範例）
       accountingapproval: false, // ⚠️ 根據成功範例，設為 false（NetSuite 會自動處理審批流程）
       supervisorapproval: false, // ⚠️ 根據成功範例，設為 false（NetSuite 會自動處理審批流程）
@@ -333,15 +334,15 @@ export async function POST(request: Request) {
 
     // 選填欄位
     if (departmentId) {
-      expenseReportPayload.department = { id: departmentId.toString() };
+      expenseReportPayload.department = { id: String(departmentId) };
     }
 
     if (classId) {
-      expenseReportPayload.class = { id: classId.toString() };
+      expenseReportPayload.class = { id: String(classId) };
     }
 
     if (locationId) {
-      expenseReportPayload.location = { id: locationId.toString() };
+      expenseReportPayload.location = { id: String(locationId) };
     }
 
     // 備註
@@ -373,9 +374,9 @@ export async function POST(request: Request) {
       items: [
         {
           expensedate: review.expense_date, // ✅ 參考 Payroll 範例，expense item 需要 expensedate
-          category: { id: expenseCategoryId.toString() },
-          amount: parseFloat(review.receipt_amount.toString()), // 確保是數字類型
-          currency: { id: expenseItemCurrencyId.toString() }, // Expense item 使用報支幣別
+          category: { id: String(expenseCategoryId) },
+          amount: parseFloat(String(review.receipt_amount)), // 確保是數字類型
+          currency: { id: String(expenseItemCurrencyId) }, // Expense item 使用報支幣別
           memo: (review.description || `${review.expense_category_name || ''} - ${review.invoice_number || ''}`.trim()).substring(0, 4000), // NetSuite memo 有長度限制
         },
       ],

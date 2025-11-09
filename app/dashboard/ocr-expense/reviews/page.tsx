@@ -259,7 +259,7 @@ export default function ExpenseReviewsPage() {
         throw error;
       }
       
-      setReviews(data || []);
+      setReviews((data || []) as ExpenseReview[]);
     } catch (error: any) {
       console.error('[loadReviews] 載入報支審核列表錯誤:', error);
       console.error('[loadReviews] 錯誤詳情:', {
@@ -456,11 +456,13 @@ export default function ExpenseReviewsPage() {
     // 因為列表查詢時已經排除了這個大型欄位
     if ((!review.attachment_base64 || !(review as any).employee_id) && review.id) {
       // 在背景載入，不阻塞 UI
-      supabase
-        .from('expense_reviews')
-        .select('*')
-        .eq('id', review.id)
-        .single()
+      Promise.resolve(
+        supabase
+          .from('expense_reviews')
+          .select('*')
+          .eq('id', review.id)
+          .single()
+      )
         .then(({ data: fullReview, error }) => {
           if (!error && fullReview) {
             setSelectedReview(fullReview as ExpenseReview);
