@@ -281,9 +281,8 @@ export default function OCRExpensePage() {
       handleInputChange('totalAmount', ocrData['總計金額'] || '');
       
       // 自動填充相關欄位
-      if (ocrData['開立時間']) {
-        handleInputChange('expenseDate', ocrData['開立時間']);
-      }
+      // 注意：報支日期不從 OCR 回寫，保持預設值（今天的日期）或讓用戶自行修改
+      // OCR 的「開立時間」只回寫到 invoiceDate 欄位（已在上面處理）
       if (ocrData['總計金額']) {
         handleInputChange('receiptAmount', ocrData['總計金額']);
       }

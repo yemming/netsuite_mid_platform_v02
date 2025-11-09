@@ -1,0 +1,286 @@
+# NetSuite Platform V2 - Project Rules
+
+> **最後更新**: 2025-01-XX  
+> **用途**: 定義 AI 助手在此專案中的行為規範和開發準則
+
+---
+
+## 📋 基本規範
+
+### 語言與溝通
+- **預設語言**: 繁體中文
+- **程式碼註解**: 繁體中文
+- **變數命名**: 英文（遵循 TypeScript/JavaScript 慣例）
+- **文件撰寫**: 繁體中文，使用萬維鋼萬老師精英日課風格（系統化思維）
+
+### 稱呼方式
+- 直接稱呼用戶為「兄弟」即可
+
+---
+
+## 🏗️ 專案架構
+
+### 技術堆疊
+- **框架**: Next.js 14+ (App Router)
+- **語言**: TypeScript
+- **樣式**: Tailwind CSS
+- **資料庫**: Supabase (PostgreSQL)
+- **外部 API**: NetSuite REST API / SuiteQL
+- **UI 元件**: Radix UI + shadcn/ui
+
+### 目錄結構
+```
+/app                    # Next.js App Router
+  /api                  # API Routes
+  /dashboard            # 儀表板頁面
+/components             # React 元件
+  /ui                   # shadcn/ui 元件
+/lib                    # 工具函數和客戶端
+/utils                  # 工具函數
+/docs                   # 專案文件
+/scripts                # 腳本檔案
+```
+
+---
+
+## 💻 程式碼規範
+
+### TypeScript
+- 使用嚴格的 TypeScript 設定（`strict: true`）
+- 所有函數都要有明確的型別定義
+- 避免使用 `any`，優先使用 `unknown` 或具體型別
+- API Routes 使用 `NextRequest` 和 `NextResponse`
+
+### 命名慣例
+- **檔案**: kebab-case (`sync-subsidiaries.ts`)
+- **元件**: PascalCase (`SyncStatus.tsx`)
+- **函數**: camelCase (`lookupNetsuiteId`)
+- **常數**: UPPER_SNAKE_CASE (`MAX_RETRY_COUNT`)
+- **型別/介面**: PascalCase (`NetSuiteConfig`)
+
+### 檔案組織
+- 每個 API Route 放在獨立的資料夾中
+- 相關的元件放在同一個資料夾
+- 工具函數按功能分類（`lib/`, `utils/`）
+
+---
+
+## 🔌 NetSuite 整合規範
+
+### API 呼叫
+- 所有 NetSuite API 呼叫都要有錯誤處理
+- 使用 `lib/netsuite-client.ts` 作為統一的客戶端
+- 記錄所有 API 請求到 `transaction_references` 表
+- 實作重試機制（最多 3 次）
+
+### 資料同步
+- 主檔同步使用增量同步優先
+- 記錄同步狀態到 `sync_logs` 表
+- 同步失敗時要有明確的錯誤訊息
+- 大表（>10000 筆）使用分批處理
+
+### 表命名規範
+- 所有 NetSuite 主檔表使用 `ns_` 前綴，並使用 NetSuite 的 record name 作為表名
+- 例如: `ns_subsidiary`, `ns_item`, `ns_customer`, `ns_account`
+- 表名使用單數形式，直接對應 NetSuite record name（例如：`subsidiary` → `ns_subsidiary）
+- 系統表不使用 `ns_` 前綴: `transaction_references`, `sync_logs`, `table_mapping_config`
+
+### SuiteQL 查詢
+- 欄位名稱使用小寫（NetSuite 規範）
+- `isinactive` 使用字串 `'F'` 或 `'T'`，不是 boolean
+- 使用 `id` 而不是 `internalId`
+- 避免使用 `OFFSET/FETCH`，改用 `ROWNUM`
+
+---
+
+## 🎨 UI/UX 規範
+
+### 元件使用
+- 優先使用 `components/ui/` 中的 shadcn/ui 元件
+- 保持一致的設計風格
+- 響應式設計：優先考慮行動裝置
+
+### 錯誤處理
+- 所有使用者操作都要有錯誤提示
+- 使用 Toast 通知（如果有的話）或 Alert
+- 錯誤訊息要清楚易懂（繁體中文）
+
+### 載入狀態
+- 所有非同步操作都要顯示載入狀態
+- 使用 Skeleton 或 Spinner
+
+---
+
+## 🗄️ 資料庫規範
+
+### Supabase
+- 使用 Supabase Client (`utils/supabase/client.ts`) 在前端
+- 使用 Supabase Server Client (`utils/supabase/server.ts`) 在後端
+- 所有查詢都要有錯誤處理
+- 使用 RPC 函數進行複雜查詢
+
+### 查詢最佳化
+- 使用索引加速查詢
+- 避免 N+1 查詢問題
+- 大資料集使用分頁
+
+---
+
+## 📝 文件規範
+
+### 程式碼註解
+- 複雜邏輯要有註解說明
+- 函數要有 JSDoc 風格的註解（如果適用）
+- 註解使用繁體中文
+
+### 文件撰寫
+- 重要功能要有對應的 Markdown 文件
+- 文件放在 `/docs` 或專案根目錄
+- 使用清晰的標題和結構
+- 跟架構還有實作細節有關的變動，都要寫入`NetSuite中臺建置完全指南.md` 文件當中，
+
+---
+
+## 🧪 測試規範
+
+### 測試檔案
+- 測試檔案放在 `app/api/*/test/` 或 `scripts/`
+- 測試檔案命名: `test-*.ts`
+
+### 測試原則
+- 重要功能要有測試
+- 測試要能獨立執行
+- 測試結果要有清楚的輸出
+
+---
+
+## 🔒 安全性規範
+
+### 環境變數
+- 敏感資訊使用環境變數
+- 不要將 API Key 或 Token 寫死在程式碼中
+- 使用 `.env.local` 存放本地環境變數
+
+### API 安全
+- 所有 API Route 都要驗證輸入
+- 使用 Supabase RLS (Row Level Security) 保護資料
+- 避免 SQL Injection（使用參數化查詢）
+
+---
+
+## 🚀 部署規範
+
+### 建置檢查
+- 建置前確保沒有 TypeScript 錯誤
+- 確保所有環境變數都已設定
+- 檢查 `package.json` 的 scripts 是否正確
+
+### 部署流程
+- 參考 `DEPLOYMENT.md` 文件
+- 部署前執行必要的資料庫遷移
+- 確認 Supabase 連線正常
+
+---
+
+## 🐛 除錯規範
+
+### 錯誤日誌
+- 使用 `console.error` 記錄錯誤（開發環境）
+- 生產環境使用適當的日誌服務
+- 錯誤訊息要包含足夠的上下文
+
+### 問題排查
+- 參考 `TROUBLESHOOTING.md` 文件
+- 檢查 `sync_logs` 表了解同步狀態
+- 查看 NetSuite API 回應的錯誤訊息
+
+---
+
+## 📦 依賴管理
+
+### 套件安裝
+- 使用 `npm` 管理套件
+- 新增套件前先檢查是否已有類似功能
+- 定期更新依賴套件（注意 breaking changes）
+
+### 版本控制
+- 使用語義化版本（Semantic Versioning）
+- 重大變更要更新版本號
+- 更新日誌要記錄在 commit message
+
+---
+
+## 🔄 程式碼審查規範
+
+### Commit 訊息
+- 使用清楚的 commit 訊息
+- 格式: `type: 簡短描述`
+- 類型: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
+### 程式碼品質
+- 保持程式碼簡潔易讀
+- 避免過度複雜的邏輯
+- 遵循 DRY (Don't Repeat Yourself) 原則
+
+---
+
+## 📚 參考文件
+
+- `NetSuite中臺建置完全指南.md` - 完整的建置指南
+- `DEPLOYMENT.md` - 部署說明
+- `TROUBLESHOOTING.md` - 問題排查指南
+- `README.md` - 專案概述
+
+---
+
+## ⚠️ 注意事項
+
+### 禁止事項
+- ❌ 不要直接修改 Supabase 主檔資料（NetSuite 是唯一資料源）
+- ❌ 不要在程式碼中硬編碼 NetSuite Account ID
+- ❌ 不要忽略錯誤處理
+- ❌ 不要使用 `any` 型別（除非必要）
+
+### 建議事項
+- ✅ 先驗證資料再呼叫 NetSuite API
+- ✅ 使用 Helper Functions 進行 Name-to-ID 轉換
+- ✅ 記錄所有交易到 `transaction_references` 表
+- ✅ 定期檢查同步狀態
+
+---
+
+## 🎯 AI 助手行為規範
+
+### 當被要求修改程式碼時
+1. 先理解現有的程式碼結構
+2. 保持一致的程式碼風格
+3. 確保型別安全
+4. 加入適當的錯誤處理
+5. 更新相關文件（如需要）
+
+### 當被要求建立新功能時
+1. 檢查是否已有類似功能
+2. 遵循專案的架構模式
+3. 建立必要的型別定義
+4. 實作錯誤處理和驗證
+5. 提供使用範例或文件
+
+### 當被要求除錯時
+1. 先查看相關的日誌和錯誤訊息
+2. 檢查 `TROUBLESHOOTING.md`
+3. 驗證資料庫連線和狀態
+4. 檢查 NetSuite API 回應
+5. 提供清楚的解決方案
+
+---
+
+## 📝 自訂規則區
+
+> 以下區域供專案團隊添加自訂規則
+
+### [在此添加你的自訂規則]
+
+---
+
+**文檔維護**: 此文件應隨專案發展持續更新，反映最新的開發規範和最佳實踐。
+

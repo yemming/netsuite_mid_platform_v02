@@ -128,7 +128,7 @@
 POS 系統
   ↓ 查詢「台灣分公司」的 ID
 Supabase 中台
-  ↓ SELECT netsuite_internal_id FROM <accountid>_subsidiaries WHERE name = '台灣分公司'
+  ↓ SELECT netsuite_internal_id FROM ns_subsidiary WHERE name = '台灣分公司'
 返回: 1
 ```
 
@@ -231,29 +231,39 @@ NetSuite 支援多維度分析，常見的 Segment：
 
 ### 4.1 表命名規範
 
-所有表統一使用 NetSuite Account ID 作為前綴（例如：`td3018275_`），文件中使用 `<accountid>` 作為佔位符：
+所有 NetSuite 主檔表統一使用 `ns_` 前綴，並使用 NetSuite 的 record name 作為表名：
 
 ```
-<accountid>_subsidiaries      (公司別)
-<accountid>_currencies        (幣別)
-<accountid>_departments       (部門)
-<accountid>_classes           (類別)
-<accountid>_locations         (地點)
-<accountid>_accounts          (會計科目)
-<accountid>_items             (產品主檔)
-<accountid>_entities_customers (客戶)
-<accountid>_entities_vendors   (供應商)
-<accountid>_entities_employees (員工)
-<accountid>_tax_codes         (稅碼)
-<accountid>_expense_categories (費用類別)
-<accountid>_terms             (付款條件)
-<accountid>_accounting_periods (會計期間)
-<accountid>_ship_methods      (運送方式)
+ns_subsidiary          (公司別，NetSuite record: subsidiary)
+ns_currency            (幣別，NetSuite record: currency)
+ns_department          (部門，NetSuite record: department)
+ns_classification      (類別，NetSuite record: classification)
+ns_location            (地點，NetSuite record: location)
+ns_account             (會計科目，NetSuite record: account)
+ns_item                (產品主檔，NetSuite record: item)
+ns_customer            (客戶，NetSuite record: customer)
+ns_vendor              (供應商，NetSuite record: vendor)
+ns_employee            (員工，NetSuite record: employee)
+ns_taxitem             (稅碼，NetSuite record: taxitem)
+ns_expensecategory     (費用類別，NetSuite record: expensecategory)
+ns_term                 (付款條件，NetSuite record: term)
+ns_accountingperiod    (會計期間，NetSuite record: accountingperiod)
+ns_shipitem            (運送方式，NetSuite record: shipitem)
+ns_bom                 (BOM 配方，NetSuite record: bom)
+ns_workcenter          (工作中心，NetSuite record: workcenter)
 ```
+
+**命名原則**：
+- ✅ 使用 `ns_` 前綴（NetSuite 的縮寫）
+- ✅ 表名直接使用 NetSuite 的 record name（單數形式，小寫）
+- ✅ 不使用複數形式（例如：`ns_subsidiaries` ❌ → `ns_subsidiary` ✅）
+- ✅ 不使用 Account ID 作為前綴（例如：`td3018275_subsidiary` ❌）
+- ✅ 系統表不使用 `ns_` 前綴：`transaction_references`, `sync_logs`, `table_mapping_config`
 
 **實際使用範例**：
-- 如果 NetSuite Account ID 是 `td3018275`，則表名為 `td3018275_subsidiaries`
-- 如果 NetSuite Account ID 是 `abc123`，則表名為 `abc123_subsidiaries`
+- 公司別表：`ns_subsidiary`
+- 產品主檔表：`ns_item`
+- 客戶表：`ns_customer`
 
 ### 4.2 核心表結構
 
@@ -267,7 +277,7 @@ NetSuite 支援多維度分析，常見的 Segment：
 -- 
 -- ⚠️ 重要：此結構已根據實際 NetSuite SuiteQL 查詢結果更新
 -- ============================================
-CREATE TABLE <accountid>_subsidiaries (
+CREATE TABLE ns_subsidiary (
   -- 主鍵
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   
@@ -300,20 +310,20 @@ CREATE TABLE <accountid>_subsidiaries (
 );
 
 -- 索引（加速查詢）
-CREATE INDEX idx_subsidiaries_internal_id ON <accountid>_subsidiaries(netsuite_internal_id);
-CREATE INDEX idx_subsidiaries_name ON <accountid>_subsidiaries(name);
-CREATE INDEX idx_subsidiaries_parent_id ON <accountid>_subsidiaries(parent_id);
-CREATE INDEX idx_subsidiaries_full_name ON <accountid>_subsidiaries(full_name);
+CREATE INDEX idx_subsidiaries_internal_id ON ns_subsidiary(netsuite_internal_id);
+CREATE INDEX idx_subsidiaries_name ON ns_subsidiary(name);
+CREATE INDEX idx_subsidiaries_parent_id ON ns_subsidiary(parent_id);
+CREATE INDEX idx_subsidiaries_full_name ON ns_subsidiary(full_name);
 
 -- 註解
-COMMENT ON TABLE <accountid>_subsidiaries IS 'NetSuite 公司別主檔';
-COMMENT ON COLUMN <accountid>_subsidiaries.netsuite_internal_id IS 'NetSuite Internal ID (唯一識別碼)';
-COMMENT ON COLUMN <accountid>_subsidiaries.name IS '公司名稱（業務系統查詢用）';
-COMMENT ON COLUMN <accountid>_subsidiaries.parent_id IS '父公司 ID（支援階層式公司結構）';
-COMMENT ON COLUMN <accountid>_subsidiaries.full_name IS '完整階層名稱（如 "HEADQUARTERS : AMERICAS : US - West"）';
-COMMENT ON COLUMN <accountid>_subsidiaries.state IS '州/省代碼';
-COMMENT ON COLUMN <accountid>_subsidiaries.email IS '公司電子郵件';
-COMMENT ON COLUMN <accountid>_subsidiaries.fiscal_calendar_id IS '會計年度曆 ID';
+COMMENT ON TABLE ns_subsidiary IS 'NetSuite 公司別主檔';
+COMMENT ON COLUMN ns_subsidiary.netsuite_internal_id IS 'NetSuite Internal ID (唯一識別碼)';
+COMMENT ON COLUMN ns_subsidiary.name IS '公司名稱（業務系統查詢用）';
+COMMENT ON COLUMN ns_subsidiary.parent_id IS '父公司 ID（支援階層式公司結構）';
+COMMENT ON COLUMN ns_subsidiary.full_name IS '完整階層名稱（如 "HEADQUARTERS : AMERICAS : US - West"）';
+COMMENT ON COLUMN ns_subsidiary.state IS '州/省代碼';
+COMMENT ON COLUMN ns_subsidiary.email IS '公司電子郵件';
+COMMENT ON COLUMN ns_subsidiary.fiscal_calendar_id IS '會計年度曆 ID';
 ```
 
 **NetSuite SuiteQL 查詢範例**：
@@ -357,7 +367,7 @@ WHERE isinactive = 'F'
 -- 說明：所有交易都需要指定幣別
 -- 優先級：🔴 最高
 -- ============================================
-CREATE TABLE <accountid>_currencies (
+CREATE TABLE ns_currency (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -376,10 +386,10 @@ CREATE TABLE <accountid>_currencies (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_currencies_internal_id ON <accountid>_currencies(netsuite_internal_id);
-CREATE INDEX idx_currencies_symbol ON <accountid>_currencies(symbol);
+CREATE INDEX idx_currencies_internal_id ON ns_currency(netsuite_internal_id);
+CREATE INDEX idx_currencies_symbol ON ns_currency(symbol);
 
-COMMENT ON TABLE <accountid>_currencies IS 'NetSuite 幣別主檔';
+COMMENT ON TABLE ns_currency IS 'NetSuite 幣別主檔';
 ```
 
 #### 4.2.3 部門（Departments）
@@ -390,7 +400,7 @@ COMMENT ON TABLE <accountid>_currencies IS 'NetSuite 幣別主檔';
 -- 說明：組織架構的部門維度
 -- 優先級：🟡 中（依賴 Subsidiary）
 -- ============================================
-CREATE TABLE <accountid>_departments (
+CREATE TABLE ns_department (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -409,12 +419,12 @@ CREATE TABLE <accountid>_departments (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_departments_internal_id ON <accountid>_departments(netsuite_internal_id);
-CREATE INDEX idx_departments_name ON <accountid>_departments(name);
-CREATE INDEX idx_departments_subsidiary ON <accountid>_departments(subsidiary_id);
+CREATE INDEX idx_departments_internal_id ON ns_department(netsuite_internal_id);
+CREATE INDEX idx_departments_name ON ns_department(name);
+CREATE INDEX idx_departments_subsidiary ON ns_department(subsidiary_id);
 
-COMMENT ON TABLE <accountid>_departments IS 'NetSuite 部門主檔';
-COMMENT ON COLUMN <accountid>_departments.full_name IS '完整階層名稱（查詢用）';
+COMMENT ON TABLE ns_department IS 'NetSuite 部門主檔';
+COMMENT ON COLUMN ns_department.full_name IS '完整階層名稱（查詢用）';
 ```
 
 #### 4.2.4 類別（Classes）
@@ -425,7 +435,7 @@ COMMENT ON COLUMN <accountid>_departments.full_name IS '完整階層名稱（查
 -- 說明：產品線/品牌/專案的分類維度
 -- 優先級：🟡 中
 -- ============================================
-CREATE TABLE <accountid>_classes (
+CREATE TABLE ns_classification (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -444,10 +454,10 @@ CREATE TABLE <accountid>_classes (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_classes_internal_id ON <accountid>_classes(netsuite_internal_id);
-CREATE INDEX idx_classes_name ON <accountid>_classes(name);
+CREATE INDEX idx_classes_internal_id ON ns_classification(netsuite_internal_id);
+CREATE INDEX idx_classes_name ON ns_classification(name);
 
-COMMENT ON TABLE <accountid>_classes IS 'NetSuite 類別主檔（產品線/品牌/專案）';
+COMMENT ON TABLE ns_classification IS 'NetSuite 類別主檔（產品線/品牌/專案）';
 ```
 
 #### 4.2.5 地點（Locations）
@@ -458,7 +468,7 @@ COMMENT ON TABLE <accountid>_classes IS 'NetSuite 類別主檔（產品線/品�
 -- 說明：倉庫/門市/辦公室
 -- 優先級：🟡 中（WMS 必要）
 -- ============================================
-CREATE TABLE <accountid>_locations (
+CREATE TABLE ns_location (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -477,11 +487,11 @@ CREATE TABLE <accountid>_locations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_locatio<accountid>_internal_id ON <accountid>_locations(netsuite_internal_id);
-CREATE INDEX idx_locatio<accountid>_name ON <accountid>_locations(name);
+CREATE INDEX idx_locatio<accountid>_internal_id ON ns_location(netsuite_internal_id);
+CREATE INDEX idx_locatio<accountid>_name ON ns_location(name);
 
-COMMENT ON TABLE <accountid>_locations IS 'NetSuite 地點主檔（倉庫/門市/辦公室）';
-COMMENT ON COLUMN <accountid>_locations.use_bins IS '是否啟用儲位（Bin）管理';
+COMMENT ON TABLE ns_location IS 'NetSuite 地點主檔（倉庫/門市/辦公室）';
+COMMENT ON COLUMN ns_location.use_bins IS '是否啟用儲位（Bin）管理';
 ```
 
 #### 4.2.6 會計科目（Accounts）⭐ 財務核心
@@ -492,7 +502,7 @@ COMMENT ON COLUMN <accountid>_locations.use_bins IS '是否啟用儲位（Bin）
 -- 說明：財務報表的底層邏輯
 -- 優先級：🔴 高（費用報銷、日記帳必要）
 -- ============================================
-CREATE TABLE <accountid>_accounts (
+CREATE TABLE ns_account (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -514,13 +524,13 @@ CREATE TABLE <accountid>_accounts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_accounts_internal_id ON <accountid>_accounts(netsuite_internal_id);
-CREATE INDEX idx_accounts_number ON <accountid>_accounts(acct_number);
-CREATE INDEX idx_accounts_type ON <accountid>_accounts(acct_type);
-CREATE INDEX idx_accounts_full_name ON <accountid>_accounts(full_name);
+CREATE INDEX idx_accounts_internal_id ON ns_account(netsuite_internal_id);
+CREATE INDEX idx_accounts_number ON ns_account(acct_number);
+CREATE INDEX idx_accounts_type ON ns_account(acct_type);
+CREATE INDEX idx_accounts_full_name ON ns_account(full_name);
 
-COMMENT ON TABLE <accountid>_accounts IS 'NetSuite 會計科目主檔';
-COMMENT ON COLUMN <accountid>_accounts.acct_type IS '科目類型：Income(收入)/Expense(費用)/Asset(資產)/Liability(負債)/Equity(權益)';
+COMMENT ON TABLE ns_account IS 'NetSuite 會計科目主檔';
+COMMENT ON COLUMN ns_account.acct_type IS '科目類型：Income(收入)/Expense(費用)/Asset(資產)/Liability(負債)/Equity(權益)';
 ```
 
 #### 4.2.7 產品主檔（Items）⭐ 交易核心
@@ -531,7 +541,7 @@ COMMENT ON COLUMN <accountid>_accounts.acct_type IS '科目類型：Income(收�
 -- 說明：所有交易明細的核心
 -- 優先級：🔴 最高（POS/EC/WMS 必要）
 -- ============================================
-CREATE TABLE <accountid>_items (
+CREATE TABLE ns_item (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -572,15 +582,15 @@ CREATE TABLE <accountid>_items (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_items_internal_id ON <accountid>_items(netsuite_internal_id);
-CREATE INDEX idx_items_item_id ON <accountid>_items(item_id);
-CREATE INDEX idx_items_name ON <accountid>_items(name);
-CREATE INDEX idx_items_type ON <accountid>_items(item_type);
-CREATE INDEX idx_items_is_assembly ON <accountid>_items(is_assembly) WHERE is_assembly = TRUE;
+CREATE INDEX idx_items_internal_id ON ns_item(netsuite_internal_id);
+CREATE INDEX idx_items_item_id ON ns_item(item_id);
+CREATE INDEX idx_items_name ON ns_item(name);
+CREATE INDEX idx_items_type ON ns_item(item_type);
+CREATE INDEX idx_items_is_assembly ON ns_item(is_assembly) WHERE is_assembly = TRUE;
 
-COMMENT ON TABLE <accountid>_items IS 'NetSuite 產品/服務主檔';
-COMMENT ON COLUMN <accountid>_items.item_type IS '產品類型：Inventory(庫存品)/Non-Inventory(非庫存品)/Service(服務)/Kit(套裝)/Assembly(組合品)';
-COMMENT ON COLUMN <accountid>_items.is_assembly IS '是否為需要生產的組合品（MES 用）';
+COMMENT ON TABLE ns_item IS 'NetSuite 產品/服務主檔';
+COMMENT ON COLUMN ns_item.item_type IS '產品類型：Inventory(庫存品)/Non-Inventory(非庫存品)/Service(服務)/Kit(套裝)/Assembly(組合品)';
+COMMENT ON COLUMN ns_item.is_assembly IS '是否為需要生產的組合品（MES 用）';
 ```
 
 #### 4.2.8 客戶主檔（Customers）
@@ -591,7 +601,7 @@ COMMENT ON COLUMN <accountid>_items.is_assembly IS '是否為需要生產的組�
 -- 說明：銷售交易的對象
 -- 優先級：🔴 高（POS/EC 必要）
 -- ============================================
-CREATE TABLE <accountid>_entities_customers (
+CREATE TABLE ns_customer (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -616,11 +626,11 @@ CREATE TABLE <accountid>_entities_customers (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_customers_internal_id ON <accountid>_entities_customers(netsuite_internal_id);
-CREATE INDEX idx_customers_entity_id ON <accountid>_entities_customers(entity_id);
-CREATE INDEX idx_customers_name ON <accountid>_entities_customers(name);
+CREATE INDEX idx_customers_internal_id ON ns_customer(netsuite_internal_id);
+CREATE INDEX idx_customers_entity_id ON ns_customer(entity_id);
+CREATE INDEX idx_customers_name ON ns_customer(name);
 
-COMMENT ON TABLE <accountid>_entities_customers IS 'NetSuite 客戶主檔';
+COMMENT ON TABLE ns_customer IS 'NetSuite 客戶主檔';
 ```
 
 #### 4.2.9 供應商主檔（Vendors）
@@ -631,7 +641,7 @@ COMMENT ON TABLE <accountid>_entities_customers IS 'NetSuite 客戶主檔';
 -- 說明：採購交易的對象
 -- 優先級：🟡 中（採購系統必要）
 -- ============================================
-CREATE TABLE <accountid>_entities_vendors (
+CREATE TABLE ns_vendor (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -656,11 +666,11 @@ CREATE TABLE <accountid>_entities_vendors (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_vendors_internal_id ON <accountid>_entities_vendors(netsuite_internal_id);
-CREATE INDEX idx_vendors_entity_id ON <accountid>_entities_vendors(entity_id);
-CREATE INDEX idx_vendors_name ON <accountid>_entities_vendors(name);
+CREATE INDEX idx_vendors_internal_id ON ns_vendor(netsuite_internal_id);
+CREATE INDEX idx_vendors_entity_id ON ns_vendor(entity_id);
+CREATE INDEX idx_vendors_name ON ns_vendor(name);
 
-COMMENT ON TABLE <accountid>_entities_vendors IS 'NetSuite 供應商主檔';
+COMMENT ON TABLE ns_vendor IS 'NetSuite 供應商主檔';
 ```
 
 #### 4.2.10 員工主檔（Employees）
@@ -671,7 +681,7 @@ COMMENT ON TABLE <accountid>_entities_vendors IS 'NetSuite 供應商主檔';
 -- 說明：費用報銷的主體
 -- 優先級：🟡 中（報支系統必要）
 -- ============================================
-CREATE TABLE <accountid>_entities_employees (
+CREATE TABLE ns_employee (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -691,11 +701,11 @@ CREATE TABLE <accountid>_entities_employees (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_employees_internal_id ON <accountid>_entities_employees(netsuite_internal_id);
-CREATE INDEX idx_employees_name ON <accountid>_entities_employees(name);
-CREATE INDEX idx_employees_email ON <accountid>_entities_employees(email);
+CREATE INDEX idx_employees_internal_id ON ns_employee(netsuite_internal_id);
+CREATE INDEX idx_employees_name ON ns_employee(name);
+CREATE INDEX idx_employees_email ON ns_employee(email);
 
-COMMENT ON TABLE <accountid>_entities_employees IS 'NetSuite 員工主檔';
+COMMENT ON TABLE ns_employee IS 'NetSuite 員工主檔';
 ```
 
 #### 4.2.11 稅碼（Tax Codes）
@@ -706,7 +716,7 @@ COMMENT ON TABLE <accountid>_entities_employees IS 'NetSuite 員工主檔';
 -- 說明：台灣必備的營業稅設定
 -- 優先級：🔴 高（所有銷售交易必要）
 -- ============================================
-CREATE TABLE <accountid>_tax_codes (
+CREATE TABLE ns_taxitem (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -721,10 +731,10 @@ CREATE TABLE <accountid>_tax_codes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_tax_codes_internal_id ON <accountid>_tax_codes(netsuite_internal_id);
-CREATE INDEX idx_tax_codes_name ON <accountid>_tax_codes(name);
+CREATE INDEX idx_tax_codes_internal_id ON ns_taxitem(netsuite_internal_id);
+CREATE INDEX idx_tax_codes_name ON ns_taxitem(name);
 
-COMMENT ON TABLE <accountid>_tax_codes IS 'NetSuite 稅碼主檔';
+COMMENT ON TABLE ns_taxitem IS 'NetSuite 稅碼主檔';
 ```
 
 #### 4.2.12 費用類別（Expense Categories）
@@ -735,7 +745,7 @@ COMMENT ON TABLE <accountid>_tax_codes IS 'NetSuite 稅碼主檔';
 -- 說明：費用報銷的分類（Account 的易用版）
 -- 優先級：🟡 中（報支系統必要）
 -- ============================================
-CREATE TABLE <accountid>_expense_categories (
+CREATE TABLE ns_expensecategory (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -749,10 +759,10 @@ CREATE TABLE <accountid>_expense_categories (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_expense_categories_internal_id ON <accountid>_expense_categories(netsuite_internal_id);
-CREATE INDEX idx_expense_categories_name ON <accountid>_expense_categories(name);
+CREATE INDEX idx_expense_categories_internal_id ON ns_expensecategory(netsuite_internal_id);
+CREATE INDEX idx_expense_categories_name ON ns_expensecategory(name);
 
-COMMENT ON TABLE <accountid>_expense_categories IS 'NetSuite 費用類別主檔（報支系統用）';
+COMMENT ON TABLE ns_expensecategory IS 'NetSuite 費用類別主檔（報支系統用）';
 ```
 
 #### 4.2.13 付款條件（Terms）
@@ -763,7 +773,7 @@ COMMENT ON TABLE <accountid>_expense_categories IS 'NetSuite 費用類別主檔�
 -- 說明：客戶/供應商的付款條件
 -- 優先級：🟢 低（可延後建立）
 -- ============================================
-CREATE TABLE <accountid>_terms (
+CREATE TABLE ns_term (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -779,9 +789,9 @@ CREATE TABLE <accountid>_terms (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_terms_internal_id ON <accountid>_terms(netsuite_internal_id);
+CREATE INDEX idx_terms_internal_id ON ns_term(netsuite_internal_id);
 
-COMMENT ON TABLE <accountid>_terms IS 'NetSuite 付款條件主檔';
+COMMENT ON TABLE ns_term IS 'NetSuite 付款條件主檔';
 ```
 
 #### 4.2.14 會計期間（Accounting Periods）
@@ -792,7 +802,7 @@ COMMENT ON TABLE <accountid>_terms IS 'NetSuite 付款條件主檔';
 -- 說明：財務過帳的期間控制
 -- 優先級：🔴 高（所有交易必要）
 -- ============================================
-CREATE TABLE <accountid>_accounting_periods (
+CREATE TABLE ns_accountingperiod (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -812,10 +822,10 @@ CREATE TABLE <accountid>_accounting_periods (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_periods_internal_id ON <accountid>_accounting_periods(netsuite_internal_id);
-CREATE INDEX idx_periods_dates ON <accountid>_accounting_periods(start_date, end_date);
+CREATE INDEX idx_periods_internal_id ON ns_accountingperiod(netsuite_internal_id);
+CREATE INDEX idx_periods_dates ON ns_accountingperiod(start_date, end_date);
 
-COMMENT ON TABLE <accountid>_accounting_periods IS 'NetSuite 會計期間主檔';
+COMMENT ON TABLE ns_accountingperiod IS 'NetSuite 會計期間主檔';
 ```
 
 #### 4.2.15 運送方式（Ship Methods）
@@ -826,7 +836,7 @@ COMMENT ON TABLE <accountid>_accounting_periods IS 'NetSuite 會計期間主檔'
 -- 說明：出貨單的運送方式
 -- 優先級：🟢 低（出貨流程才需要）
 -- ============================================
-CREATE TABLE <accountid>_ship_methods (
+CREATE TABLE ns_shipitem (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -839,9 +849,9 @@ CREATE TABLE <accountid>_ship_methods (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_ship_methods_internal_id ON <accountid>_ship_methods(netsuite_internal_id);
+CREATE INDEX idx_ship_methods_internal_id ON ns_shipitem(netsuite_internal_id);
 
-COMMENT ON TABLE <accountid>_ship_methods IS 'NetSuite 運送方式主檔';
+COMMENT ON TABLE ns_shipitem IS 'NetSuite 運送方式主檔';
 ```
 
 ### 4.3 製造業專屬表（MES/WMS）
@@ -854,7 +864,7 @@ COMMENT ON TABLE <accountid>_ship_methods IS 'NetSuite 運送方式主檔';
 -- 說明：定義成品由哪些原料組成
 -- 優先級：🔴 最高（MES 必要）
 -- ============================================
-CREATE TABLE <accountid>_bom_headers (
+CREATE TABLE ns_bom (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -877,12 +887,12 @@ CREATE TABLE <accountid>_bom_headers (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_bom_headers_internal_id ON <accountid>_bom_headers(netsuite_internal_id);
-CREATE INDEX idx_bom_headers_assembly ON <accountid>_bom_headers(assembly_item_id);
-CREATE INDEX idx_bom_headers_active ON <accountid>_bom_headers(is_active, effective_date, obsolete_date);
+CREATE INDEX idx_bom_headers_internal_id ON ns_bom(netsuite_internal_id);
+CREATE INDEX idx_bom_headers_assembly ON ns_bom(assembly_item_id);
+CREATE INDEX idx_bom_headers_active ON ns_bom(is_active, effective_date, obsolete_date);
 
-COMMENT ON TABLE <accountid>_bom_headers IS 'NetSuite BOM 配方表頭';
-COMMENT ON COLUMN <accountid>_bom_headers.assembly_item_id IS '成品的 netsuite_internal_id (from <accountid>_items)';
+COMMENT ON TABLE ns_bom IS 'NetSuite BOM 配方表頭';
+COMMENT ON COLUMN ns_bom.assembly_item_id IS '成品的 netsuite_internal_id (from ns_item)';
 ```
 
 #### 4.3.2 配方明細（BOM Lines）
@@ -893,12 +903,12 @@ COMMENT ON COLUMN <accountid>_bom_headers.assembly_item_id IS '成品的 netsuit
 -- 說明：BOM 的組成原料清單
 -- 優先級：🔴 最高（MES 必要）
 -- ============================================
-CREATE TABLE <accountid>_bom_lines (
+CREATE TABLE ns_bom_line (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   
   -- 關聯
-  bom_header_id UUID REFERENCES <accountid>_bom_headers(id),
-  netsuite_bom_id INTEGER,                         -- 對應 <accountid>_bom_headers.netsuite_internal_id
+  bom_header_id UUID REFERENCES ns_bom(id),
+  netsuite_bom_id INTEGER,                         -- 對應 ns_bom.netsuite_internal_id
   
   -- 明細資訊
   line_number INTEGER,                             -- 行號
@@ -916,13 +926,13 @@ CREATE TABLE <accountid>_bom_lines (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_bom_lines_header ON <accountid>_bom_lines(bom_header_id);
-CREATE INDEX idx_bom_lines_netsuite_bom ON <accountid>_bom_lines(netsuite_bom_id);
-CREATE INDEX idx_bom_lines_component ON <accountid>_bom_lines(component_item_id);
+CREATE INDEX idx_bom_lines_header ON ns_bom_line(bom_header_id);
+CREATE INDEX idx_bom_lines_netsuite_bom ON ns_bom_line(netsuite_bom_id);
+CREATE INDEX idx_bom_lines_component ON ns_bom_line(component_item_id);
 
-COMMENT ON TABLE <accountid>_bom_lines IS 'NetSuite BOM 配方明細';
-COMMENT ON COLUMN <accountid>_bom_lines.component_item_id IS '原料的 netsuite_internal_id (from <accountid>_items)';
-COMMENT ON COLUMN <accountid>_bom_lines.component_yield IS '良率（100 = 無損耗）';
+COMMENT ON TABLE ns_bom_line IS 'NetSuite BOM 配方明細';
+COMMENT ON COLUMN ns_bom_line.component_item_id IS '原料的 netsuite_internal_id (from ns_item)';
+COMMENT ON COLUMN ns_bom_line.component_yield IS '良率（100 = 無損耗）';
 ```
 
 #### 4.3.3 工作中心（Work Centers）
@@ -933,7 +943,7 @@ COMMENT ON COLUMN <accountid>_bom_lines.component_yield IS '良率（100 = 無�
 -- 說明：產線/機台/工作站
 -- 優先級：🟡 中（進階 MES 需要）
 -- ============================================
-CREATE TABLE <accountid>_work_centers (
+CREATE TABLE ns_workcenter (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -951,10 +961,10 @@ CREATE TABLE <accountid>_work_centers (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_work_centers_internal_id ON <accountid>_work_centers(netsuite_internal_id);
-CREATE INDEX idx_work_centers_location ON <accountid>_work_centers(location_id);
+CREATE INDEX idx_work_centers_internal_id ON ns_workcenter(netsuite_internal_id);
+CREATE INDEX idx_work_centers_location ON ns_workcenter(location_id);
 
-COMMENT ON TABLE <accountid>_work_centers IS 'NetSuite 工作中心主檔（產線/機台）';
+COMMENT ON TABLE ns_workcenter IS 'NetSuite 工作中心主檔（產線/機台）';
 ```
 
 #### 4.3.4 工序表（Routings）- 選配
@@ -965,7 +975,7 @@ COMMENT ON TABLE <accountid>_work_centers IS 'NetSuite 工作中心主檔（產�
 -- 說明：生產流程的工序定義
 -- 優先級：🟢 低（進階 MES 才需要）
 -- ============================================
-CREATE TABLE <accountid>_routings (
+CREATE TABLE ns_routing (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -980,17 +990,17 @@ CREATE TABLE <accountid>_routings (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_routings_internal_id ON <accountid>_routings(netsuite_internal_id);
-CREATE INDEX idx_routings_assembly ON <accountid>_routings(assembly_item_id);
+CREATE INDEX idx_routings_internal_id ON ns_routing(netsuite_internal_id);
+CREATE INDEX idx_routings_assembly ON ns_routing(assembly_item_id);
 
 -- ============================================
 -- 工序明細（Routing Steps）
 -- ============================================
-CREATE TABLE <accountid>_routing_steps (
+CREATE TABLE ns_routing_step (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   
   -- 關聯
-  routing_id UUID REFERENCES <accountid>_routings(id),
+  routing_id UUID REFERENCES ns_routing(id),
   netsuite_routing_id INTEGER,
   
   -- 工序資訊
@@ -1006,11 +1016,11 @@ CREATE TABLE <accountid>_routing_steps (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_routing_steps_routing ON <accountid>_routing_steps(routing_id);
-CREATE INDEX idx_routing_steps_sequence ON <accountid>_routing_steps(sequence_number);
+CREATE INDEX idx_routing_steps_routing ON ns_routing_step(routing_id);
+CREATE INDEX idx_routing_steps_sequence ON ns_routing_step(sequence_number);
 
-COMMENT ON TABLE <accountid>_routings IS 'NetSuite 工序主表';
-COMMENT ON TABLE <accountid>_routing_steps IS 'NetSuite 工序明細';
+COMMENT ON TABLE ns_routing IS 'NetSuite 工序主表';
+COMMENT ON TABLE ns_routing_step IS 'NetSuite 工序明細';
 ```
 
 ### 4.4 輔助系統表
@@ -1119,7 +1129,7 @@ CREATE TABLE sync_logs (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   
   -- 同步資訊
-  table_name VARCHAR(100),                         -- '<accountid>_subsidiaries', '<accountid>_items'
+  table_name VARCHAR(100),                         -- 'ns_subsidiary', 'ns_item'
   sync_type VARCHAR(50),                           -- 'full', 'incremental'
   
   -- 執行結果
@@ -1199,7 +1209,7 @@ COMMENT ON VIEW vw_sync_status IS '監控視圖：顯示每個表的最後同步
 -- ============================================
 -- 函數：通用 Name 查詢 Internal ID
 -- 用途：讓業務系統用名稱查詢 NetSuite ID
--- 範例：SELECT lookup_netsuite_id('<accountid>_subsidiaries', '台灣分公司');
+-- 範例：SELECT lookup_netsuite_id('ns_subsidiary', '台灣分公司');
 -- ============================================
 CREATE OR REPLACE FUNCTION lookup_netsuite_id(
   p_table_name VARCHAR,
@@ -1230,9 +1240,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 使用範例
--- SELECT lookup_netsuite_id('<accountid>_subsidiaries', '台灣分公司');
--- SELECT lookup_netsuite_id('<accountid>_departments', '研發一部');
--- SELECT lookup_netsuite_id('<accountid>_items', '可口可樂 330ml');
+-- SELECT lookup_netsuite_id('ns_subsidiary', '台灣分公司');
+-- SELECT lookup_netsuite_id('ns_department', '研發一部');
+-- SELECT lookup_netsuite_id('ns_item', '可口可樂 330ml');
 
 COMMENT ON FUNCTION lookup_netsuite_id IS '通用函數：用名稱查詢 NetSuite Internal ID';
 ```
@@ -1265,7 +1275,7 @@ DECLARE
 BEGIN
   -- 檢查 Subsidiary（必填）
   SELECT netsuite_internal_id INTO v_subsidiary_id 
-  FROM <accountid>_subsidiaries 
+  FROM ns_subsidiary 
   WHERE name = p_subsidiary_name AND is_active = TRUE;
   
   IF v_subsidiary_id IS NULL THEN
@@ -1274,7 +1284,7 @@ BEGIN
   
   -- 檢查 Currency（必填）
   SELECT netsuite_internal_id INTO v_currency_id
-  FROM <accountid>_currencies
+  FROM ns_currency
   WHERE symbol = p_currency_symbol AND is_active = TRUE;
   
   IF v_currency_id IS NULL THEN
@@ -1284,7 +1294,7 @@ BEGIN
   -- 檢查 Customer（如果有提供）
   IF p_customer_name IS NOT NULL THEN
     SELECT netsuite_internal_id INTO v_customer_id
-    FROM <accountid>_entities_customers
+    FROM ns_customer
     WHERE name = p_customer_name AND is_inactive = FALSE;
     
     IF v_customer_id IS NULL THEN
@@ -1295,7 +1305,7 @@ BEGIN
   -- 檢查 Department（如果有提供）
   IF p_department_name IS NOT NULL THEN
     SELECT netsuite_internal_id INTO v_department_id
-    FROM <accountid>_departments
+    FROM ns_department
     WHERE name = p_department_name AND is_inactive = FALSE;
     
     IF v_department_id IS NULL THEN
@@ -1306,7 +1316,7 @@ BEGIN
   -- 檢查 Class（如果有提供）
   IF p_class_name IS NOT NULL THEN
     SELECT netsuite_internal_id INTO v_class_id
-    FROM <accountid>_classes
+    FROM ns_classification
     WHERE name = p_class_name AND is_inactive = FALSE;
     
     IF v_class_id IS NULL THEN
@@ -1317,7 +1327,7 @@ BEGIN
   -- 檢查 Location（如果有提供）
   IF p_location_name IS NOT NULL THEN
     SELECT netsuite_internal_id INTO v_location_id
-    FROM <accountid>_locations
+    FROM ns_location
     WHERE name = p_location_name AND is_inactive = FALSE;
     
     IF v_location_id IS NULL THEN
@@ -1378,9 +1388,9 @@ BEGIN
     i.name as component_name,
     bl.quantity * p_quantity as required_quantity,
     bl.unit_of_measure
-  FROM <accountid>_bom_headers bh
-  JOIN <accountid>_bom_lines bl ON bl.netsuite_bom_id = bh.netsuite_internal_id
-  JOIN <accountid>_items i ON i.netsuite_internal_id = bl.component_item_id
+  FROM ns_bom bh
+  JOIN ns_bom_line bl ON bl.netsuite_bom_id = bh.netsuite_internal_id
+  JOIN ns_item i ON i.netsuite_internal_id = bl.component_item_id
   WHERE bh.assembly_item_id = p_assembly_item_id
     AND bh.is_active = TRUE
     AND (bh.effective_date IS NULL OR bh.effective_date <= CURRENT_DATE)
@@ -1430,7 +1440,7 @@ DECLARE
 BEGIN
   -- 檢查 Subsidiary（必填）
   SELECT netsuite_internal_id INTO v_subsidiary_id 
-  FROM <accountid>_subsidiaries 
+  FROM ns_subsidiary 
   WHERE name = p_subsidiary_name AND is_active = TRUE;
   
   IF v_subsidiary_id IS NULL THEN
@@ -1439,7 +1449,7 @@ BEGIN
   
   -- 檢查 Currency（必填）
   SELECT netsuite_internal_id INTO v_currency_id
-  FROM <accountid>_currencies
+  FROM ns_currency
   WHERE symbol = p_currency_symbol AND is_active = TRUE;
   
   IF v_currency_id IS NULL THEN
@@ -1448,7 +1458,7 @@ BEGIN
   
   -- 檢查會計期間（必填）
   SELECT netsuite_internal_id, is_closed INTO v_period_id, v_period_closed
-  FROM <accountid>_accounting_periods
+  FROM ns_accountingperiod
   WHERE period_name = p_period_name;
   
   IF v_period_id IS NULL THEN
@@ -1464,7 +1474,7 @@ BEGIN
       v_period_end DATE;
     BEGIN
       SELECT start_date, end_date INTO v_period_start, v_period_end
-      FROM <accountid>_accounting_periods
+      FROM ns_accountingperiod
       WHERE netsuite_internal_id = v_period_id;
       
       IF p_tran_date < v_period_start OR p_tran_date > v_period_end THEN
@@ -1506,7 +1516,7 @@ BEGIN
       
       -- 檢查會計科目
       SELECT netsuite_internal_id, acct_type INTO v_line_account_id, v_account_type
-      FROM <accountid>_accounts
+      FROM ns_account
       WHERE (acct_name = v_account_name OR full_name = v_account_name)
         AND is_inactive = FALSE
         AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
@@ -1523,7 +1533,7 @@ BEGIN
       -- 檢查 Department（如果有提供）
       IF v_department_name IS NOT NULL THEN
         SELECT netsuite_internal_id INTO v_line_department_id
-        FROM <accountid>_departments
+        FROM ns_department
         WHERE name = v_department_name 
           AND is_inactive = FALSE
           AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
@@ -1536,7 +1546,7 @@ BEGIN
       -- 檢查 Class（如果有提供）
       IF v_class_name IS NOT NULL THEN
         SELECT netsuite_internal_id INTO v_line_class_id
-        FROM <accountid>_classes
+        FROM ns_classification
         WHERE name = v_class_name 
           AND is_inactive = FALSE
           AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
@@ -1549,7 +1559,7 @@ BEGIN
       -- 檢查 Location（如果有提供）
       IF v_location_name IS NOT NULL THEN
         SELECT netsuite_internal_id INTO v_line_location_id
-        FROM <accountid>_locations
+        FROM ns_location
         WHERE name = v_location_name 
           AND is_inactive = FALSE
           AND (subsidiary_id IS NULL OR subsidiary_id = v_subsidiary_id);
@@ -1563,20 +1573,20 @@ BEGIN
       IF v_account_needs_entity AND v_entity_name IS NOT NULL THEN
         -- 先查客戶
         SELECT netsuite_internal_id INTO v_line_entity_id
-        FROM <accountid>_entities_customers
+        FROM ns_customer
         WHERE name = v_entity_name AND is_inactive = FALSE;
         
         -- 如果沒找到，查供應商
         IF v_line_entity_id IS NULL THEN
           SELECT netsuite_internal_id INTO v_line_entity_id
-          FROM <accountid>_entities_vendors
+          FROM ns_vendor
           WHERE name = v_entity_name AND is_inactive = FALSE;
         END IF;
         
         -- 如果還是沒找到，查員工
         IF v_line_entity_id IS NULL THEN
           SELECT netsuite_internal_id INTO v_line_entity_id
-          FROM <accountid>_entities_employees
+          FROM ns_employee
           WHERE name = v_entity_name AND is_inactive = FALSE;
         END IF;
         
@@ -1982,18 +1992,18 @@ serve(async (req) => {
 #### 從 NetSuite 需要拉取的資料
 
 **必須同步的主檔**：
-- ✅ `<accountid>_accounts` - 會計科目（必填）
-- ✅ `<accountid>_accounting_periods` - 會計期間（必填）
-- ✅ `<accountid>_subsidiaries` - 公司別（必填）
-- ✅ `<accountid>_currencies` - 幣別（必填）
+- ✅ `ns_account` - 會計科目（必填）
+- ✅ `ns_accountingperiod` - 會計期間（必填）
+- ✅ `ns_subsidiary` - 公司別（必填）
+- ✅ `ns_currency` - 幣別（必填）
 
 **選填但建議同步的主檔**：
-- ⚠️ `<accountid>_departments` - 部門（某些公司要求必填）
-- ⚠️ `<accountid>_classes` - 類別（某些公司要求必填）
-- ⚠️ `<accountid>_locations` - 地點（某些公司要求必填）
-- ⚠️ `<accountid>_entities_customers` - 客戶（應收帳款科目需要）
-- ⚠️ `<accountid>_entities_vendors` - 供應商（應付帳款科目需要）
-- ⚠️ `<accountid>_entities_employees` - 員工（員工相關科目需要）
+- ⚠️ `ns_department` - 部門（某些公司要求必填）
+- ⚠️ `ns_classification` - 類別（某些公司要求必填）
+- ⚠️ `ns_location` - 地點（某些公司要求必填）
+- ⚠️ `ns_customer` - 客戶（應收帳款科目需要）
+- ⚠️ `ns_vendor` - 供應商（應付帳款科目需要）
+- ⚠️ `ns_employee` - 員工（員工相關科目需要）
 
 #### API Payload 範本
 
@@ -2116,7 +2126,7 @@ serve(async (req) => {
     
     // 查詢會計期間 ID
     const { data: period } = await supabase
-      .from('<accountid>_accounting_periods')
+      .from('ns_accountingperiod')
       .select('netsuite_internal_id')
       .eq('period_name', period_name)
       .single()
@@ -2126,7 +2136,7 @@ serve(async (req) => {
       lines.map(async (line: any) => {
         // 查詢科目 ID
         const { data: account } = await supabase
-          .from('<accountid>_accounts')
+          .from('ns_account')
           .select('netsuite_internal_id, acct_type')
           .or(`acct_name.eq.${line.account_name},full_name.eq.${line.account_name}`)
           .eq('is_inactive', false)
@@ -2141,7 +2151,7 @@ serve(async (req) => {
         if (line.department_name) {
           const { data: dept } = await supabase
             .rpc('lookup_netsuite_id', {
-              p_table_name: '<accountid>_departments',
+              p_table_name: 'ns_department',
               p_name: line.department_name
             })
           departmentId = dept
@@ -2152,7 +2162,7 @@ serve(async (req) => {
         if (line.class_name) {
           const { data: cls } = await supabase
             .rpc('lookup_netsuite_id', {
-              p_table_name: '<accountid>_classes',
+              p_table_name: 'ns_classification',
               p_name: line.class_name
             })
           classId = cls
@@ -2163,7 +2173,7 @@ serve(async (req) => {
         if (line.location_name) {
           const { data: loc } = await supabase
             .rpc('lookup_netsuite_id', {
-              p_table_name: '<accountid>_locations',
+              p_table_name: 'ns_location',
               p_name: line.location_name
             })
           locationId = loc
@@ -2174,7 +2184,7 @@ serve(async (req) => {
         if (line.entity_name) {
           // 先查客戶
           const { data: customer } = await supabase
-            .from('<accountid>_entities_customers')
+            .from('ns_customer')
             .select('netsuite_internal_id')
             .eq('name', line.entity_name)
             .eq('is_inactive', false)
@@ -2185,7 +2195,7 @@ serve(async (req) => {
           } else {
             // 查供應商
             const { data: vendor } = await supabase
-              .from('<accountid>_entities_vendors')
+              .from('ns_vendor')
               .select('netsuite_internal_id')
               .eq('name', line.entity_name)
               .eq('is_inactive', false)
@@ -2196,7 +2206,7 @@ serve(async (req) => {
             } else {
               // 查員工
               const { data: employee } = await supabase
-                .from('<accountid>_entities_employees')
+                .from('ns_employee')
                 .select('netsuite_internal_id')
                 .eq('name', line.entity_name)
                 .eq('is_inactive', false)
@@ -2384,7 +2394,7 @@ export function useAccountingPeriods() {
     queryKey: ['accounting-periods'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('<accountid>_accounting_periods')
+        .from('ns_accountingperiod')
         .select('netsuite_internal_id, period_name, start_date, end_date, is_closed')
         .eq('is_closed', false)
         .order('start_date', { ascending: false })
@@ -2402,7 +2412,7 @@ export function useAccounts(subsidiaryId?: number) {
     queryKey: ['accounts', subsidiaryId],
     queryFn: async () => {
       let query = supabase
-        .from('<accountid>_accounts')
+        .from('ns_account')
         .select('netsuite_internal_id, acct_number, acct_name, full_name, acct_type')
         .eq('is_inactive', false)
       
@@ -2425,7 +2435,7 @@ export function useDepartments(subsidiaryId?: number) {
     queryKey: ['departments', subsidiaryId],
     queryFn: async () => {
       let query = supabase
-        .from('<accountid>_departments')
+        .from('ns_department')
         .select('netsuite_internal_id, name')
         .eq('is_inactive', false)
       
@@ -2779,7 +2789,7 @@ async function createProductionOrder(
 ) {
   // 1. 查詢成品 ID
   const { data: assemblyItem } = await supabase
-    .from('<accountid>_items')
+    .from('ns_item')
     .select('netsuite_internal_id, is_assembly')
     .eq('name', assemblyItemName)
     .single()
@@ -2798,7 +2808,7 @@ async function createProductionOrder(
   // 3. 查詢地點 ID
   const locationId = await supabase
     .rpc('lookup_netsuite_id', {
-      p_table_name: '<accountid>_locations',
+      p_table_name: 'ns_location',
       p_name: locationName
     })
   
@@ -2919,14 +2929,14 @@ async function createProductionOrder(
 #### ❌ 錯誤：使用 STRING 存 NetSuite ID
 ```sql
 -- 錯誤
-CREATE TABLE <accountid>_subsidiaries (
+CREATE TABLE ns_subsidiary (
   netsuite_internal_id VARCHAR(50)  -- ❌ NetSuite ID 是 INTEGER
 );
 ```
 
 #### ✅ 正確
 ```sql
-CREATE TABLE <accountid>_subsidiaries (
+CREATE TABLE ns_subsidiary (
   netsuite_internal_id INTEGER  -- ✅ 正確
 );
 ```
@@ -2996,7 +3006,7 @@ CREATE TABLE <accountid>_exchange_rates (
 **解決方案**：使用有效日期過濾
 
 ```sql
-SELECT * FROM <accountid>_bom_headers 
+SELECT * FROM ns_bom 
 WHERE assembly_item_id = 201 
   AND is_active = TRUE
   AND (effective_date IS NULL OR effective_date <= CURRENT_DATE)
@@ -3086,66 +3096,66 @@ SELECT 'NetSuite 中台建置完成！' as message;
 -- ============================================
 
 -- 1. Subsidiaries
-INSERT INTO <accountid>_subsidiaries (netsuite_internal_id, name, legal_name, country, is_active)
+INSERT INTO ns_subsidiary (netsuite_internal_id, name, legal_name, country, is_active)
 VALUES 
   (1, '台灣分公司', '台灣某某股份有限公司', 'Taiwan', TRUE),
   (2, '香港分公司', 'HK Branch Ltd.', 'Hong Kong', TRUE);
 
 -- 2. Currencies
-INSERT INTO <accountid>_currencies (netsuite_internal_id, name, symbol, exchange_rate, is_base_currency, is_active)
+INSERT INTO ns_currency (netsuite_internal_id, name, symbol, exchange_rate, is_base_currency, is_active)
 VALUES 
   (1, 'Taiwan Dollar', 'TWD', 1.000000, TRUE, TRUE),
   (2, 'US Dollar', 'USD', 30.500000, FALSE, TRUE),
   (3, 'Hong Kong Dollar', 'HKD', 3.900000, FALSE, TRUE);
 
 -- 3. Departments
-INSERT INTO <accountid>_departments (netsuite_internal_id, name, subsidiary_id, is_inactive)
+INSERT INTO ns_department (netsuite_internal_id, name, subsidiary_id, is_inactive)
 VALUES 
   (1, '研發一部', 1, FALSE),
   (2, '業務部', 1, FALSE),
   (3, '財務部', 1, FALSE);
 
 -- 4. Locations
-INSERT INTO <accountid>_locations (netsuite_internal_id, name, subsidiary_id, is_inactive)
+INSERT INTO ns_location (netsuite_internal_id, name, subsidiary_id, is_inactive)
 VALUES 
   (10, '台北倉', 1, FALSE),
   (11, '台中倉', 1, FALSE),
   (12, '高雄倉', 1, FALSE);
 
 -- 5. Accounts
-INSERT INTO <accountid>_accounts (netsuite_internal_id, acct_number, acct_name, full_name, acct_type, is_inactive)
+INSERT INTO ns_account (netsuite_internal_id, acct_number, acct_name, full_name, acct_type, is_inactive)
 VALUES 
   (100, '4110', '銷貨收入', '4110 - 銷貨收入', 'Income', FALSE),
   (101, '5110', '銷貨成本', '5110 - 銷貨成本', 'Expense', FALSE),
   (102, '6225', '交通費', '6225 - 交通費', 'Expense', FALSE);
 
 -- 6. Items
-INSERT INTO <accountid>_items (netsuite_internal_id, item_id, name, item_type, base_price, is_inactive)
+INSERT INTO ns_item (netsuite_internal_id, item_id, name, item_type, base_price, is_inactive)
 VALUES 
   (200, 'ITEM-001', '可口可樂 330ml', 'Inventory', 25.00, FALSE),
   (201, 'ITEM-002', '可口可樂 24 罐箱裝', 'Assembly', 600.00, FALSE);
 
 -- 7. Customers
-INSERT INTO <accountid>_entities_customers (netsuite_internal_id, entity_id, name, subsidiary_id, currency_id, is_inactive)
+INSERT INTO ns_customer (netsuite_internal_id, entity_id, name, subsidiary_id, currency_id, is_inactive)
 VALUES 
   (100, 'C-00001', '測試客戶', 1, 1, FALSE);
 
 -- 8. Tax Codes
-INSERT INTO <accountid>_tax_codes (netsuite_internal_id, name, rate)
+INSERT INTO ns_taxitem (netsuite_internal_id, name, rate)
 VALUES 
   (1, '應稅 5%', 5.00),
   (2, '零稅率', 0.00),
   (3, '免稅', 0.00);
 
 -- 9. BOM Header
-INSERT INTO <accountid>_bom_headers (netsuite_internal_id, assembly_item_id, name, revision, is_active)
+INSERT INTO ns_bom (netsuite_internal_id, assembly_item_id, name, revision, is_active)
 VALUES 
   (1001, 201, 'BOM - 可口可樂 24 罐箱裝', 'Rev 1.0', TRUE);
 
 -- 10. BOM Lines
-INSERT INTO <accountid>_bom_lines (bom_header_id, netsuite_bom_id, line_number, component_item_id, quantity)
+INSERT INTO ns_bom_line (bom_header_id, netsuite_bom_id, line_number, component_item_id, quantity)
 VALUES 
-  ((SELECT id FROM <accountid>_bom_headers WHERE netsuite_internal_id = 1001), 1001, 1, 200, 24.0000);
+  ((SELECT id FROM ns_bom WHERE netsuite_internal_id = 1001), 1001, 1, 200, 24.0000);
 
 -- 測試查詢
 SELECT 'Test Data Inserted!' as message;
@@ -3171,17 +3181,17 @@ ORDER BY table_name;
 
 -- 檢查 2：確認所有表都有資料
 SELECT 
-  '<accountid>_subsidiaries' as table_name, COUNT(*) as row_count FROM <accountid>_subsidiaries
+  'ns_subsidiary' as table_name, COUNT(*) as row_count FROM ns_subsidiary
 UNION ALL
-SELECT '<accountid>_currencies', COUNT(*) FROM <accountid>_currencies
+SELECT 'ns_currency', COUNT(*) FROM ns_currency
 UNION ALL
-SELECT '<accountid>_departments', COUNT(*) FROM <accountid>_departments
+SELECT 'ns_department', COUNT(*) FROM ns_department
 UNION ALL
-SELECT '<accountid>_items', COUNT(*) FROM <accountid>_items;
+SELECT 'ns_item', COUNT(*) FROM ns_item;
 -- 預期：每張表都 > 0
 
 -- 檢查 3：測試 lookup 函數
-SELECT lookup_netsuite_id('<accountid>_subsidiaries', '台灣分公司');
+SELECT lookup_netsuite_id('ns_subsidiary', '台灣分公司');
 -- 預期：返回 1
 
 -- 檢查 4：測試驗證函數
@@ -3225,7 +3235,7 @@ journalEntry        - 日記帳
 #### 常用查詢
 ```sql
 -- 查 ID
-SELECT lookup_netsuite_id('<accountid>_items', '可口可樂 330ml');
+SELECT lookup_netsuite_id('ns_item', '可口可樂 330ml');
 
 -- 驗證交易
 SELECT validate_transaction_components('台灣分公司', 'TWD', '客戶名稱');

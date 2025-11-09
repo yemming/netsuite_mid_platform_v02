@@ -256,9 +256,9 @@ export default function Sidebar() {
             <div className="flex items-center gap-1 flex-shrink-0">
               <button 
                 onClick={() => setIsCollapsed(true)}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors"
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors"
               >
-                <PanelLeftClose className="w-3.5 h-3.5 text-[#28363F] dark:text-white" />
+                <PanelLeftClose className="w-4 h-4 text-[#28363F] dark:text-white" />
               </button>
             </div>
             </div>
