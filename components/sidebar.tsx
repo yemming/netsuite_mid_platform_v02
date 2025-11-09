@@ -23,7 +23,8 @@ import {
   HelpCircle,
   Receipt,
   Cog,
-  Store
+  Store,
+  ClipboardCheck
 } from 'lucide-react'
 
 interface MenuItem {
@@ -51,6 +52,16 @@ const privatePages: MenuItem[] = [
         name: 'OCR To NetSuite',
         href: '/dashboard/ocr-expense',
         icon: FileText,
+      },
+      {
+        name: '我的報支',
+        href: '/dashboard/ocr-expense/my-expenses',
+        icon: FileText,
+      },
+      {
+        name: '報支審核',
+        href: '/dashboard/ocr-expense/reviews',
+        icon: ClipboardCheck,
       },
       {
         name: '資料同步狀態',

@@ -89,9 +89,29 @@ export class NetSuiteAPIClient {
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
+    
+    // 檢查 Location header（某些 API 會在 Location header 中返回建立的記錄 URL）
+    const locationHeader = response.headers.get('location');
+    if (locationHeader && process.env.NODE_ENV === 'development') {
+      console.log(`[NetSuite API] Location header: ${locationHeader}`);
+      // 從 Location header 中提取記錄 ID（例如：/services/rest/record/v1/expenseReport/12345）
+      const locationMatch = locationHeader.match(/\/(\d+)$/);
+      if (locationMatch) {
+        console.log(`[NetSuite API] 從 Location header 提取的記錄 ID: ${locationMatch[1]}`);
+      }
+    }
 
     // 先讀取回應內容
     const responseText = await response.text();
+    
+    // Debug: 只在開發環境或錯誤時記錄詳細資訊
+    if (process.env.NODE_ENV === 'development' || !response.ok) {
+      console.log(`[NetSuite API] 回應狀態: ${response.status}`);
+      console.log(`[NetSuite API] 回應 Content-Type: ${response.headers.get('content-type')}`);
+      if (!response.ok) {
+        console.log(`[NetSuite API] 回應內容（前 1000 字）:`, responseText.substring(0, 1000));
+      }
+    }
     
     if (!response.ok) {
       // 檢查是否為 HTML 錯誤頁面
@@ -100,6 +120,7 @@ export class NetSuiteAPIClient {
         const titleMatch = responseText.match(/<title>(.*?)<\/title>/i);
         const title = titleMatch ? titleMatch[1] : 'NetSuite 錯誤頁面';
         
+        console.error(`[NetSuite API] HTML 錯誤頁面:`, responseText.substring(0, 500));
         throw new Error(
           `NetSuite API error (${response.status}): ${title}。NetSuite 返回了 HTML 錯誤頁面，可能是：1) REST Web 服務權限未開啟 2) 端點不存在 3) 認證失敗。請檢查 NetSuite 權限設定。`
         );
@@ -108,12 +129,14 @@ export class NetSuiteAPIClient {
       // 嘗試解析 JSON 錯誤
       try {
         const errorJson = JSON.parse(responseText);
-        const errorDetail = errorJson.error || errorJson.message || responseText;
+        console.error(`[NetSuite API] JSON 錯誤:`, JSON.stringify(errorJson, null, 2));
+        const errorDetail = errorJson.error || errorJson.message || JSON.stringify(errorJson);
         throw new Error(
           `NetSuite API error (${response.status}): ${errorDetail}`
         );
-      } catch {
+      } catch (parseError) {
         // 如果不是 JSON，直接使用文字（限制長度避免過長）
+        console.error(`[NetSuite API] 非 JSON 錯誤回應:`, responseText);
         throw new Error(
           `NetSuite API error (${response.status}): ${responseText.substring(0, 500)}`
         );
@@ -122,6 +145,45 @@ export class NetSuiteAPIClient {
 
     // 成功回應：檢查是否為 JSON
     const contentType = response.headers.get('content-type');
+    
+    // 處理空字串回應（某些 NetSuite API 可能成功但返回空字串，例如 204 No Content）
+    if (responseText.trim() === '') {
+      console.warn(`[NetSuite API] 警告：NetSuite API 返回了空字串回應（狀態碼: ${response.status}）`);
+      console.warn(`[NetSuite API] 這可能是正常的（例如 204 No Content），或者表示請求成功但沒有返回資料`);
+      
+      // 檢查 Location header 是否有記錄 ID
+      const locationHeader = response.headers.get('location');
+      let recordId: string | null = null;
+      if (locationHeader) {
+        const locationMatch = locationHeader.match(/\/(\d+)$/);
+        if (locationMatch) {
+          recordId = locationMatch[1];
+          console.log(`[NetSuite API] 從 Location header 提取的記錄 ID: ${recordId}`);
+        }
+      }
+      
+      // 如果是 204 No Content，這是正常的
+      if (response.status === 204 || response.status === 201) {
+        console.log(`[NetSuite API] ${response.status} - 這是正常的，表示請求成功但沒有返回內容`);
+        return { 
+          success: true, 
+          message: `Request successful (${response.status})`,
+          id: recordId || undefined,
+          location: locationHeader || undefined,
+        } as T;
+      }
+      
+      // 其他情況下的空字串，可能是錯誤，但先嘗試返回成功
+      // 某些 NetSuite API（如 createRecord）可能在某些情況下返回空字串
+      console.warn(`[NetSuite API] 空字串回應但狀態碼不是 204/201，嘗試返回成功狀態`);
+      return { 
+        success: true, 
+        message: 'Request successful (empty response)',
+        id: recordId || undefined,
+        location: locationHeader || undefined,
+      } as T;
+    }
+    
     if (contentType && contentType.includes('application/json')) {
       try {
         return JSON.parse(responseText);
@@ -140,9 +202,11 @@ export class NetSuiteAPIClient {
       // 嘗試解析為 JSON（某些 API 可能沒有正確設定 Content-Type）
       try {
         return JSON.parse(responseText);
-      } catch {
+      } catch (parseError: any) {
+        console.error(`[NetSuite API] 解析 JSON 失敗:`, parseError.message);
+        console.error(`[NetSuite API] 回應內容:`, responseText);
         throw new Error(
-          `NetSuite API 返回了非 JSON 格式的回應: ${responseText.substring(0, 200)}`
+          `NetSuite API 返回了非 JSON 格式的回應: ${responseText ? responseText.substring(0, 500) : '(空字串)'}`
         );
       }
     }
@@ -335,7 +399,35 @@ export class NetSuiteAPIClient {
   // 創建記錄（通用）
   async createRecord(recordType: string, recordData: any): Promise<any> {
     const endpoint = `/services/rest/record/v1/${recordType}`;
-    return this.request(endpoint, 'POST', recordData);
+    const startTime = Date.now();
+    
+    // 只在開發環境記錄詳細資訊
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[NetSuite API] 建立記錄: ${recordType}`, {
+        endpoint,
+        payloadSize: JSON.stringify(recordData).length,
+      });
+    }
+    
+    try {
+      const result = await this.request(endpoint, 'POST', recordData);
+      const duration = Date.now() - startTime;
+      
+      // 只在開發環境或耗時過長時記錄
+      if (process.env.NODE_ENV === 'development' || duration > 5000) {
+        console.log(`[NetSuite API] 建立記錄成功: ${recordType}，耗時: ${duration}ms`);
+      }
+      
+      return result;
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      console.error(`[NetSuite API] 建立記錄失敗: ${recordType}，耗時: ${duration}ms`);
+      console.error(`[NetSuite API] 錯誤訊息:`, error.message);
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`[NetSuite API] 錯誤堆疊:`, error.stack);
+      }
+      throw error;
+    }
   }
 
   // 更新記錄（通用）

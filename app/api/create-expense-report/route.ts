@@ -1,20 +1,23 @@
 import { NextResponse } from 'next/server';
-import { getNetSuiteAPIClient } from '@/lib/netsuite-client';
 import { createClient } from '@/utils/supabase/server';
 
+/**
+ * 建立報支項目（寫入審核表）
+ * 說明：報支資料先寫入 expense_reviews 表，待財務人員審核後再同步到 NetSuite
+ */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
       expenseDate,
-      type, // 費用科目
-      employee, // 員工（Entity）
-      subsidiary,
-      expenseLocation,
-      department,
-      class: classField,
+      type, // 費用科目 ID
+      employee, // 員工 ID
+      subsidiary, // 公司別 ID
+      expenseLocation, // 地點 ID
+      department, // 部門 ID
+      class: classField, // 類別 ID
       receiptAmount,
-      receiptCurrency,
+      receiptCurrency, // 幣別符號（如 TWD）
       description,
       receiptMissing,
       // OCR 識別結果
@@ -47,7 +50,8 @@ export async function POST(request: Request) {
       ocrWebViewLink,
       ocrProcessedAt,
       // 附件（圖片）
-      attachment,
+      attachment_url, // Supabase Storage URL（優先使用）
+      attachment, // Base64 備用（如果 Storage 上傳失敗）
     } = body;
 
     // 驗證必填欄位
@@ -65,223 +69,302 @@ export async function POST(request: Request) {
       );
     }
 
-    // 驗證 NetSuite 環境變數
-    const requiredEnvVars = [
-      'NETSUITE_ACCOUNT_ID',
-      'NETSUITE_CONSUMER_KEY',
-      'NETSUITE_CONSUMER_SECRET',
-      'NETSUITE_TOKEN_ID',
-      'NETSUITE_TOKEN_SECRET',
-    ];
-
-    const missingVars = requiredEnvVars.filter(
-      (varName) => !process.env[varName]
-    );
-
-    if (missingVars.length > 0) {
+    // 驗證幣別
+    if (!receiptCurrency || receiptCurrency.trim() === '') {
       return NextResponse.json(
-        { 
-          error: `NetSuite 環境變數未設定: ${missingVars.join(', ')}` 
-        },
-        { status: 500 }
+        { error: '請選擇幣別' },
+        { status: 400 }
       );
     }
 
-    const netsuite = getNetSuiteAPIClient();
     const supabase = await createClient();
 
-    // 從 Supabase 查詢對應的 NetSuite ID
-    // 假設前端傳來的值可能是名稱或 ID，我們需要查詢對應的 netsuite_internal_id
+    // 取得當前使用者資訊
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: '無法取得使用者資訊，請重新登入' },
+        { status: 401 }
+      );
+    }
+
+    // 查詢所有相關主檔的 ID 和名稱（用於快取到審核表）
     
     // 查詢 Employee（Entity）
     let employeeId: string | null = null;
+    let employeeName: string | null = null;
     if (employee) {
-      try {
-        const { data: empData, error: empError } = await supabase
-          .from('ns_entities_employees')
-          .select('netsuite_internal_id')
-          .eq('id', employee)
-          .eq('is_inactive', false)
-          .maybeSingle();
-        
-        if (!empError && empData) {
-          employeeId = empData.netsuite_internal_id?.toString() || null;
-        }
-        // 如果查不到，嘗試用名稱查詢
-        if (!employeeId) {
-          const { data: empDataByName } = await supabase
-            .from('ns_entities_employees')
-            .select('netsuite_internal_id')
-            .ilike('name', `%${employee}%`)
-            .eq('is_inactive', false)
-            .limit(1)
-            .maybeSingle();
-          employeeId = empDataByName?.netsuite_internal_id?.toString() || employee;
-        }
-      } catch (e) {
-        // 如果查詢失敗，假設傳來的值就是 NetSuite ID
-        employeeId = employee;
+      const { data: empData } = await supabase
+        .from('ns_entities_employees')
+        .select('id, name')
+        .eq('id', employee)
+        .eq('is_inactive', false)
+        .maybeSingle();
+      
+      if (empData) {
+        employeeId = empData.id;
+        employeeName = empData.name;
+      } else {
+        return NextResponse.json(
+          { error: `找不到員工（ID: ${employee}），請確認員工是否正確或已同步到系統` },
+          { status: 400 }
+        );
       }
+    } else {
+      return NextResponse.json(
+        { error: '請選擇員工' },
+        { status: 400 }
+      );
     }
 
-    // 查詢 Subsidiary
+    // 查詢 Expense Category（必填）
+    let expenseCategoryId: string | null = null;
+    let expenseCategoryName: string | null = null;
+    if (type) {
+      const { data: categoryData } = await supabase
+        .from('ns_expense_categories')
+        .select('id, name')
+        .eq('id', type)
+        .eq('is_inactive', false)
+        .maybeSingle();
+      
+      if (categoryData) {
+        expenseCategoryId = categoryData.id;
+        expenseCategoryName = categoryData.name;
+      } else {
+        return NextResponse.json(
+          { error: `找不到費用類別（ID: ${type}），請確認費用類別是否正確或已同步到系統` },
+          { status: 400 }
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: '請選擇費用類別' },
+        { status: 400 }
+      );
+    }
+
+    // 查詢 Subsidiary（必填）
     let subsidiaryId: string | null = null;
+    let subsidiaryName: string | null = null;
     if (subsidiary) {
-      try {
-        const { data: subData, error: subError } = await supabase
-          .from('ns_subsidiaries')
-          .select('netsuite_internal_id')
-          .or(`id.eq.${subsidiary},name.ilike.%${subsidiary}%`)
-          .eq('is_inactive', false)
-          .limit(1)
-          .maybeSingle();
-        
-        if (!subError && subData) {
-          subsidiaryId = subData.netsuite_internal_id?.toString() || null;
-        }
-        // 如果查不到，假設傳來的值就是 NetSuite ID
-        if (!subsidiaryId) {
-          subsidiaryId = subsidiary;
-        }
-      } catch (e) {
-        // 如果查詢失敗，假設傳來的值就是 NetSuite ID
-        subsidiaryId = subsidiary;
+      const { data: subData } = await supabase
+        .from('ns_subsidiaries')
+        .select('id, name')
+        .eq('id', subsidiary)
+        .eq('is_active', true)
+        .maybeSingle();
+      
+      if (subData) {
+        subsidiaryId = subData.id;
+        subsidiaryName = subData.name;
+      } else {
+        return NextResponse.json(
+          { error: `找不到公司別（ID: ${subsidiary}），請確認公司別是否正確或已同步到系統` },
+          { status: 400 }
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: '請選擇公司別' },
+        { status: 400 }
+      );
+    }
+
+    // 查詢 Location
+    let locationId: string | null = null;
+    let locationName: string | null = null;
+    if (expenseLocation) {
+      const { data: locData } = await supabase
+        .from('ns_locations')
+        .select('id, name')
+        .eq('id', expenseLocation)
+        .eq('is_inactive', false)
+        .maybeSingle();
+      
+      if (locData) {
+        locationId = locData.id;
+        locationName = locData.name;
       }
     }
 
     // 查詢 Department
     let departmentId: string | null = null;
+    let departmentName: string | null = null;
     if (department) {
-      try {
-        const { data: deptData } = await supabase
-          .from('ns_departments')
-          .select('netsuite_internal_id')
-          .or(`id.eq.${department},name.ilike.%${department}%`)
-          .eq('is_inactive', false)
-          .limit(1)
-          .maybeSingle();
-        departmentId = deptData?.netsuite_internal_id?.toString() || department;
-      } catch (e) {
-        departmentId = department;
+      const { data: deptData } = await supabase
+        .from('ns_departments')
+        .select('id, name')
+        .eq('id', department)
+        .eq('is_inactive', false)
+        .maybeSingle();
+      
+      if (deptData) {
+        departmentId = deptData.id;
+        departmentName = deptData.name;
       }
     }
 
     // 查詢 Class
     let classId: string | null = null;
+    let className: string | null = null;
     if (classField) {
-      try {
-        const { data: classData } = await supabase
-          .from('ns_classes')
-          .select('netsuite_internal_id')
-          .or(`id.eq.${classField},name.ilike.%${classField}%`)
-          .eq('is_inactive', false)
-          .limit(1)
-          .maybeSingle();
-        classId = classData?.netsuite_internal_id?.toString() || classField;
-      } catch (e) {
-        classId = classField;
-      }
-    }
-
-    // 查詢 Expense Category
-    let categoryId: string | null = null;
-    if (type) {
-      try {
-        const { data: categoryData } = await supabase
-          .from('ns_expense_categories')
-          .select('netsuite_internal_id')
-          .or(`id.eq.${type},name.ilike.%${type}%`)
-          .eq('is_inactive', false)
-          .limit(1)
-          .maybeSingle();
-        categoryId = categoryData?.netsuite_internal_id?.toString() || type;
-      } catch (e) {
-        categoryId = type;
-      }
-    }
-
-    // 查詢 Location（如果有的話）
-    let locationId: string | null = null;
-    if (expenseLocation) {
-      try {
-        const { data: locData } = await supabase
-          .from('ns_locations')
-          .select('netsuite_internal_id')
-          .or(`id.eq.${expenseLocation},name.ilike.%${expenseLocation}%`)
-          .eq('is_inactive', false)
-          .limit(1)
-          .maybeSingle();
-        locationId = locData?.netsuite_internal_id?.toString() || expenseLocation;
-      } catch (e) {
-        locationId = expenseLocation;
-      }
-    }
-
-    // 查詢 Currency
-    let currencyId: string = '1'; // 預設
-    if (receiptCurrency) {
-      try {
-        const { data: currData } = await supabase
-          .from('ns_currencies')
-          .select('netsuite_internal_id')
-          .or(`id.eq.${receiptCurrency},symbol.eq.${receiptCurrency},name.ilike.%${receiptCurrency}%`)
-          .eq('is_inactive', false)
-          .limit(1)
-          .maybeSingle();
-        currencyId = currData?.netsuite_internal_id?.toString() || receiptCurrency || '1';
-      } catch (e) {
-        currencyId = receiptCurrency || '1';
-      }
-    }
-
-    // 組裝 NetSuite Expense Report payload
-    const expenseReportData: any = {
-      recordType: 'expenseReport',
-      entity: employeeId ? { id: employeeId } : undefined, // 員工（Entity）
-      subsidiary: { id: subsidiaryId || subsidiary },
-      currency: { id: currencyId },
-      tranDate: expenseDate,
-      // 以下欄位為可選（根據 NetSuite 實際需求）
-      ...(departmentId && { department: { id: departmentId } }),
-      ...(classId && { class: { id: classId } }),
-      ...(locationId && { location: { id: locationId } }),
-      memo: description || `OCR 辨識報支項目${invoiceNumber ? ` - 發票號碼: ${invoiceNumber}` : ''}`,
-      expense: {
-        items: [
-          {
-            category: { id: categoryId || type },
-            amount: parseFloat(receiptAmount),
-            memo: description || `發票: ${invoiceNumber || '無發票號碼'}`,
-          }
-        ]
-      }
-    };
-
-    // 如果有 OCR 識別結果，添加到 memo
-    if (invoiceNumber || invoiceTitle) {
-      const ocrInfo = [];
-      if (invoiceTitle) ocrInfo.push(`發票標題: ${invoiceTitle}`);
-      if (invoiceNumber) ocrInfo.push(`發票號碼: ${invoiceNumber}`);
-      if (invoiceDate) ocrInfo.push(`開立時間: ${invoiceDate}`);
-      if (sellerName) ocrInfo.push(`賣方: ${sellerName}`);
-      if (buyerName) ocrInfo.push(`買方: ${buyerName}`);
+      const { data: classData } = await supabase
+        .from('ns_classes')
+        .select('id, name')
+        .eq('id', classField)
+        .eq('is_inactive', false)
+        .maybeSingle();
       
-      expenseReportData.memo = `${expenseReportData.memo}\n\nOCR 識別資訊:\n${ocrInfo.join('\n')}`;
+      if (classData) {
+        classId = classData.id;
+        className = classData.name;
+      }
     }
 
-    // 創建 Expense Report
-    const netsuiteResult = await netsuite.createRecord('expensereport', expenseReportData);
+    // 查詢 Currency（必填）
+    let currencyId: string | null = null;
+    if (receiptCurrency) {
+      const { data: currData } = await supabase
+        .from('ns_currencies')
+        .select('id, symbol, name')
+        .or(`symbol.eq.${receiptCurrency},name.ilike.%${receiptCurrency}%`)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+      
+      if (currData) {
+        currencyId = currData.id;
+      } else {
+        return NextResponse.json(
+          { error: `找不到幣別「${receiptCurrency}」，請確認幣別是否正確或已同步到系統` },
+          { status: 400 }
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: '請選擇幣別' },
+        { status: 400 }
+      );
+    }
 
-    // 保存到 Supabase（記錄交易參考）
-    // TODO: 如果有 transaction_references 表，可以記錄這裡
-    // await supabase.from('transaction_references').insert({...});
+    // 取得使用者名稱（從 user metadata 或 email）
+    const createdByName = user.user_metadata?.full_name || user.user_metadata?.name || user.email || '未知使用者';
+
+    // 轉換 invoiceDate 為 DATE 格式（如果有的話）
+    let invoiceDateFormatted: Date | null = null;
+    if (invoiceDate) {
+      try {
+        invoiceDateFormatted = new Date(invoiceDate);
+        if (isNaN(invoiceDateFormatted.getTime())) {
+          invoiceDateFormatted = null;
+        }
+      } catch (e) {
+        invoiceDateFormatted = null;
+      }
+    }
+
+    // 轉換 ocrProcessedAt 為 TIMESTAMPTZ（如果有的話）
+    let ocrProcessedAtFormatted: Date | null = null;
+    if (ocrProcessedAt) {
+      try {
+        ocrProcessedAtFormatted = new Date(ocrProcessedAt);
+        if (isNaN(ocrProcessedAtFormatted.getTime())) {
+          ocrProcessedAtFormatted = null;
+        }
+      } catch (e) {
+        ocrProcessedAtFormatted = null;
+      }
+    }
+
+    // 寫入 expense_reviews 表（審核表）
+    const { data: reviewData, error: insertError } = await supabase
+      .from('expense_reviews')
+      .insert({
+        // 基本報支資訊
+        expense_date: expenseDate,
+        expense_category_id: expenseCategoryId,
+        expense_category_name: expenseCategoryName,
+        employee_id: employeeId,
+        employee_name: employeeName,
+        subsidiary_id: subsidiaryId,
+        subsidiary_name: subsidiaryName,
+        location_id: locationId,
+        location_name: locationName,
+        department_id: departmentId,
+        department_name: departmentName,
+        class_id: classId,
+        class_name: className,
+        receipt_amount: parseFloat(receiptAmount),
+        receipt_currency: receiptCurrency,
+        currency_id: currencyId,
+        description: description || null,
+        receipt_missing: receiptMissing || false,
+        
+        // OCR 識別結果
+        invoice_title: invoiceTitle || null,
+        invoice_period: invoicePeriod || null,
+        invoice_number: invoiceNumber || null,
+        invoice_date: invoiceDateFormatted,
+        random_code: randomCode || null,
+        format_code: formatCode || null,
+        seller_name: sellerName || null,
+        seller_tax_id: sellerTaxId || null,
+        seller_address: sellerAddress || null,
+        buyer_name: buyerName || null,
+        buyer_tax_id: buyerTaxId || null,
+        buyer_address: buyerAddress || null,
+        untaxed_amount: untaxedAmount ? parseFloat(untaxedAmount) : null,
+        tax_amount: taxAmount ? parseFloat(taxAmount) : null,
+        total_amount: totalAmount ? parseFloat(totalAmount) : null,
+        
+        // OCR 元數據
+        ocr_success: ocrSuccess || false,
+        ocr_confidence: ocrConfidence ? parseFloat(ocrConfidence.toString()) : null,
+        ocr_document_type: ocrDocumentType || null,
+        ocr_errors: ocrErrors || null,
+        ocr_warnings: ocrWarnings || null,
+        ocr_error_count: ocrErrorCount || 0,
+        ocr_warning_count: ocrWarningCount || 0,
+        ocr_quality_grade: ocrQualityGrade || null,
+        ocr_file_name: ocrFileName || null,
+        ocr_file_id: ocrFileId || null,
+        ocr_web_view_link: ocrWebViewLink || null,
+               ocr_processed_at: ocrProcessedAtFormatted,
+               
+               // 附件（優先使用 Storage URL，Base64 作為備用）
+               attachment_url: attachment_url || null,
+               attachment_base64: attachment || null,
+               
+               // 審核狀態（預設為待審核）
+               review_status: 'pending',
+        netsuite_sync_status: 'pending',
+        
+        // 建立人員資訊
+        created_by: user.id,
+        created_by_name: createdByName,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('寫入審核表錯誤:', insertError);
+      return NextResponse.json(
+        { 
+          error: '寫入審核表失敗',
+          message: insertError.message || '未知錯誤',
+          details: insertError
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      message: '報支項目已成功建立',
-      netsuite_id: netsuiteResult.id,
-      netsuite_tran_id: netsuiteResult.tranId,
-      data: netsuiteResult,
+      message: '報支項目已成功提交，等待財務人員審核',
+      review_id: reviewData.id,
+      review_status: 'pending',
+      data: reviewData,
     });
 
   } catch (error: any) {

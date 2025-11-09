@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -17,6 +18,8 @@ import {
 } from '@/components/ui/select';
 
 export default function OCRExpensePage() {
+  const router = useRouter();
+  
   // 獲取今天的日期（格式：YYYY-MM-DD）
   const getTodayDate = () => {
     const today = new Date();
@@ -549,21 +552,54 @@ export default function OCRExpensePage() {
     setLoading(true);
 
     try {
-      // 準備附件數據（如果有）
-      let attachmentData = null;
+      // 上傳附件到 Supabase Storage（如果有）
+      let attachmentUrl = null;
+      let attachmentBase64 = null; // 備用，如果 Storage 上傳失敗
+      
       if (attachments.length > 0 && attachments[0]) {
         const file = attachments[0];
-        if (previewImage && previewImage.startsWith('data:')) {
-          // 將 base64 轉換為 Blob
-          const response = await fetch(previewImage);
-          const blob = await response.blob();
-          // 轉換為 base64 字符串（用於傳輸）
-          const reader = new FileReader();
-          attachmentData = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
+        const supabase = (await import('@/utils/supabase/client')).createClient();
+        
+        // 取得當前使用者 ID
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error('無法取得使用者資訊，請重新登入');
+        }
+
+        // 產生檔案名稱：{user_id}/{timestamp}_{filename}
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileExt = file.name.split('.').pop() || 'jpg';
+        const fileName = `${user.id}/${timestamp}_${Date.now()}.${fileExt}`;
+
+        try {
+          // 上傳到 Supabase Storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('expense-receipts')
+            .upload(fileName, file, {
+              cacheControl: '3600',
+              upsert: false,
+            });
+
+          if (uploadError) {
+            console.warn('Storage 上傳失敗，使用 Base64 備用方案:', uploadError);
+            // 如果上傳失敗，使用 Base64 備用方案
+            if (previewImage && previewImage.startsWith('data:')) {
+              attachmentBase64 = previewImage.split(',')[1]; // 移除 data:image/jpeg;base64, 前綴
+            }
+          } else {
+            // 取得公開 URL（如果是 Private bucket，需要取得 Signed URL）
+            const { data: urlData } = supabase.storage
+              .from('expense-receipts')
+              .getPublicUrl(fileName);
+            
+            attachmentUrl = urlData.publicUrl;
+          }
+        } catch (storageError: any) {
+          console.warn('Storage 上傳錯誤，使用 Base64 備用方案:', storageError);
+          // 如果 Storage 不可用，使用 Base64 備用方案
+          if (previewImage && previewImage.startsWith('data:')) {
+            attachmentBase64 = previewImage.split(',')[1];
+          }
         }
       }
 
@@ -575,7 +611,8 @@ export default function OCRExpensePage() {
         },
         body: JSON.stringify({
           ...formData,
-          attachment: attachmentData,
+          attachment_url: attachmentUrl,
+          attachment: attachmentBase64, // 備用 Base64（如果 Storage 上傳失敗）
         }),
       });
 
@@ -586,10 +623,59 @@ export default function OCRExpensePage() {
       }
 
       // 成功
-      alert(`報支項目已成功建立！\n\nNetSuite ID: ${result.netsuite_id}\n交易編號: ${result.netsuite_tran_id || 'N/A'}`);
-      
-      // 可選：重置表單或導航
-      // window.location.href = '/dashboard';
+      if (result.success) {
+        // 清空表單
+        setFormData({
+          expenseDate: getTodayDate(),
+          type: '',
+          subsidiary: '',
+          expenseLocation: '',
+          department: '',
+          class: '',
+          employee: '',
+          receiptAmount: '',
+          receiptCurrency: 'TWD',
+          description: '',
+          receiptMissing: false,
+          invoiceTitle: '',
+          invoicePeriod: '',
+          invoiceNumber: '',
+          invoiceDate: '',
+          randomCode: '',
+          formatCode: '',
+          sellerName: '',
+          sellerTaxId: '',
+          sellerAddress: '',
+          buyerName: '',
+          buyerTaxId: '',
+          buyerAddress: '',
+          untaxedAmount: '',
+          taxAmount: '',
+          totalAmount: '',
+          ocrSuccess: false,
+          ocrConfidence: 0,
+          ocrDocumentType: '',
+          ocrErrors: '',
+          ocrWarnings: '',
+          ocrErrorCount: 0,
+          ocrWarningCount: 0,
+          ocrQualityGrade: '',
+          ocrFileName: '',
+          ocrFileId: '',
+          ocrWebViewLink: '',
+          ocrProcessedAt: '',
+        });
+        setAttachments([]);
+        setPreviewImage(null);
+        
+        // 顯示成功訊息
+        alert(`報支項目已成功提交！\n\n審核編號: ${result.review_id}\n狀態: 待審核\n\n財務人員將進行檢核，審核通過後會同步到 NetSuite。`);
+        
+        // 導航到「我的報支」頁面
+        router.push('/dashboard/ocr-expense/my-expenses');
+      } else {
+        alert(`提交失敗: ${result.error || result.message || '未知錯誤'}`);
+      }
       
     } catch (error) {
       console.error('提交報支項目錯誤:', error);
@@ -608,7 +694,7 @@ export default function OCRExpensePage() {
           <h1 className="text-3xl font-bold">建立報支項目</h1>
         </div>
         <p className="text-muted-foreground">
-          使用 OCR 技術自動識別收據並建立報支項目
+          填寫報支項目資訊，可選擇使用 OCR 技術自動識別收據（選填）
         </p>
       </div>
 
@@ -623,7 +709,7 @@ export default function OCRExpensePage() {
             <div className="space-y-4 flex flex-col">
               {/* Attachments */}
               <div className="space-y-2 flex-1 flex flex-col">
-                <Label className="text-sm font-semibold">附件</Label>
+                <Label className="text-sm font-semibold">附件（選填）</Label>
                 <div
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
@@ -1210,7 +1296,7 @@ export default function OCRExpensePage() {
       {/* OCR 識別結果 - 獨立區塊 */}
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>OCR 識別結果</CardTitle>
+          <CardTitle>OCR 識別結果（選填）</CardTitle>
         </CardHeader>
         <CardContent>
           {ocrProcessing ? (
@@ -1526,7 +1612,13 @@ export default function OCRExpensePage() {
                       </Label>
                       <Input
                         id="ocr-success"
-                        value={formData.ocrSuccess ? '成功' : '失敗'}
+                        value={
+                          !formData.ocrFileName && !formData.ocrFileId && !formData.ocrProcessedAt
+                            ? '無OCR'
+                            : formData.ocrSuccess
+                            ? '成功'
+                            : '失敗'
+                        }
                         readOnly
                         className="text-sm bg-gray-100 dark:bg-gray-800 h-8"
                       />
