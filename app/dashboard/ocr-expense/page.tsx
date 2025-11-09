@@ -1398,21 +1398,21 @@ export default function OCRExpensePage() {
                 <TableHeader>
                   <TableRow className="bg-gray-100 dark:bg-gray-800">
                     <TableHead className="w-16 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">參考編號</TableHead>
-                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">日期 *</TableHead>
-                    <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別 *</TableHead>
+                    <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
+                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">日期 <span className="text-red-500">*</span></TableHead>
+                    <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別 <span className="text-red-500">*</span></TableHead>
                     {useMultiCurrency && <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">外幣金額</TableHead>}
-                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">幣別 *</TableHead>
+                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">幣別 <span className="text-red-500">*</span></TableHead>
                     {useMultiCurrency && <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">匯率</TableHead>}
-                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">金額 *</TableHead>
+                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">金額 <span className="text-red-500">*</span></TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">稅碼</TableHead>
                     <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">稅率</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">稅額</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">總金額</TableHead>
-                    <TableHead className="min-w-[200px] text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">備註</TableHead>
+                    <TableHead className="w-48 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">備註</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">部門</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">地點</TableHead>
-                    <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
                     <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1428,16 +1428,144 @@ export default function OCRExpensePage() {
                       <TableRow key={line.id}>
                         <TableCell className="text-center text-sm px-1">{line.refNo}</TableCell>
                         <TableCell className="text-sm px-1">
-                          <Input
-                            type="date"
-                            value={line.date || formData.expenseDate}
-                            onChange={(e) => {
-                              const newLines = [...expenseLines];
-                              newLines[index].date = e.target.value;
-                              setExpenseLines(newLines);
-                            }}
-                            className="h-7 text-sm px-1.5"
-                          />
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-sm px-1.5 w-full"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                }}
+                              >
+                                <Eye className="h-3 w-3 mr-1" />
+                                {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? '查看 OCR' : '無 OCR'}
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                              <DialogHeader>
+                                <DialogTitle>OCR 識別結果 - 明細 #{line.refNo}</DialogTitle>
+                                <DialogDescription>
+                                  {line.ocrData.invoiceNumber ? `發票號碼: ${line.ocrData.invoiceNumber}` : '尚未進行 OCR 辨識'}
+                                </DialogDescription>
+                              </DialogHeader>
+                              {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? (
+                                <div className="space-y-4">
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-semibold">發票標題</Label>
+                                      <p className="text-sm">{line.ocrData.invoiceTitle || 'N/A'}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-semibold">發票期間</Label>
+                                      <p className="text-sm">{line.ocrData.invoicePeriod || 'N/A'}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-semibold">發票號碼</Label>
+                                      <p className="text-sm">{line.ocrData.invoiceNumber || 'N/A'}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-semibold">發票日期</Label>
+                                      <p className="text-sm">{line.ocrData.invoiceDate || 'N/A'}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-semibold">隨機碼</Label>
+                                      <p className="text-sm">{line.ocrData.randomCode || 'N/A'}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-semibold">格式代碼</Label>
+                                      <p className="text-sm">{line.ocrData.formatCode || 'N/A'}</p>
+                                    </div>
+                                  </div>
+                                  <div className="border-t pt-4">
+                                    <h3 className="text-sm font-semibold mb-2">賣方資訊</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">賣方名稱</Label>
+                                        <p className="text-sm">{line.ocrData.sellerName || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">賣方統編</Label>
+                                        <p className="text-sm">{line.ocrData.sellerTaxId || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2 col-span-2">
+                                        <Label className="text-sm font-semibold">賣方地址</Label>
+                                        <p className="text-sm">{line.ocrData.sellerAddress || 'N/A'}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="border-t pt-4">
+                                    <h3 className="text-sm font-semibold mb-2">買方資訊</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">買方名稱</Label>
+                                        <p className="text-sm">{line.ocrData.buyerName || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">買方統編</Label>
+                                        <p className="text-sm">{line.ocrData.buyerTaxId || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2 col-span-2">
+                                        <Label className="text-sm font-semibold">買方地址</Label>
+                                        <p className="text-sm">{line.ocrData.buyerAddress || 'N/A'}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="border-t pt-4">
+                                    <h3 className="text-sm font-semibold mb-2">金額資訊</h3>
+                                    <div className="grid grid-cols-3 gap-4">
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">未稅金額</Label>
+                                        <p className="text-sm">{line.ocrData.untaxedAmount || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">稅額</Label>
+                                        <p className="text-sm">{line.ocrData.taxAmount || 'N/A'}</p>
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label className="text-sm font-semibold">總金額</Label>
+                                        <p className="text-sm font-bold">{line.ocrData.totalAmount || 'N/A'}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {line.ocrData.ocrWebViewLink && (
+                                    <div className="border-t pt-4">
+                                      <a
+                                        href={line.ocrData.ocrWebViewLink}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 text-sm underline"
+                                      >
+                                        查看原始檔案
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-center py-8">
+                                  <p>此明細尚未進行 OCR 辨識</p>
+                                  <p className="text-xs mt-2">請先上傳收據圖片並執行 OCR 辨識</p>
+                                </div>
+                              )}
+                            </DialogContent>
+                          </Dialog>
+                        </TableCell>
+                        <TableCell className="text-sm px-1">
+                          <div className="relative">
+                            <Input
+                              type="date"
+                              value={line.date || formData.expenseDate}
+                              onChange={(e) => {
+                                const newLines = [...expenseLines];
+                                newLines[index].date = e.target.value;
+                                setExpenseLines(newLines);
+                              }}
+                              className="h-7 text-sm px-1.5 pr-8 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-moz-calendar-picker-indicator]:opacity-0 [&::-moz-calendar-picker-indicator]:absolute [&::-moz-calendar-picker-indicator]:right-0 [&::-moz-calendar-picker-indicator]:w-full [&::-moz-calendar-picker-indicator]:h-full [&::-moz-calendar-picker-indicator]:cursor-pointer"
+                            />
+                            <Calendar 
+                              className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400 pointer-events-none z-10" 
+                            />
+                          </div>
                         </TableCell>
                         <TableCell className="text-sm px-1">
                           <Select
@@ -1600,7 +1728,7 @@ export default function OCRExpensePage() {
                               newLines[index].memo = e.target.value;
                               setExpenseLines(newLines);
                             }}
-                            className="h-7 text-sm px-1.5"
+                            className="h-7 text-sm px-1.5 w-full"
                             placeholder="備註"
                           />
                         </TableCell>
@@ -1666,209 +1794,6 @@ export default function OCRExpensePage() {
                               ))}
                             </SelectContent>
                           </Select>
-                        </TableCell>
-                        <TableCell className="text-sm px-1">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-sm w-full justify-start"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                }}
-                              >
-                                <Eye className="h-3 w-3 mr-1" />
-                                {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? '查看 OCR' : '無 OCR'}
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                              <DialogHeader>
-                                <DialogTitle>OCR 識別結果 - 明細 #{line.refNo}</DialogTitle>
-                                <DialogDescription>
-                                  {line.ocrData.invoiceNumber ? `發票號碼: ${line.ocrData.invoiceNumber}` : '尚未進行 OCR 辨識'}
-                                </DialogDescription>
-                              </DialogHeader>
-                              {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? (
-                                <div className="space-y-4">
-                                  {/* 發票相關資訊 */}
-                                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
-                                    <h4 className="text-sm font-semibold mb-3">發票資訊</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                      <div className="space-y-2">
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">發票標題</Label>
-                                          <Input value={line.ocrData.invoiceTitle} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">發票期別</Label>
-                                          <Input value={line.ocrData.invoicePeriod} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">發票號碼</Label>
-                                          <Input value={line.ocrData.invoiceNumber} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">開立時間</Label>
-                                          <Input value={line.ocrData.invoiceDate} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">隨機碼</Label>
-                                          <Input value={line.ocrData.randomCode} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">格式代號</Label>
-                                          <Input value={line.ocrData.formatCode} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">賣方資訊</h5>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">賣方名稱</Label>
-                                          <Input value={line.ocrData.sellerName} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">賣方統編</Label>
-                                          <Input value={line.ocrData.sellerTaxId} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">賣方地址</Label>
-                                          <Input value={line.ocrData.sellerAddress} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">買方資訊</h5>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">買方名稱</Label>
-                                          <Input value={line.ocrData.buyerName} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">買方統編</Label>
-                                          <Input value={line.ocrData.buyerTaxId} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">買方地址</Label>
-                                          <Input value={line.ocrData.buyerAddress} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">未稅銷售額</Label>
-                                          <Input value={line.ocrData.untaxedAmount} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">稅額</Label>
-                                          <Input value={line.ocrData.taxAmount} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-semibold text-gray-700 dark:text-gray-300">總計金額</Label>
-                                          <Input value={line.ocrData.totalAmount} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800 font-semibold" />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  {/* OCR 處理資訊 */}
-                                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
-                                    <h4 className="text-sm font-semibold mb-3">OCR 處理資訊</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                      <div className="space-y-2">
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">處理狀態</Label>
-                                          <Input
-                                            value={line.ocrData.ocrSuccess ? '成功' : '失敗'}
-                                            readOnly
-                                            className="text-sm h-7 bg-gray-100 dark:bg-gray-800"
-                                          />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">辨識信心度 (%)</Label>
-                                          <Input
-                                            type="number"
-                                            value={line.ocrData.ocrConfidence}
-                                            readOnly
-                                            className="text-sm h-7 bg-gray-100 dark:bg-gray-800"
-                                          />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">文件類型</Label>
-                                          <Input value={line.ocrData.ocrDocumentType} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">品質等級</Label>
-                                          <Input value={line.ocrData.ocrQualityGrade} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">錯誤數量</Label>
-                                          <Input
-                                            type="number"
-                                            value={line.ocrData.ocrErrorCount}
-                                            readOnly
-                                            className="text-sm h-7 bg-gray-100 dark:bg-gray-800"
-                                          />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">警告數量</Label>
-                                          <Input
-                                            type="number"
-                                            value={line.ocrData.ocrWarningCount}
-                                            readOnly
-                                            className="text-sm h-7 bg-gray-100 dark:bg-gray-800"
-                                          />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">錯誤訊息</Label>
-                                          <Input value={line.ocrData.ocrErrors || '無'} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">警告訊息</Label>
-                                          <Input value={line.ocrData.ocrWarnings || '無'} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                      </div>
-                                      <div className="space-y-2">
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">檔案名稱</Label>
-                                          <Input value={line.ocrData.ocrFileName || '未知檔案'} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">檔案 ID</Label>
-                                          <Input value={line.ocrData.ocrFileId || '無'} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">處理時間</Label>
-                                          <Input
-                                            value={line.ocrData.ocrProcessedAt ? new Date(line.ocrData.ocrProcessedAt).toLocaleString('zh-TW') : ''}
-                                            readOnly
-                                            className="text-sm h-7 bg-gray-100 dark:bg-gray-800"
-                                          />
-                                        </div>
-                                        {line.ocrData.ocrWebViewLink && (
-                                          <div className="space-y-1">
-                                            <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">預覽連結</Label>
-                                            <div className="flex gap-2">
-                                              <Input value={line.ocrData.ocrWebViewLink} readOnly className="text-sm h-7 bg-gray-100 dark:bg-gray-800" />
-                                              <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => window.open(line.ocrData.ocrWebViewLink, '_blank')}
-                                                className="flex-shrink-0 h-7 text-sm"
-                                              >
-                                                開啟
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="text-center py-8 text-gray-500">
-                                  <p>此明細尚未進行 OCR 辨識</p>
-                                  <p className="text-sm mt-2">請先上傳收據圖片並執行 OCR 辨識</p>
-                                </div>
-                              )}
-                            </DialogContent>
-                          </Dialog>
                         </TableCell>
                         <TableCell className="px-1">
                           <div className="flex gap-1">
