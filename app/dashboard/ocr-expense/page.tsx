@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/utils/supabase/client';
 import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2, Copy, Trash2, Check, Eye, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -575,6 +576,23 @@ export default function OCRExpensePage() {
     const loadFormOptions = async () => {
       setLoadingFormOptions(true);
       try {
+        const supabase = createClient();
+        
+        // 先取得使用者資料和 mapping 的員工
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setLoadingFormOptions(false);
+          return;
+        }
+        
+        // 取得使用者的員工 mapping
+        const { data: userProfile } = await supabase
+          .from('user_profiles')
+          .select('netsuite_employee_id')
+          .eq('id', user.id)
+          .maybeSingle();
+        
+        // 載入表單選項
         const response = await fetch('/api/expense-form-options');
         const result = await response.json();
         
@@ -592,6 +610,47 @@ export default function OCRExpensePage() {
           // 如果有警告，顯示在 console
           if (result.warnings && result.warnings.length > 0) {
             console.warn('載入表單選項時有部分錯誤:', result.warnings);
+          }
+          
+          // 如果有 mapping 的員工，自動填入員工和公司別
+          if (userProfile?.netsuite_employee_id) {
+            // 查詢員工資料
+            const { data: employeeData } = await supabase
+              .from('ns_entities_employees')
+              .select('id, netsuite_internal_id, subsidiary_id, department_id')
+              .eq('netsuite_internal_id', userProfile.netsuite_employee_id)
+              .eq('is_inactive', false)
+              .single();
+            
+            if (employeeData) {
+              // 找到對應的員工 ID（使用 formOptions 中的 id）
+              const matchedEmployee = result.data.employees?.find(
+                (emp: any) => emp.netsuite_internal_id === employeeData.netsuite_internal_id
+              );
+              
+              if (matchedEmployee) {
+                setFormData(prev => ({
+                  ...prev,
+                  employee: matchedEmployee.id,
+                }));
+              }
+              
+              // 如果有 subsidiary_id，自動填入公司別
+              if (employeeData.subsidiary_id) {
+                const matchedSubsidiary = result.data.subsidiaries?.find(
+                  (sub: any) => sub.netsuite_internal_id === employeeData.subsidiary_id
+                );
+                
+                if (matchedSubsidiary) {
+                  setFormData(prev => ({
+                    ...prev,
+                    subsidiary: matchedSubsidiary.id,
+                  }));
+                }
+              }
+              
+              // 部門、地點、類別現在只在表身的每一行中選擇，不再在表頭
+            }
           }
         } else {
           console.error('載入表單選項失敗:', result.error || result.message);
@@ -775,7 +834,7 @@ export default function OCRExpensePage() {
           id: `line-${uniqueId}`,
           refNo: processingRefNo, // 使用正在處理行的參考編號，保持連續性
           date: formData.expenseDate,
-          category: formData.type || '',
+          category: '', // 費用類別在表身每一行中選擇
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
           exchangeRate: '1.00',
@@ -785,9 +844,9 @@ export default function OCRExpensePage() {
           taxAmt: ocrOutput['稅額'] || '',
           grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
           memo: formData.description || '',
-          department: formData.department || '',
-          class: formData.class || '',
-          location: formData.expenseLocation || '',
+          department: '', // 部門在表身每一行中選擇
+          class: '', // 類別在表身每一行中選擇
+          location: '', // 地點在表身每一行中選擇
           ocrDetail: ocrOutput['發票號碼'] || ocrData.ocrFileName || '',
           ocrData: ocrDataWithImage,
           customer: '',
@@ -823,7 +882,7 @@ export default function OCRExpensePage() {
           id: `line-${uniqueId}`,
           refNo: prevRefNo,
           date: formData.expenseDate,
-          category: formData.type || '',
+          category: '', // 費用類別在表身每一行中選擇
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
           exchangeRate: '1.00',
@@ -833,9 +892,9 @@ export default function OCRExpensePage() {
           taxAmt: ocrOutput['稅額'] || '',
           grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
           memo: formData.description || '',
-          department: formData.department || '',
-          class: formData.class || '',
-          location: formData.expenseLocation || '',
+          department: '', // 部門在表身每一行中選擇
+          class: '', // 類別在表身每一行中選擇
+          location: '', // 地點在表身每一行中選擇
           ocrDetail: ocrOutput['發票號碼'] || ocrData.ocrFileName || '',
           ocrData: ocrDataWithImage,
           customer: '',
@@ -1587,8 +1646,8 @@ export default function OCRExpensePage() {
 
   const handleSubmit = async () => {
     // 驗證必填欄位
-    if (!formData.expenseDate || !formData.type || !formData.subsidiary || !formData.employee) {
-      alert('請填寫所有必填欄位（報支日期、費用科目、員工、公司別）');
+    if (!formData.expenseDate || !formData.subsidiary || !formData.employee) {
+      alert('請填寫所有必填欄位（報支日期、員工、公司別）');
       return;
     }
 
@@ -1796,35 +1855,6 @@ export default function OCRExpensePage() {
                 </div>
               </div>
 
-              {/* Type */}
-              <div className="space-y-1">
-                <Label htmlFor="type" className="text-sm font-semibold">
-                  費用用途 <span className="text-red-500">*</span>
-                </Label>
-                <Select
-                  value={formData.type}
-                  onValueChange={(value) => handleInputChange('type', value)}
-                  disabled={loadingFormOptions}
-                >
-                  <SelectTrigger id="type">
-                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇費用用途"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formOptions.expenseCategories.length > 0 ? (
-                      formOptions.expenseCategories.map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          {category.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                        {loadingFormOptions ? "載入中..." : "無可用費用類別"}
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
               {/* Employee */}
               <div className="space-y-1">
                 <Label htmlFor="employee" className="text-sm font-semibold">
@@ -1877,93 +1907,6 @@ export default function OCRExpensePage() {
                     ) : (
                       <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
                         {loadingFormOptions ? "載入中..." : "無可用公司別"}
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Expense Location */}
-              <div className="space-y-1">
-                <Label htmlFor="expenseLocation" className="text-sm font-semibold">
-                  地點
-                </Label>
-                <Select
-                  value={formData.expenseLocation}
-                  onValueChange={(value) => handleInputChange('expenseLocation', value)}
-                  disabled={loadingFormOptions}
-                >
-                  <SelectTrigger id="expenseLocation">
-                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇地點"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formOptions.locations.length > 0 ? (
-                      formOptions.locations.map((location) => (
-                        <SelectItem key={location.id} value={location.id}>
-                          {location.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                        {loadingFormOptions ? "載入中..." : "無可用地點"}
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Department */}
-              <div className="space-y-1">
-                <Label htmlFor="department" className="text-sm font-semibold">
-                  部門
-                </Label>
-                <Select
-                  value={formData.department}
-                  onValueChange={(value) => handleInputChange('department', value)}
-                  disabled={loadingFormOptions}
-                >
-                  <SelectTrigger id="department">
-                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇部門"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formOptions.departments.length > 0 ? (
-                      formOptions.departments.map((department) => (
-                        <SelectItem key={department.id} value={department.id}>
-                          {department.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                        {loadingFormOptions ? "載入中..." : "無可用部門"}
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Class */}
-              <div className="space-y-1">
-                <Label htmlFor="class" className="text-sm font-semibold">
-                  類別
-                </Label>
-                <Select
-                  value={formData.class}
-                  onValueChange={(value) => handleInputChange('class', value)}
-                  disabled={loadingFormOptions}
-                >
-                  <SelectTrigger id="class">
-                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇類別"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formOptions.classes.length > 0 ? (
-                      formOptions.classes.map((classItem) => (
-                        <SelectItem key={classItem.id} value={classItem.id}>
-                          {classItem.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                        {loadingFormOptions ? "載入中..." : "無可用類別"}
                       </div>
                     )}
                   </SelectContent>
@@ -2026,10 +1969,7 @@ export default function OCRExpensePage() {
                   placeholder="輸入報支項目描述..."
                 />
               </div>
-            </div>
 
-            {/* Right Column - Attachments and Preview */}
-            <div className="space-y-4 flex flex-col">
               {/* Attachments */}
               <div className="space-y-2 flex-1 flex flex-col">
                 <Label className="text-sm font-semibold">附件（選填）</Label>
@@ -2227,17 +2167,20 @@ export default function OCRExpensePage() {
                   )}
                 </div>
               </div>
+            </div>
 
+            {/* Right Column - Preview */}
+            <div className="space-y-4 flex flex-col">
               {/* Image Preview */}
               <div className="space-y-2">
                 <Label className="text-sm font-semibold">圖片預覽</Label>
                 <div
                   className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
-                  style={{ minHeight: '350px', height: '350px' }}
+                  style={{ minHeight: '490px', height: '490px' }}
                   onWheel={handleWheel}
                 >
                   {previewImage ? (
-                    <div className="relative w-full h-full" style={{ minHeight: '350px', height: '350px' }}>
+                    <div className="relative w-full h-full" style={{ minHeight: '550px', height: '550px' }}>
                       {/* Zoom Controls */}
                       <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-lg p-1 border border-gray-200 dark:border-gray-700">
                         <Button
@@ -2301,8 +2244,8 @@ export default function OCRExpensePage() {
                         onMouseUp={handleMouseUp}
                         onMouseLeave={handleMouseUp}
                         style={{
-                          minHeight: '350px',
-                          height: '350px',
+                          minHeight: '490px',
+                          height: '490px',
                         }}
                       >
                         <img
@@ -2326,7 +2269,7 @@ export default function OCRExpensePage() {
                       )}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full min-h-[350px] gap-3" style={{ height: '350px' }}>
+                    <div className="flex flex-col items-center justify-center h-full min-h-[490px] gap-3" style={{ height: '550px' }}>
                       <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
                       <p className="text-gray-400 dark:text-gray-500 text-center text-sm">圖片預覽</p>
                     </div>
@@ -2480,7 +2423,7 @@ export default function OCRExpensePage() {
                     {useMultiCurrency && <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">外幣金額</TableHead>}
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">幣別 <span className="text-red-500">*</span></TableHead>
                     {useMultiCurrency && <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">匯率</TableHead>}
-                    <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">金額 <span className="text-red-500">*</span></TableHead>
+                        <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">金額 <span className="text-red-500">*</span></TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">稅碼</TableHead>
                     <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">稅率</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">稅額</TableHead>
@@ -3358,7 +3301,7 @@ export default function OCRExpensePage() {
                     id: `line-${Date.now()}-${Math.random()}`,
                     refNo: nextRefNo,
                     date: formData.expenseDate,
-                    category: formData.type || '',
+                    category: '', // 費用類別在表身每一行中選擇
                     foreignAmount: '',
                     currency: formData.receiptCurrency || 'TWD',
                     exchangeRate: '1.00',
