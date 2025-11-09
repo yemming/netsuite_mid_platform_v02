@@ -49,10 +49,10 @@ export async function POST() {
       }
     }
 
-    const netsuiteData = result.items || [];
-    console.log(`從 NetSuite 取得 ${netsuiteData.length} 筆 Accounting Period 資料`);
+    const listItems = result.items || [];
+    console.log(`從 NetSuite List API 取得 ${listItems.length} 筆 Accounting Period ID`);
 
-    if (netsuiteData.length === 0) {
+    if (listItems.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -63,19 +63,62 @@ export async function POST() {
       );
     }
 
+    // ⚠️ 重要：List API 只返回 id 和 links，需要使用 getRecord 取得詳細資料
+    console.log('開始使用 getRecord 取得每筆記錄的詳細資料...');
+    const netsuiteData: any[] = [];
+    
+    // 批次處理，每批 10 個，避免 API 限制
+    const batchSize = 10;
+    for (let i = 0; i < listItems.length; i += batchSize) {
+      const batch = listItems.slice(i, i + batchSize);
+      console.log(`處理批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(listItems.length / batchSize)} (records ${i + 1}-${Math.min(i + batchSize, listItems.length)})...`);
+      
+      // 並行查詢批次中的每個記錄
+      const batchPromises = batch.map(async (item: any) => {
+        const recordId = item.id;
+        try {
+          const detail = await netsuite.getRecord('accountingperiod', recordId);
+          return detail;
+        } catch (error: any) {
+          console.warn(`取得 Accounting Period ${recordId} 詳細資料失敗:`, error.message);
+          // 如果失敗，至少返回基本資訊
+          return {
+            id: recordId,
+            periodName: null,
+            startDate: null,
+            endDate: null,
+            _error: error.message,
+          };
+        }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      netsuiteData.push(...batchResults);
+      
+      // 每批次之間稍作延遲，避免 API 限制
+      if (i + batchSize < listItems.length) {
+        await new Promise(resolve => setTimeout(resolve, 100)); // 延遲 100ms
+      }
+    }
+    
+    console.log(`從 NetSuite 取得 ${netsuiteData.length} 筆 Accounting Period 詳細資料`);
+
     // 轉換資料格式
     const syncTimestamp = new Date().toISOString();
     const recordsToUpsert = netsuiteData.map((item: any) => {
-      // REST API 返回的資料結構（根據實際 API 回應）
-      // 注意：實際欄位名是 closed（不是 isClosed），且 isAdjustment 不存在
-      const periodName = item.periodName || item.name || '';
-      const startDate = item.startDate || item.startdate || null;
-      const endDate = item.endDate || item.enddate || null;
-      const isQuarter = item.isQuarter === true || item.isquarter === 'T' || false;
-      const isYear = item.isYear === true || item.isyear === 'T' || false;
-      const isClosed = item.closed === true || item.isClosed === true || item.isclosed === 'T' || false; // 注意：實際欄位名是 closed
-      const fiscalCalendarId = item.fiscalCalendar?.id ? parseInt(item.fiscalCalendar.id) : null;
+      // REST API 返回的實際欄位結構（根據測試結果）
+      const periodName = item.periodName || '';
+      const startDate = item.startDate || null;
+      const endDate = item.endDate || null;
+      const isQuarter = item.isQuarter === true || false;
+      const isYear = item.isYear === true || false;
+      // ⚠️ 注意：實際資料庫有 is_adjustment 欄位，但 REST API 中沒有此欄位，設為 false
+      const isAdjustment = false;
+      const isClosed = item.closed === true || false; // 注意：實際欄位名是 closed，不是 isClosed
 
+      // 只寫入實際資料庫存在的欄位
+      // 實際資料庫欄位：id, netsuite_internal_id, period_name, start_date, end_date, 
+      // is_quarter, is_year, is_adjustment, is_closed, sync_timestamp, created_at
       return {
         netsuite_internal_id: parseInt(item.id), // REST API 返回的 id 是字串，需轉換
         period_name: periodName,
@@ -83,7 +126,7 @@ export async function POST() {
         end_date: endDate,
         is_quarter: isQuarter,
         is_year: isYear,
-        // is_adjustment 欄位不存在於 REST API，已移除
+        is_adjustment: isAdjustment, // 實際資料庫有此欄位，但 REST API 沒有，設為 false
         is_closed: isClosed, // 注意：實際欄位名是 closed，不是 isClosed
         sync_timestamp: syncTimestamp,
       };

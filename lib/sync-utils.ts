@@ -105,27 +105,27 @@ export async function getTableSyncStatus(tableName: string) {
         .order('sync_timestamp', { ascending: false })
         .limit(1);
 
-      if (fallbackError) {
-        return {
-          success: false,
-          error: fallbackError.message,
-          totalRecords: 0,
-          lastSyncTime: null,
-          lastUpdateTime: null,
-        };
-      }
+           if (fallbackError) {
+             return {
+               success: false,
+               error: fallbackError.message,
+               totalRecords: 0,
+               lastSyncTime: null,
+               lastUpdateTime: null,
+             };
+           }
 
-      // 統計總記錄數
-      const { count } = await supabase
-        .from(tableName)
-        .select('*', { count: 'exact', head: true });
+           // 統計總記錄數
+           const { count } = await supabase
+             .from(tableName)
+             .select('*', { count: 'exact', head: true });
 
-      return {
-        success: true,
-        totalRecords: count || 0,
-        lastSyncTime: fallbackData && fallbackData.length > 0 ? fallbackData[0].sync_timestamp : null,
-        lastUpdateTime: fallbackData && fallbackData.length > 0 ? (fallbackData[0].updated_at || fallbackData[0].created_at) : null,
-      };
+           return {
+             success: true,
+             totalRecords: count || 0,
+             lastSyncTime: fallbackData && fallbackData.length > 0 ? fallbackData[0].sync_timestamp : null,
+             lastUpdateTime: fallbackData && fallbackData.length > 0 ? fallbackData[0].created_at : null,
+           };
     }
 
     // 統計總記錄數

@@ -25,23 +25,57 @@ interface SyncAction {
   data?: any;
 }
 
-const TABLE_CONFIG = [
-  { name: 'ns_subsidiaries', label: '公司別', api: '/api/sync-subsidiaries', priority: '🔴 最高' },
-  { name: 'ns_currencies', label: '幣別', api: '/api/sync-currencies', priority: '🔴 最高' },
-  { name: 'ns_accounting_periods', label: '會計期間', api: '/api/sync-accounting-periods', priority: '🔴 最高', disabled: true, disabledReason: 'SuiteQL 不支援' },
-  { name: 'ns_departments', label: '部門', api: '/api/sync-departments', priority: '🟡 中' },
-  { name: 'ns_classes', label: '類別', api: '/api/sync-classes', priority: '🟡 中' },
-  { name: 'ns_locations', label: '地點', api: '/api/sync-locations', priority: '🟡 中' },
-  { name: 'ns_accounts', label: '會計科目', api: '/api/sync-accounts', priority: '🟡 中' },
-  { name: 'ns_terms', label: '付款條件', api: '/api/sync-terms', priority: '🟢 低' },
-  { name: 'ns_tax_codes', label: '稅碼', api: '/api/sync-tax-codes', priority: '🔴 高' },
-  { name: 'ns_expense_categories', label: '費用類別', api: '/api/sync-expense-categories', priority: '🟡 中' },
-  { name: 'ns_items', label: '產品主檔', api: '/api/sync-items', priority: '🔴 最高' },
-  { name: 'ns_entities_customers', label: '客戶', api: '/api/sync-customers', priority: '🔴 高' },
-  { name: 'ns_entities_vendors', label: '供應商', api: '/api/sync-vendors', priority: '🟡 中' },
-  { name: 'ns_entities_employees', label: '員工', api: '/api/sync-employees', priority: '🟡 中' },
-  { name: 'ns_ship_methods', label: '運送方式', api: '/api/sync-ship-methods', priority: '🟢 低' },
+interface TableConfig {
+  name: string;
+  label: string;
+  api: string;
+  priority: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+const TABLE_CONFIG: TableConfig[] = [
+  { name: 'ns_subsidiaries', label: '公司別', api: '/api/sync-subsidiaries', priority: '最高' },
+  { name: 'ns_currencies', label: '幣別', api: '/api/sync-currencies', priority: '最高' },
+  { name: 'ns_accounting_periods', label: '會計期間', api: '/api/sync-accounting-periods', priority: '最高' },
+  { name: 'ns_departments', label: '部門', api: '/api/sync-departments', priority: '中' },
+  { name: 'ns_classes', label: '類別', api: '/api/sync-classes', priority: '中' },
+  { name: 'ns_locations', label: '地點', api: '/api/sync-locations', priority: '中' },
+  { name: 'ns_accounts', label: '會計科目', api: '/api/sync-accounts', priority: '中' },
+  { name: 'ns_terms', label: '付款條件', api: '/api/sync-terms', priority: '低' },
+  { name: 'ns_tax_codes', label: '稅碼', api: '/api/sync-tax-codes', priority: '高' },
+  { name: 'ns_expense_categories', label: '費用類別', api: '/api/sync-expense-categories', priority: '中' },
+  { name: 'ns_items', label: '產品主檔', api: '/api/sync-items', priority: '最高' },
+  { name: 'ns_entities_customers', label: '客戶', api: '/api/sync-customers', priority: '高' },
+  { name: 'ns_entities_vendors', label: '供應商', api: '/api/sync-vendors', priority: '中' },
+  { name: 'ns_entities_employees', label: '員工', api: '/api/sync-employees', priority: '中' },
+  { name: 'ns_ship_methods', label: '運送方式', api: '/api/sync-ship-methods', priority: '低' },
 ];
+
+// 表名到路由的映射
+const TABLE_ROUTES: Record<string, string> = {
+  'ns_subsidiaries': 'subsidiaries',
+  'ns_currencies': 'currencies',
+  'ns_accounting_periods': 'accounting-periods',
+  'ns_departments': 'departments',
+  'ns_classes': 'classes',
+  'ns_locations': 'locations',
+  'ns_accounts': 'accounts',
+  'ns_terms': 'terms',
+  'ns_tax_codes': 'tax-codes',
+  'ns_expense_categories': 'expense-categories',
+  'ns_items': 'items',
+  'ns_entities_customers': 'customers',
+  'ns_entities_vendors': 'vendors',
+  'ns_entities_employees': 'employees',
+  'ns_ship_methods': 'ship-methods',
+};
+
+// 根據表名取得詳細頁面路由
+function getTableDetailRoute(tableName: string): string | null {
+  const route = TABLE_ROUTES[tableName];
+  return route ? `/dashboard/ocr-expense/sync-status/${route}` : null;
+}
 
 export default function SyncStatusPage() {
   const [tableStatuses, setTableStatuses] = useState<TableSyncStatus[]>([]);
@@ -232,21 +266,23 @@ export default function SyncStatusPage() {
                       return (
                         <TableRow key={table.name}>
                           <TableCell className="font-medium">
-                            {table.name === 'ns_subsidiaries' ? (
-                              <Link
-                                href="/dashboard/ocr-expense/sync-status/subsidiaries"
-                                className="text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                {status.label}
-                              </Link>
-                            ) : (
-                              status.label
-                            )}
+                            {status.label}
                           </TableCell>
                           <TableCell>
-                            <code className="text-xs bg-gray-100 dark:bg-[#3a4f5d] px-2 py-1 rounded font-mono">
-                              {table.name}
-                            </code>
+                            {getTableDetailRoute(table.name) ? (
+                              <Link
+                                href={getTableDetailRoute(table.name)!}
+                                className="text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                <code className="text-xs bg-gray-100 dark:bg-[#3a4f5d] px-2 py-1 rounded font-mono">
+                                  {table.name}
+                                </code>
+                              </Link>
+                            ) : (
+                              <code className="text-xs bg-gray-100 dark:bg-[#3a4f5d] px-2 py-1 rounded font-mono">
+                                {table.name}
+                              </code>
+                            )}
                           </TableCell>
                           <TableCell>
                             <span className="text-xs">{table.priority}</span>
@@ -364,7 +400,7 @@ export default function SyncStatusPage() {
                 <AlertCircle className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div className="text-sm text-muted-foreground space-y-1">
                   <p>
-                    • 優先級說明：🔴 最高（基礎主檔）、🟡 中（組織架構）、🟢 低（可延後建立）
+                    • 優先級說明：最高（基礎主檔）、中（組織架構）、低（可延後建立）
                   </p>
                   <p>
                     • 建議按照優先級順序同步：先同步基礎主檔（公司別、幣別），再同步其他表
