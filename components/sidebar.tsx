@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { 
@@ -40,16 +40,6 @@ const mainNavigation: MenuItem[] = [
     href: '/dashboard',
     icon: LayoutDashboard,
   },
-  {
-    name: 'SuiteQL 查詢',
-    href: '/dashboard/query',
-    icon: Terminal,
-  },
-  {
-    name: '設定',
-    href: '/dashboard/settings',
-    icon: Settings,
-  },
 ]
 
 const privatePages: MenuItem[] = [
@@ -63,36 +53,14 @@ const privatePages: MenuItem[] = [
         icon: FileText,
       },
       {
-        name: 'NetSuite Traning',
-        icon: FileText,
+        name: '資料同步狀態',
+        href: '/dashboard/ocr-expense/sync-status',
+        icon: Database,
       },
       {
-        name: 'NetSuite Material',
-        icon: FileText,
-      },
-      {
-        name: 'DDA Template',
-        icon: FileText,
-      },
-      {
-        name: 'NetSuite專案',
-        icon: FileText,
-      },
-      {
-        name: "NetSuite's SuiteApp",
-        icon: FileText,
-      },
-    ],
-  },
-  // 實際功能頁面整合到 Private 區域
-  {
-    name: 'POS單據模擬',
-    icon: Store,
-    children: [
-      {
-        name: '我的訂單',
-        href: '/dashboard/orders',
-        icon: ShoppingCart,
+        name: 'SuiteQL 查詢',
+        href: '/dashboard/query',
+        icon: Terminal,
       },
     ],
   },
@@ -101,7 +69,30 @@ const privatePages: MenuItem[] = [
 export default function Sidebar() {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['NetSuite單據模擬', 'POS單據模擬']))
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['NetSuite單據模擬']))
+
+  // 自動展開包含當前路徑的父選單
+  useEffect(() => {
+    // 檢查是否有子選單的 href 匹配當前路徑
+    const hasActiveChild = (item: MenuItem): boolean => {
+      if (item.href && pathname.startsWith(item.href)) {
+        return true
+      }
+      if (item.children) {
+        return item.children.some(child => hasActiveChild(child))
+      }
+      return false
+    }
+
+    const checkAndExpand = (items: MenuItem[]) => {
+      items.forEach(item => {
+        if (item.children && hasActiveChild(item)) {
+          setExpandedItems(prev => new Set([...prev, item.name]))
+        }
+      })
+    }
+    checkAndExpand([...mainNavigation, ...privatePages])
+  }, [pathname])
 
   const toggleExpand = (itemName: string) => {
     const newExpanded = new Set(expandedItems)
@@ -115,7 +106,9 @@ export default function Sidebar() {
 
   const renderMenuItem = (item: MenuItem, level: number = 0) => {
     const Icon = item.icon || FileText
-    const isActive = item.href === pathname
+    // 精確匹配：只有當 pathname 完全等於 item.href 時才 active
+    // 避免 /dashboard 在訪問 /dashboard/xxx 時也被高亮
+    const isActive = item.href ? pathname === item.href : false
     const hasChildren = item.children && item.children.length > 0
     const isExpanded = expandedItems.has(item.name)
     const indentLevel = level * 20

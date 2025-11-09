@@ -18,8 +18,13 @@
 - [6. Phase 3: 交易單據實作](#6-phase-3-交易單據實作)
 - [7. Phase 4: 製造業專屬（MES/WMS）](#7-phase-4-製造業專屬meswms)
 - [8. 實作時間表](#8-實作時間表)
-- [9. 常見問題與陷阱](#9-常見問題與陷阱)
-- [10. 附錄](#10-附錄)
+- [9. 實際欄位對照總結](#9-實際欄位對照總結)
+  - [9.1 主要差異與注意事項](#91-主要差異與注意事項)
+  - [9.2 欄位類型轉換注意事項](#92-欄位類型轉換注意事項)
+  - [9.3 同步實作建議](#93-同步實作建議)
+  - [9.4 同步表維護與擴充](#94-同步表維護與擴充)
+- [10. 常見問題與陷阱](#10-常見問題與陷阱)
+- [11. 附錄](#11-附錄)
 
 ---
 
@@ -3207,6 +3212,148 @@ async function createProductionOrder(
 4. **物件欄位處理**：對於 REST API 的物件欄位，需要實作提取邏輯
 5. **錯誤處理**：所有 API 呼叫都要有錯誤處理和重試機制
 
+### 9.4 同步表維護與擴充
+
+> **適用場景**：當系統成長需要新增或移除同步表時（例如：新增 BOM 表、移除舊表）
+
+#### 9.4.1 新增同步表
+
+當需要新增一張新的同步表到「資料同步狀態」頁面時，需要修改以下檔案：
+
+**1. 前端頁面：`app/dashboard/ocr-expense/sync-status/page.tsx`**
+
+在 `TABLE_CONFIG` 陣列中新增表配置：
+
+```typescript
+const TABLE_CONFIG = [
+  // ... 現有的表 ...
+  { name: 'ns_ship_methods', label: '運送方式', api: '/api/sync-ship-methods', priority: '🟢 低' },
+  // 新增 BOM 表頭範例
+  { 
+    name: 'ns_bom_headers',           // Supabase 表名（必須與實際表名一致）
+    label: 'BOM 表頭',                 // 顯示名稱
+    api: '/api/sync-bom-headers',      // 同步 API 路由（必須已實作）
+    priority: '🔴 最高'                 // 優先級：🔴 最高 / 🔴 高 / 🟡 中 / 🟢 低
+  },
+];
+```
+
+**配置說明**：
+- `name`：必須與 Supabase 實際表名完全一致（例如：`ns_bom_headers`）
+- `label`：在頁面上顯示的中文名稱
+- `api`：同步 API 的路徑，必須已經實作並可正常運作
+- `priority`：建議根據業務重要性設定
+- `disabled`（可選）：如果表暫時不支援同步，可設為 `true`
+- `disabledReason`（可選）：停用原因說明
+
+**2. API 路由：`app/api/sync-status/route.ts`**
+
+在 `tables` 陣列中新增表資訊：
+
+```typescript
+const tables = [
+  // ... 現有的表 ...
+  { name: 'ns_ship_methods', label: '運送方式' },
+  // 新增 BOM 表頭
+  { name: 'ns_bom_headers', label: 'BOM 表頭' },
+];
+```
+
+這個 API 用於查詢表的同步狀態（記錄數、最後同步時間等），表名必須與 Supabase 實際表名一致。
+
+**3. 確認事項（必須完成）**
+
+在新增同步表之前，請確認：
+
+- ✅ **Supabase 表已建立**：確認表結構已建立並符合命名規範（`ns_` 前綴 + NetSuite record name）
+- ✅ **同步 API 已實作**：確認 `/api/sync-xxx` 路由已實作並可正常運作
+- ✅ **表映射配置**（可選）：如果使用 `table_mapping_config` 表，需要在資料庫中新增記錄
+
+**4. 表映射配置（可選，如果使用動態配置）**
+
+如果系統使用 `table_mapping_config` 表來動態管理表映射，需要在資料庫中新增記錄：
+
+```sql
+-- 範例：新增 BOM 表頭配置
+INSERT INTO table_mapping_config (
+  mapping_key,           -- 映射鍵（例如：bomHeaders）
+  netsuite_table,        -- NetSuite SuiteQL 表名（例如：bom）
+  supabase_table_name,   -- Supabase 表名（例如：ns_bom_headers）
+  label,                 -- 中文標籤（例如：BOM 表頭）
+  priority,              -- 優先級（例如：🔴 最高）
+  api_route,             -- API 路由（例如：/api/sync-bom-headers）
+  conflict_column,       -- 衝突處理欄位（例如：netsuite_internal_id）
+  sync_order,            -- 同步順序（數字，越小越優先）
+  is_enabled             -- 是否啟用（TRUE/FALSE）
+) VALUES (
+  'bomHeaders',
+  'bom',
+  'ns_bom_headers',
+  'BOM 表頭',
+  '🔴 最高',
+  '/api/sync-bom-headers',
+  'netsuite_internal_id',
+  14,
+  TRUE
+);
+```
+
+#### 9.4.2 移除同步表
+
+當需要移除舊的同步表時，只需從上述兩個檔案中刪除對應的配置項目：
+
+1. **前端頁面**：從 `TABLE_CONFIG` 陣列中移除該表的配置
+2. **API 路由**：從 `tables` 陣列中移除該表的資訊
+3. **資料庫配置**（如果使用）：從 `table_mapping_config` 表中刪除或停用該記錄
+
+**注意**：移除同步表配置**不會**刪除 Supabase 中的實際表，只是不再在同步狀態頁面顯示。如果需要刪除 Supabase 表，需要手動執行 DROP TABLE。
+
+#### 9.4.3 修改同步表配置
+
+如果需要修改表的顯示名稱、優先級或 API 路由：
+
+1. **修改前端配置**：更新 `TABLE_CONFIG` 中對應項目的屬性
+2. **修改 API 配置**：更新 `tables` 陣列中對應項目的 `label`
+3. **修改資料庫配置**（如果使用）：更新 `table_mapping_config` 表中對應記錄
+
+#### 9.4.4 特殊情況處理
+
+**使用 REST API 的表**：
+
+如果表使用 REST API 而非 SuiteQL（例如：BOM、Accounting Period），可能需要特殊處理：
+
+```typescript
+{
+  name: 'ns_bom_headers',
+  label: 'BOM 表頭',
+  api: '/api/sync-bom-headers',
+  priority: '🔴 最高',
+  // 可選：如果暫時不支援，可以標記為停用
+  // disabled: true,
+  // disabledReason: 'REST API 權限未開啟'
+}
+```
+
+**依賴關係**：
+
+某些表可能依賴其他表（例如：BOM Lines 依賴 BOM Headers），建議：
+- 在 `priority` 中反映依賴關係
+- 在同步順序中確保依賴表先同步
+- 在 `table_mapping_config` 的 `depends_on` 欄位中記錄依賴關係
+
+#### 9.4.5 檢查清單
+
+新增同步表後的檢查項目：
+
+- [ ] 前端頁面已更新 `TABLE_CONFIG`
+- [ ] API 路由已更新 `tables` 陣列
+- [ ] Supabase 表已建立並符合命名規範
+- [ ] 同步 API 已實作並測試通過
+- [ ] 表映射配置已更新（如果使用）
+- [ ] 同步狀態頁面可正常顯示新表
+- [ ] 點擊「同步」按鈕可正常執行同步
+- [ ] 同步後可正常顯示記錄數和同步時間
+
 ---
 
 ## 10. 常見問題與陷阱
@@ -3324,9 +3471,9 @@ VALUES (gen_random_uuid(), 1, 'SalesOrder', 'department', TRUE);
 
 ---
 
-## 10. 附錄
+## 11. 附錄
 
-### 10.1 完整 SQL 腳本（一鍵執行）
+### 11.1 完整 SQL 腳本（一鍵執行）
 
 ```sql
 -- ============================================
@@ -3375,7 +3522,7 @@ VALUES (gen_random_uuid(), 1, 'SalesOrder', 'department', TRUE);
 SELECT 'NetSuite 中台建置完成！' as message;
 ```
 
-### 10.2 測試資料腳本
+### 11.2 測試資料腳本
 
 ```sql
 -- ============================================
@@ -3449,7 +3596,7 @@ SELECT 'Test Data Inserted!' as message;
 SELECT * FROM vw_sync_status;
 ```
 
-### 10.3 檢查清單
+### 11.3 檢查清單
 
 建置完成後請執行這些檢查：
 
@@ -3501,7 +3648,7 @@ SELECT * FROM get_bom_components(201, 1);
 SELECT '✅ 所有檢查通過，系統可以開始使用！' as status;
 ```
 
-### 10.4 快速參考
+### 11.4 快速參考
 
 #### NetSuite Record Types
 ```
