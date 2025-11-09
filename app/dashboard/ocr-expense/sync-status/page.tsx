@@ -304,7 +304,8 @@ export default function SyncStatusPage() {
                           </TableCell>
                           <TableCell>
                             <span className="text-sm text-muted-foreground">
-                              {formatTime(status.lastUpdateTime)}
+                              {/* 優先顯示 sync_timestamp，如果沒有則顯示 lastUpdateTime */}
+                              {formatTime(status.lastSyncTime || status.lastUpdateTime)}
                             </span>
                           </TableCell>
                           <TableCell className="text-right">

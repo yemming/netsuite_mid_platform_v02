@@ -91,9 +91,11 @@ export async function getTableSyncStatus(tableName: string) {
 
     // 查詢最新的同步記錄
     // 注意：某些表可能沒有 updated_at 欄位（如 ns_terms），所以先查詢 sync_timestamp
+    // ⚠️ 重要：過濾掉 sync_timestamp 為 NULL 的記錄，只查詢有同步時間的記錄
     const { data, error } = await supabase
       .from(tableName)
       .select('sync_timestamp, updated_at, created_at')
+      .not('sync_timestamp', 'is', null)  // 過濾掉 sync_timestamp 為 NULL 的記錄
       .order('sync_timestamp', { ascending: false })
       .limit(1);
 
@@ -102,6 +104,7 @@ export async function getTableSyncStatus(tableName: string) {
       const { data: fallbackData, error: fallbackError } = await supabase
         .from(tableName)
         .select('sync_timestamp, created_at')
+        .not('sync_timestamp', 'is', null)  // 過濾掉 sync_timestamp 為 NULL 的記錄
         .order('sync_timestamp', { ascending: false })
         .limit(1);
 
