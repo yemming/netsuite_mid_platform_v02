@@ -4,7 +4,7 @@
     "installCommand": "npm install"
   },
   "deploy": {
-    "startCommand": "cd .next/standalone && node server.js",
+    "startCommand": "node server.js",
     "healthcheck": {
       "path": "/api/health",
       "interval": 30,
