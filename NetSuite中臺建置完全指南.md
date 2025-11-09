@@ -9,6 +9,7 @@
 > **v1.1 更新內容（2025-11-09）**：
 > - 新增「9.1 實際資料庫結構與指南的差異」章節，記錄實際 Supabase 資料庫結構與指南的差異
 > - 更新所有表的 CREATE TABLE 語句，反映實際資料庫結構
+> - 修正幣別表名（從 `ns_currency` 改為 `ns_currencies`，使用複數形式）
 > - 修正 subsidiary 欄位處理方式（從 TEXT 改為 INTEGER，取第一個值）
 > - 修正 Account 欄位名稱（從 account_search_display_name 改為 acct_name）
 > - 記錄 Item 同步方式的修正（混合使用 SuiteQL + REST API）
@@ -249,7 +250,7 @@ NetSuite 支援多維度分析，常見的 Segment：
 
 ```
 ns_subsidiary          (公司別，NetSuite record: subsidiary)
-ns_currency            (幣別，NetSuite record: currency)
+ns_currencies          (幣別，NetSuite record: currency)
 ns_department          (部門，NetSuite record: department)
 ns_classification      (類別，NetSuite record: classification)
 ns_location            (地點，NetSuite record: location)
@@ -387,7 +388,7 @@ WHERE isinactive = 'F'
 -- 說明：所有交易都需要指定幣別
 -- 優先級：🔴 最高
 -- ============================================
-CREATE TABLE ns_currency (
+CREATE TABLE ns_currencies (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   netsuite_internal_id INTEGER UNIQUE NOT NULL,
   
@@ -414,10 +415,10 @@ CREATE TABLE ns_currency (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_currencies_internal_id ON ns_currency(netsuite_internal_id);
-CREATE INDEX idx_currencies_symbol ON ns_currency(symbol);
+CREATE INDEX idx_currencies_internal_id ON ns_currencies(netsuite_internal_id);
+CREATE INDEX idx_currencies_symbol ON ns_currencies(symbol);
 
-COMMENT ON TABLE ns_currency IS 'NetSuite 幣別主檔';
+COMMENT ON TABLE ns_currencies IS 'NetSuite 幣別主檔';
 ```
 
 #### 4.2.3 部門（Departments）
@@ -1433,7 +1434,7 @@ BEGIN
   
   -- 檢查 Currency（必填）
   SELECT netsuite_internal_id INTO v_currency_id
-  FROM ns_currency
+  FROM ns_currencies
   WHERE symbol = p_currency_symbol AND is_active = TRUE;
   
   IF v_currency_id IS NULL THEN
@@ -1598,7 +1599,7 @@ BEGIN
   
   -- 檢查 Currency（必填）
   SELECT netsuite_internal_id INTO v_currency_id
-  FROM ns_currency
+  FROM ns_currencies
   WHERE symbol = p_currency_symbol AND is_active = TRUE;
   
   IF v_currency_id IS NULL THEN
@@ -2144,7 +2145,7 @@ serve(async (req) => {
 - ✅ `ns_account` - 會計科目（必填）
 - ✅ `ns_accountingperiod` - 會計期間（必填）
 - ✅ `ns_subsidiary` - 公司別（必填）
-- ✅ `ns_currency` - 幣別（必填）
+- ✅ `ns_currencies` - 幣別（必填）
 
 **選填但建議同步的主檔**：
 - ⚠️ `ns_department` - 部門（某些公司要求必填）
@@ -3085,6 +3086,7 @@ async function createProductionOrder(
 
 | 指南中的表名 | 實際 Supabase 表名 | 說明 |
 |------------|------------------|------|
+| `ns_currency` | `ns_currencies` | 幣別表 |
 | `ns_department` | `ns_departments` | 部門表 |
 | `ns_classification` | `ns_classes` | 類別表 |
 | `ns_location` | `ns_locations` | 地點表 |
@@ -3923,7 +3925,7 @@ VALUES
   (2, '香港分公司', 'HK Branch Ltd.', 'Hong Kong', TRUE);
 
 -- 2. Currencies
-INSERT INTO ns_currency (netsuite_internal_id, name, symbol, exchange_rate, is_base_currency, is_active)
+INSERT INTO ns_currencies (netsuite_internal_id, name, symbol, exchange_rate, is_base_currency, is_active)
 VALUES 
   (1, 'Taiwan Dollar', 'TWD', 1.000000, TRUE, TRUE),
   (2, 'US Dollar', 'USD', 30.500000, FALSE, TRUE),
@@ -4004,7 +4006,7 @@ ORDER BY table_name;
 SELECT 
   'ns_subsidiary' as table_name, COUNT(*) as row_count FROM ns_subsidiary
 UNION ALL
-SELECT 'ns_currency', COUNT(*) FROM ns_currency
+SELECT 'ns_currencies', COUNT(*) FROM ns_currencies
 UNION ALL
 SELECT 'ns_department', COUNT(*) FROM ns_department
 UNION ALL

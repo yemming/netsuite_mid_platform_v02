@@ -81,10 +81,25 @@ export default function OCRExpensePage() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentJobIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [employees, setEmployees] = useState<Array<{ id: string; name: string; netsuite_internal_id: number }>>([]);
-  const [loadingEmployees, setLoadingEmployees] = useState(false);
-  const [expenseCategories, setExpenseCategories] = useState<Array<{ id: string; name: string; netsuite_internal_id: number }>>([]);
-  const [loadingCategories, setLoadingCategories] = useState(false);
+  // 表單選項資料（一次載入所有）
+  const [formOptions, setFormOptions] = useState<{
+    employees: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    expenseCategories: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    subsidiaries: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    locations: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    departments: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    classes: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    currencies: Array<{ id: string; name: string; symbol: string; netsuite_internal_id: number }>;
+  }>({
+    employees: [],
+    expenseCategories: [],
+    subsidiaries: [],
+    locations: [],
+    departments: [],
+    classes: [],
+    currencies: [],
+  });
+  const [loadingFormOptions, setLoadingFormOptions] = useState(false);
 
   const handleInputChange = (field: string, value: any) => {
     setFormData((prev) => ({
@@ -183,60 +198,40 @@ export default function OCRExpensePage() {
     };
   }, []);
 
-  // 載入員工列表
+  // 載入所有表單選項（一次查詢）
   useEffect(() => {
-    const loadEmployees = async () => {
-      setLoadingEmployees(true);
+    const loadFormOptions = async () => {
+      setLoadingFormOptions(true);
       try {
-        const { createClient } = await import('@/utils/supabase/client');
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from('ns_entities_employees')
-          .select('id, name, netsuite_internal_id')
-          .eq('is_inactive', false)
-          .order('name');
+        const response = await fetch('/api/expense-form-options');
+        const result = await response.json();
         
-        if (!error && data) {
-          setEmployees(data);
-        } else if (error) {
-          console.error('載入員工列表錯誤:', error);
+        if (result.success && result.data) {
+          setFormOptions({
+            employees: result.data.employees || [],
+            expenseCategories: result.data.expenseCategories || [],
+            subsidiaries: result.data.subsidiaries || [],
+            locations: result.data.locations || [],
+            departments: result.data.departments || [],
+            classes: result.data.classes || [],
+            currencies: result.data.currencies || [],
+          });
+          
+          // 如果有警告，顯示在 console
+          if (result.warnings && result.warnings.length > 0) {
+            console.warn('載入表單選項時有部分錯誤:', result.warnings);
+          }
+        } else {
+          console.error('載入表單選項失敗:', result.error || result.message);
         }
       } catch (error) {
-        console.error('載入員工列表錯誤:', error);
+        console.error('載入表單選項錯誤:', error);
       } finally {
-        setLoadingEmployees(false);
+        setLoadingFormOptions(false);
       }
     };
 
-    loadEmployees();
-  }, []);
-
-  // 載入費用類別列表
-  useEffect(() => {
-    const loadExpenseCategories = async () => {
-      setLoadingCategories(true);
-      try {
-        const { createClient } = await import('@/utils/supabase/client');
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from('ns_expense_categories')
-          .select('id, name, netsuite_internal_id')
-          .eq('is_inactive', false)
-          .order('name');
-        
-        if (!error && data) {
-          setExpenseCategories(data);
-        } else if (error) {
-          console.error('載入費用類別列表錯誤:', error);
-        }
-      } catch (error) {
-        console.error('載入費用類別列表錯誤:', error);
-      } finally {
-        setLoadingCategories(false);
-      }
-    };
-
-    loadExpenseCategories();
+    loadFormOptions();
   }, []);
 
   // 取消 OCR 處理
@@ -951,7 +946,6 @@ export default function OCRExpensePage() {
                     onChange={(e) => handleInputChange('expenseDate', e.target.value)}
                     className="pr-10 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-moz-calendar-picker-indicator]:opacity-0 [&::-moz-calendar-picker-indicator]:absolute [&::-moz-calendar-picker-indicator]:right-0 [&::-moz-calendar-picker-indicator]:w-full [&::-moz-calendar-picker-indicator]:h-full [&::-moz-calendar-picker-indicator]:cursor-pointer"
                     style={{
-                      fontSize: 'clamp(14px, 2.5vw, 16px)', // 響應式字體：桌面 14px，手機 16px
                       paddingRight: '2.5rem',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -988,21 +982,21 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.type}
                   onValueChange={(value) => handleInputChange('type', value)}
-                  disabled={loadingCategories}
+                  disabled={loadingFormOptions}
                 >
                   <SelectTrigger id="type">
-                    <SelectValue placeholder={loadingCategories ? "載入中..." : "選擇費用用途"} />
+                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇費用用途"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {expenseCategories.length > 0 ? (
-                      expenseCategories.map((category) => (
+                    {formOptions.expenseCategories.length > 0 ? (
+                      formOptions.expenseCategories.map((category) => (
                         <SelectItem key={category.id} value={category.id}>
                           {category.name}
                         </SelectItem>
                       ))
                     ) : (
                       <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                        {loadingCategories ? "載入中..." : "無可用費用類別"}
+                        {loadingFormOptions ? "載入中..." : "無可用費用類別"}
                       </div>
                     )}
                   </SelectContent>
@@ -1017,21 +1011,21 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.employee}
                   onValueChange={(value) => handleInputChange('employee', value)}
-                  disabled={loadingEmployees}
+                  disabled={loadingFormOptions}
                 >
                   <SelectTrigger id="employee">
-                    <SelectValue placeholder={loadingEmployees ? "載入中..." : "選擇員工"} />
+                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇員工"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {employees.length > 0 ? (
-                      employees.map((emp) => (
+                    {formOptions.employees.length > 0 ? (
+                      formOptions.employees.map((emp) => (
                         <SelectItem key={emp.id} value={emp.id}>
                           {emp.name}
                         </SelectItem>
                       ))
                     ) : (
                       <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                        {loadingEmployees ? "載入中..." : "無可用員工"}
+                        {loadingFormOptions ? "載入中..." : "無可用員工"}
                       </div>
                     )}
                   </SelectContent>
@@ -1046,14 +1040,23 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.subsidiary}
                   onValueChange={(value) => handleInputChange('subsidiary', value)}
+                  disabled={loadingFormOptions}
                 >
                   <SelectTrigger id="subsidiary">
-                    <SelectValue placeholder="選擇子公司" />
+                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇公司別"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="subsidiary-1">子公司 1</SelectItem>
-                    <SelectItem value="subsidiary-2">子公司 2</SelectItem>
-                    <SelectItem value="subsidiary-3">子公司 3</SelectItem>
+                    {formOptions.subsidiaries.length > 0 ? (
+                      formOptions.subsidiaries.map((subsidiary) => (
+                        <SelectItem key={subsidiary.id} value={subsidiary.id}>
+                          {subsidiary.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                        {loadingFormOptions ? "載入中..." : "無可用公司別"}
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1066,16 +1069,23 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.expenseLocation}
                   onValueChange={(value) => handleInputChange('expenseLocation', value)}
+                  disabled={loadingFormOptions}
                 >
                   <SelectTrigger id="expenseLocation">
-                    <SelectValue placeholder="選擇地點" />
+                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇地點"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="taiwan">Taiwan</SelectItem>
-                    <SelectItem value="china">China</SelectItem>
-                    <SelectItem value="usa">USA</SelectItem>
-                    <SelectItem value="japan">Japan</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {formOptions.locations.length > 0 ? (
+                      formOptions.locations.map((location) => (
+                        <SelectItem key={location.id} value={location.id}>
+                          {location.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                        {loadingFormOptions ? "載入中..." : "無可用地點"}
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1088,14 +1098,23 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.department}
                   onValueChange={(value) => handleInputChange('department', value)}
+                  disabled={loadingFormOptions}
                 >
                   <SelectTrigger id="department">
-                    <SelectValue placeholder="選擇部門" />
+                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇部門"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="dept-1">部門 1</SelectItem>
-                    <SelectItem value="dept-2">部門 2</SelectItem>
-                    <SelectItem value="dept-3">部門 3</SelectItem>
+                    {formOptions.departments.length > 0 ? (
+                      formOptions.departments.map((department) => (
+                        <SelectItem key={department.id} value={department.id}>
+                          {department.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                        {loadingFormOptions ? "載入中..." : "無可用部門"}
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1108,14 +1127,23 @@ export default function OCRExpensePage() {
                 <Select
                   value={formData.class}
                   onValueChange={(value) => handleInputChange('class', value)}
+                  disabled={loadingFormOptions}
                 >
                   <SelectTrigger id="class">
-                    <SelectValue placeholder="選擇類別" />
+                    <SelectValue placeholder={loadingFormOptions ? "載入中..." : "選擇類別"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="class-1">類別 1</SelectItem>
-                    <SelectItem value="class-2">類別 2</SelectItem>
-                    <SelectItem value="class-3">類別 3</SelectItem>
+                    {formOptions.classes.length > 0 ? (
+                      formOptions.classes.map((classItem) => (
+                        <SelectItem key={classItem.id} value={classItem.id}>
+                          {classItem.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                        {loadingFormOptions ? "載入中..." : "無可用類別"}
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1129,15 +1157,23 @@ export default function OCRExpensePage() {
                   <Select
                     value={formData.receiptCurrency}
                     onValueChange={(value) => handleInputChange('receiptCurrency', value)}
+                    disabled={loadingFormOptions}
                   >
                     <SelectTrigger className="w-24">
-                      <SelectValue />
+                      <SelectValue placeholder={loadingFormOptions ? "載入中..." : "幣別"} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="TWD">TWD</SelectItem>
-                      <SelectItem value="USD">USD</SelectItem>
-                      <SelectItem value="CNY">CNY</SelectItem>
-                      <SelectItem value="JPY">JPY</SelectItem>
+                      {formOptions.currencies.length > 0 ? (
+                        formOptions.currencies.map((currency) => (
+                          <SelectItem key={currency.id} value={currency.symbol || currency.name}>
+                            {currency.symbol || currency.name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                          {loadingFormOptions ? "載入中..." : "無可用幣別"}
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                   <Input
