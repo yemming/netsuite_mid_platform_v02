@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -14,12 +14,15 @@ export const metadata: Metadata = {
     apple: '/apple-icon.svg',
   },
   manifest: '/manifest.json',
-  themeColor: '#28363F',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
     title: 'NetSuite AI Nexus',
   },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#28363F',
 }
 
 export default function RootLayout({
