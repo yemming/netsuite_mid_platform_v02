@@ -817,8 +817,13 @@ CREATE TABLE ns_taxitem (
   rate DECIMAL(5,2),                              -- 稅率 (rate)
   description TEXT,                               -- 描述 (description)
   
+  -- 組織關係
+  country VARCHAR(100),                            -- 國家代碼（country，例如：TW, US, CN）
+  -- ⚠️ 重要：根據 NetSuite 邏輯，稅碼是根據 Country 來篩選的
+  -- 流程：Employee → Subsidiary → Country → Tax Code
+  
   -- ⚠️ 注意：實際資料庫中沒有以下欄位：
-  -- full_name, parent_id, tax_account_id, sale_account_id, updated_at
+  -- full_name, parent_id, tax_account_id, sale_account_id, updated_at, subsidiary_id
   
   -- 狀態
   is_inactive BOOLEAN DEFAULT FALSE,              -- isinactive = 'F'
@@ -828,8 +833,10 @@ CREATE TABLE ns_taxitem (
 
 CREATE INDEX idx_tax_codes_internal_id ON ns_taxitem(netsuite_internal_id);
 CREATE INDEX idx_tax_codes_name ON ns_taxitem(name);
+CREATE INDEX idx_tax_codes_country ON ns_taxitem(country);
 
 COMMENT ON TABLE ns_taxitem IS 'NetSuite 稅碼主檔';
+COMMENT ON COLUMN ns_taxitem.country IS '國家代碼（country，例如：TW, US, CN），用於根據 Employee → Subsidiary → Country → Tax Code 的流程篩選稅碼';
 ```
 
 #### 4.2.12 費用類別（Expense Categories）
@@ -1320,6 +1327,7 @@ CREATE TABLE expense_reviews (
   receipt_amount DECIMAL(15,2) NOT NULL,           -- 收據金額
   receipt_currency VARCHAR(10) NOT NULL,          -- 幣別（TWD, USD 等）
   currency_id UUID,                               -- 幣別 ID（對應 ns_currencies.id）
+  use_multi_currency BOOLEAN DEFAULT FALSE,        -- 是否使用多幣別（表頭設定，影響表身是否顯示外幣金額和匯率欄位）
   
   -- 描述
   description TEXT,                               -- 報支描述
@@ -3455,18 +3463,48 @@ CREATE TABLE ns_tax_codes (
   name VARCHAR(255) NOT NULL,                       -- 稅碼名稱（使用 itemid）
   rate DECIMAL(5,2),                                 -- 稅率
   description TEXT,                                  -- 描述
+  country VARCHAR(100),                              -- 國家代碼（country，例如：TW, US, CN）
   is_inactive BOOLEAN DEFAULT FALSE,
   sync_timestamp TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ✅ 已新增（2025-01-XX）：
+-- country - 國家代碼，用於根據 Employee → Subsidiary → Country → Tax Code 的流程篩選稅碼
+
 -- ❌ 指南中有但實際沒有：
--- full_name, parent_id, tax_account_id, sale_account_id, updated_at
+-- full_name, parent_id, tax_account_id, sale_account_id, updated_at, subsidiary_id
 ```
 
 **同步邏輯**：
-- 只同步基本稅碼資訊（名稱、稅率、描述）
+- 同步基本稅碼資訊（名稱、稅率、描述）
+- 同步國家代碼（country）：
+  - ✅ 使用 `salestaxitem` 和 `taxtype` 兩張表 JOIN 查詢
+  - ✅ 從 `taxtype.country` 欄位取得國家代碼（例如：`US`, `AU`, `TW`）
+  - ⚠️ 如果 JOIN 沒有取得 country，則從稅碼名稱中提取作為 fallback
+  - 支援的命名模式：`VAT_TW`, `WET-AU`, `PST_BC_0` 等
+- 根據 NetSuite 邏輯：Employee → Subsidiary → Country → Tax Code
+- 前端會根據選定的 subsidiary 的 country 來篩選對應的稅碼
 - 不包含階層結構和會計科目
+
+**SuiteQL 查詢**：
+```sql
+SELECT 
+  st.id,
+  st.itemid,
+  st.fullname,
+  st.rate,
+  st.description,
+  st.taxtype,
+  st.isinactive,
+  tt.id as taxtype_id,
+  tt.name as taxtype_name,
+  tt.country,
+  tt.description as taxtype_description
+FROM salestaxitem st
+LEFT JOIN taxtype tt ON st.taxtype = tt.id
+ORDER BY st.id
+```
 
 #### 9.1.8 費用類別表（ns_expense_categories）實際結構
 
@@ -4978,6 +5016,7 @@ CREATE TABLE expense_reviews (
   subsidiary_id UUID,                              -- 公司別 ID（對應 ns_subsidiaries.id）
   subsidiary_name VARCHAR(255),                   -- 公司別名稱（快取）
   description TEXT,                                -- 報支描述
+  use_multi_currency BOOLEAN DEFAULT FALSE,        -- 是否使用多幣別（表頭設定，影響表身是否顯示外幣金額和匯率欄位）
   
   -- ============================================
   -- 審核狀態

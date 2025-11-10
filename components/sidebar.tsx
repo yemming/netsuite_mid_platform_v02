@@ -49,17 +49,17 @@ const privatePages: MenuItem[] = [
     icon: Receipt,
     children: [
       {
-        name: 'OCR To NetSuite',
+        name: '建立費用報告',
         href: '/dashboard/ocr-expense',
-        icon: FileText,
+        icon: Receipt,
       },
       {
-        name: '我的報支',
+        name: '我的費用報告',
         href: '/dashboard/ocr-expense/my-expenses',
         icon: FileText,
       },
       {
-        name: '報支審核',
+        name: '費用報告核准',
         href: '/dashboard/ocr-expense/reviews',
         icon: ClipboardCheck,
       },

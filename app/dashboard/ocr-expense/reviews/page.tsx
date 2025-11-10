@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FileText, CheckCircle2, XCircle, Clock, Eye, Image as ImageIcon, Calendar, User, Building2, MapPin, DollarSign, AlertCircle, Loader2, Save } from 'lucide-react';
+import { FileText, CheckCircle2, XCircle, Clock, Eye, Image as ImageIcon, Calendar, User, Building2, MapPin, DollarSign, AlertCircle, Loader2, Save, Edit, X, Trash2, Receipt, CheckSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { createClient } from '@/utils/supabase/client';
+import { useRouter } from 'next/navigation';
 
 interface ExpenseReview {
   id: string;
@@ -207,6 +208,7 @@ function AttachmentPreview({
 }
 
 export default function ExpenseReviewsPage() {
+  const router = useRouter();
   const [reviews, setReviews] = useState<ExpenseReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedReview, setSelectedReview] = useState<ExpenseReview | null>(null);
@@ -293,6 +295,8 @@ export default function ExpenseReviewsPage() {
             gross_amt,
             invoice_number,
             ocr_success,
+            ocr_confidence,
+            ocr_quality_grade,
             ocr_file_name,
             ocr_processed_at
           )
@@ -354,8 +358,8 @@ export default function ExpenseReviewsPage() {
           seller_name: null,
           buyer_name: null,
           total_amount: receiptAmount,
-          ocr_confidence: null,
-          ocr_quality_grade: null,
+          ocr_confidence: firstLine?.ocr_confidence || null,
+          ocr_quality_grade: firstLine?.ocr_quality_grade || null,
           ocr_file_id: null,
           attachment_url: null,
           attachment_base64: null,
@@ -596,9 +600,9 @@ export default function ExpenseReviewsPage() {
   }, [signedUrls, supabase, extractFilePath]);
 
   // 開啟詳細資訊對話框（使用與「我的報支」相同的 API，確保能顯示明細）
-  const handleViewDetails = async (review: ExpenseReview) => {
+  const handleViewDetails = async (review: ExpenseReview, autoEdit: boolean = false) => {
     setIsDetailDialogOpen(true);
-    setIsEditing(false); // 重置編輯狀態（審核頁面不允許編輯）
+    setIsEditing(false); // 先重置編輯狀態
     setDetailLoading(true);
     setSelectedReview(null);
 
@@ -660,6 +664,7 @@ export default function ExpenseReviewsPage() {
           total_amount: line.total_amount ? (typeof line.total_amount === 'number' ? line.total_amount : parseFloat(String(line.total_amount)) || null) : null,
           ocr_success: line.ocr_success || false,
           ocr_confidence: line.ocr_confidence || null,
+          ocr_quality_grade: line.ocr_quality_grade || null,
           attachment_url: line.attachment_url || null,
           attachment_base64: line.attachment_base64 || null,
         })),
@@ -677,6 +682,11 @@ export default function ExpenseReviewsPage() {
           }
         }
       }
+
+      // 如果指定自動進入編輯模式，則設置編輯狀態
+      if (autoEdit) {
+        setIsEditing(true);
+      }
     } catch (error: any) {
       console.error('載入報支詳細資料錯誤:', error);
       alert(`載入詳細資料失敗: ${error.message}`);
@@ -684,6 +694,43 @@ export default function ExpenseReviewsPage() {
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  // 刪除報支項目
+  const handleDelete = async (review: ExpenseReview) => {
+    if (!confirm(`確定要刪除此報支項目嗎？此操作無法復原。`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/expense-reports/${review.id}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '刪除失敗');
+      }
+
+      alert('報支項目已成功刪除');
+      // 重新載入列表
+      loadReviews();
+    } catch (error: any) {
+      console.error('刪除報支項目錯誤:', error);
+      alert(`刪除失敗: ${error.message}`);
+    }
+  };
+
+  // 編輯報支項目（跳轉到 OCR to NetSuite 頁面進行編輯）
+  const handleEdit = (review: ExpenseReview) => {
+    router.push(`/dashboard/ocr-expense?id=${review.id}`);
+  };
+
+  // 檢查是否可以編輯（審核人：approved 且未進 ERP 前可以編輯）
+  const canEdit = (review: ExpenseReview) => {
+    // 審核人：approved 狀態且未同步到 NetSuite（進 ERP 前）可以編輯
+    return review.review_status === 'approved' && review.netsuite_sync_status !== 'success';
   };
 
   // 保存編輯的資料
@@ -1011,19 +1058,21 @@ export default function ExpenseReviewsPage() {
     }
   };
 
-  // 取得狀態標籤
+  // 取得狀態 Badge
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case 'draft':
+        return <Badge className="bg-amber-600 text-white">草稿</Badge>;
       case 'pending':
-        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800">待審核</Badge>;
+        return <Badge className="bg-purple-500 text-white">待審核</Badge>;
       case 'approved':
-        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">已核准</Badge>;
+        return <Badge className="bg-green-500 text-white">已核准</Badge>;
       case 'rejected':
-        return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">已拒絕</Badge>;
+        return <Badge className="bg-red-500 text-white">已拒絕</Badge>;
       case 'cancelled':
-        return <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:border-gray-800">已取消</Badge>;
+        return <Badge className="bg-gray-500 text-white">已取消</Badge>;
       default:
-        return <Badge variant="outline">{status}</Badge>;
+        return <Badge>{status}</Badge>;
     }
   };
 
@@ -1034,18 +1083,18 @@ export default function ExpenseReviewsPage() {
     }
 
     if (!syncStatus || syncStatus === 'pending') {
-      return <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:border-gray-800">⏳ 待同步</Badge>;
+      return <Badge className="bg-gray-400 text-white">⏳ 待同步</Badge>;
     }
 
     switch (syncStatus) {
       case 'success':
-        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">✅ 已同步</Badge>;
+        return <Badge className="bg-green-500 text-white">✅ 已同步</Badge>;
       case 'syncing':
-        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800">🔄 與 NetSuite 同步中</Badge>;
+        return <Badge className="bg-yellow-500 text-white">🔄 與 NetSuite 同步中</Badge>;
       case 'failed':
-        return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">❌ 同步失敗</Badge>;
+        return <Badge className="bg-red-500 text-white">❌ 同步失敗</Badge>;
       default:
-        return <Badge variant="outline">{syncStatus}</Badge>;
+        return <Badge>{syncStatus}</Badge>;
     }
   };
 
@@ -1054,8 +1103,8 @@ export default function ExpenseReviewsPage() {
       {/* 頁面標題 */}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
-          <FileText className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">報支審核</h1>
+          <CheckSquare className="h-8 w-8 text-primary" />
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">費用報告核准</h1>
         </div>
         <p className="text-gray-600 dark:text-muted-foreground">
           檢視和審核待審核的報支項目
@@ -1065,32 +1114,37 @@ export default function ExpenseReviewsPage() {
       {/* 狀態篩選 */}
       <div className="mb-6 flex gap-2">
         <Button
-          variant={statusFilter === 'all' ? 'default' : 'outline'}
+          variant="outline"
           onClick={() => setStatusFilter('all')}
+          className={statusFilter === 'all' ? 'border-blue-500 border-2 text-blue-600 dark:text-blue-400' : ''}
         >
           全部
         </Button>
         <Button
-          variant={statusFilter === 'pending' ? 'default' : 'outline'}
+          variant="outline"
           onClick={() => setStatusFilter('pending')}
+          className={statusFilter === 'pending' ? 'border-blue-500 border-2 text-blue-600 dark:text-blue-400' : ''}
         >
           待審核
         </Button>
         <Button
-          variant={statusFilter === 'approved' ? 'default' : 'outline'}
+          variant="outline"
           onClick={() => setStatusFilter('approved')}
+          className={statusFilter === 'approved' ? 'border-blue-500 border-2 text-blue-600 dark:text-blue-400' : ''}
         >
           已核准
         </Button>
         <Button
-          variant={statusFilter === 'rejected' ? 'default' : 'outline'}
+          variant="outline"
           onClick={() => setStatusFilter('rejected')}
+          className={statusFilter === 'rejected' ? 'border-blue-500 border-2 text-blue-600 dark:text-blue-400' : ''}
         >
           已拒絕
         </Button>
         <Button
-          variant={statusFilter === 'cancelled' ? 'default' : 'outline'}
+          variant="outline"
           onClick={() => setStatusFilter('cancelled')}
+          className={statusFilter === 'cancelled' ? 'border-blue-500 border-2 text-blue-600 dark:text-blue-400' : ''}
         >
           已取消
         </Button>
@@ -1121,9 +1175,9 @@ export default function ExpenseReviewsPage() {
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">查看</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報支日期</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">員工</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">金額</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">總金額</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">OCR 狀態</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">審核狀態</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報告狀態</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">建立時間</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite 同步</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">操作</TableHead>
@@ -1155,22 +1209,22 @@ export default function ExpenseReviewsPage() {
                         if (!hasOcrData) {
                           // 沒有 OCR 資料，顯示「無OCR」
                           return (
-                            <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:border-gray-800">
+                            <Badge className="bg-gray-400 text-white">
                               無OCR
                             </Badge>
                           );
                         } else if (review.ocr_success) {
-                          // OCR 成功
+                          // OCR 成功（只顯示狀態，不顯示百分比和等級）
                           return (
-                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">
-                              {review.ocr_confidence ? `${review.ocr_confidence}%` : '成功'}
+                            <Badge className="bg-green-500 text-white">
+                              OCR 成功
                             </Badge>
                           );
                         } else {
                           // OCR 失敗
                           return (
-                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">
-                              失敗
+                            <Badge className="bg-red-500 text-white">
+                              OCR 失敗
                             </Badge>
                           );
                         }
@@ -1183,6 +1237,24 @@ export default function ExpenseReviewsPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-2">
+                        {/* 編輯和刪除按鈕（財務審核的人永遠都可以使用） */}
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleEdit(review)}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          編輯
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(review)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          刪除
+                        </Button>
+                        {/* 核准和拒絕按鈕（只有 pending 狀態顯示） */}
                         {review.review_status === 'pending' && (
                           <>
                             <Button
@@ -1195,9 +1267,9 @@ export default function ExpenseReviewsPage() {
                               核准
                             </Button>
                             <Button
-                              variant="destructive"
                               size="sm"
                               onClick={() => handleReview(review, 'reject')}
+                              className="bg-orange-500 hover:bg-orange-600 text-white"
                             >
                               <XCircle className="h-4 w-4 mr-1" />
                               拒絕
@@ -1241,9 +1313,6 @@ export default function ExpenseReviewsPage() {
             </div>
           ) : selectedReview && editingData ? (
             <div className="space-y-6">
-              {/* 編輯模式切換按鈕（審核頁面不允許編輯，隱藏編輯按鈕） */}
-              {/* 注意：審核頁面只允許查看，不允許編輯 */}
-
               {/* 基本資訊 */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1289,35 +1358,6 @@ export default function ExpenseReviewsPage() {
                   )}
                 </div>
                 <div>
-                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">費用類別 *</Label>
-                  {isEditing ? (
-                    <Select
-                      value={(editingData as any).expense_category_id || ''}
-                      onValueChange={(value) => {
-                        const category = formOptions.expenseCategories.find(c => c.id === value);
-                        setEditingData({
-                          ...editingData,
-                          expense_category_id: value,
-                          expense_category_name: category?.name || null,
-                        } as any);
-                      }}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="請選擇費用類別" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {formOptions.expenseCategories.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="mt-1">{selectedReview.expense_category_name || '-'}</p>
-                  )}
-                </div>
-                <div>
                   <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">公司別 *</Label>
                   {isEditing ? (
                     <Select
@@ -1344,93 +1384,6 @@ export default function ExpenseReviewsPage() {
                     </Select>
                   ) : (
                     <p className="mt-1">{selectedReview.subsidiary_name || '-'}</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">部門</Label>
-                  {isEditing ? (
-                    <Select
-                      value={(editingData as any).department_id || undefined}
-                      onValueChange={(value) => {
-                        const department = formOptions.departments.find(d => d.id === value);
-                        setEditingData({
-                          ...editingData,
-                          department_id: value || null,
-                          department_name: department?.name || null,
-                        } as any);
-                      }}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="請選擇部門（選填）" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {formOptions.departments.map((dept) => (
-                          <SelectItem key={dept.id} value={dept.id}>
-                            {dept.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="mt-1">{selectedReview.department_name || '-'}</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">地點</Label>
-                  {isEditing ? (
-                    <Select
-                      value={(editingData as any).location_id || undefined}
-                      onValueChange={(value) => {
-                        const location = formOptions.locations.find(l => l.id === value);
-                        setEditingData({
-                          ...editingData,
-                          location_id: value || null,
-                          location_name: location?.name || null,
-                        } as any);
-                      }}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="請選擇地點（選填）" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {formOptions.locations.map((loc) => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="mt-1">{selectedReview.location_name || '-'}</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">類別</Label>
-                  {isEditing ? (
-                    <Select
-                      value={(editingData as any).class_id || undefined}
-                      onValueChange={(value) => {
-                        const classItem = formOptions.classes.find(c => c.id === value);
-                        setEditingData({
-                          ...editingData,
-                          class_id: value || null,
-                          class_name: classItem?.name || null,
-                        } as any);
-                      }}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="請選擇類別（選填）" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {formOptions.classes.map((cls) => (
-                          <SelectItem key={cls.id} value={cls.id}>
-                            {cls.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="mt-1">{selectedReview.class_name || '-'}</p>
                   )}
                 </div>
                 <div>
@@ -1540,8 +1493,32 @@ export default function ExpenseReviewsPage() {
                       </div>
                     )}
                     <div>
-                      <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">OCR 信心度</Label>
-                      <p className="mt-1">{selectedReview.ocr_confidence ? `${selectedReview.ocr_confidence}%` : '-'}</p>
+                      <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">OCR 狀態</Label>
+                      <div className="mt-1">
+                        {(() => {
+                          // 檢查是否有 OCR 資料（從 expense_lines 判斷）
+                          const hasOcrData = (selectedReview as any).expense_lines && 
+                            (selectedReview as any).expense_lines.some((line: any) => 
+                              line.ocr_success !== undefined || 
+                              line.ocr_confidence !== null || 
+                              line.ocr_quality_grade !== null
+                            );
+                          
+                          if (!hasOcrData) {
+                            return <Badge className="bg-gray-400 text-white">無 OCR</Badge>;
+                          }
+                          
+                          // 檢查是否有成功的 OCR（至少有一個 line 的 ocr_success 為 true）
+                          const hasSuccessfulOcr = (selectedReview as any).expense_lines && 
+                            (selectedReview as any).expense_lines.some((line: any) => line.ocr_success === true);
+                          
+                          if (hasSuccessfulOcr) {
+                            return <Badge className="bg-green-500 text-white">OCR 成功</Badge>;
+                          } else {
+                            return <Badge className="bg-red-500 text-white">OCR 失敗</Badge>;
+                          }
+                        })()}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1639,12 +1616,28 @@ export default function ExpenseReviewsPage() {
                                   <p className="mt-1 font-medium">{formatAmount(line.total_amount, line.currency)}</p>
                                 </div>
                               )}
-                              {line.ocr_confidence && (
+                              {(line.ocr_confidence !== null && line.ocr_confidence !== undefined) || line.ocr_quality_grade ? (
                                 <div>
-                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">OCR 信心度</Label>
-                                  <p className="mt-1">{line.ocr_confidence}%</p>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">OCR 信心度 / 等級</Label>
+                                  <p className="mt-1">
+                                    {line.ocr_confidence !== null && line.ocr_confidence !== undefined
+                                      ? (() => {
+                                          const confidence = parseFloat(String(line.ocr_confidence));
+                                          // 如果值 <= 1，表示是小數格式（0.01 = 1%），需要乘以 100
+                                          // 如果值 > 1，表示已經是百分比格式（90 = 90%），直接顯示
+                                          const percentage = confidence <= 1 ? confidence * 100 : confidence;
+                                          return `${percentage.toFixed(0)}%`;
+                                        })()
+                                      : '-'
+                                    }
+                                    {line.ocr_quality_grade && (
+                                      <span className="ml-2 text-gray-600 dark:text-gray-400">
+                                        (等級: {line.ocr_quality_grade})
+                                      </span>
+                                    )}
+                                  </p>
                                 </div>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         )}
@@ -1757,13 +1750,13 @@ export default function ExpenseReviewsPage() {
                       <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">同步狀態</Label>
                       <div className="mt-1">
                         {selectedReview.netsuite_sync_status === 'success' ? (
-                          <Badge className="bg-green-500">✅ 已同步</Badge>
+                          <Badge className="bg-green-500 text-white">✅ 已同步</Badge>
                         ) : selectedReview.netsuite_sync_status === 'syncing' ? (
-                          <Badge className="bg-yellow-500">🔄 與 NetSuite 同步中</Badge>
+                          <Badge className="bg-yellow-500 text-white">🔄 與 NetSuite 同步中</Badge>
                         ) : selectedReview.netsuite_sync_status === 'failed' ? (
-                          <Badge className="bg-red-500">❌ 同步失敗</Badge>
+                          <Badge className="bg-red-500 text-white">❌ 同步失敗</Badge>
                         ) : (
-                          <Badge className="bg-gray-500">⏳ 待同步</Badge>
+                          <Badge className="bg-gray-400 text-white">⏳ 待同步</Badge>
                         )}
                       </div>
                     </div>
@@ -1878,7 +1871,7 @@ export default function ExpenseReviewsPage() {
             <Button
               onClick={handleSubmitReview}
               disabled={submitting}
-              className={reviewAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : reviewAction === 'reject' ? 'bg-red-600 hover:bg-red-700' : ''}
+              className={reviewAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : reviewAction === 'reject' ? 'bg-orange-500 hover:bg-orange-600' : ''}
             >
               {submitting ? (
                 <>

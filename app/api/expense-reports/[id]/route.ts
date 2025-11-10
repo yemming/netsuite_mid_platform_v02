@@ -113,7 +113,7 @@ export async function PUT(
       );
     }
 
-    const { expenseDate, employee, subsidiary, description } = header;
+    const { expenseDate, employee, subsidiary, description, useMultiCurrency } = header;
 
     // 驗證表頭必填欄位
     if (!expenseDate || !employee || !subsidiary) {
@@ -225,6 +225,7 @@ export async function PUT(
       subsidiary_id: subsidiaryId,
       subsidiary_name: subsidiaryName,
       description: description || null,
+      use_multi_currency: useMultiCurrency || false, // 使用多幣別
       updated_at: new Date().toISOString(),
     };
     

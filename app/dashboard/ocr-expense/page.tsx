@@ -68,6 +68,7 @@ interface ExpenseReportLine {
     ocrFileId: string;
     ocrWebViewLink: string;
     ocrProcessedAt: string;
+    expenseType?: string; // OCR 辨識的費用類型（原始值，用於 mapping 到 expense category）
     attachmentImageData?: string; // 附件圖片的 base64 數據（用於在 OCR 明細中顯示）
     attachmentFileType?: string; // 附件檔案類型（用於判斷是圖片還是 PDF）
     attachmentUrl?: string; // 附件 URL（Supabase Storage URL）
@@ -181,11 +182,12 @@ export default function OCRExpensePage() {
   const [formOptions, setFormOptions] = useState<{
     employees: Array<{ id: string; name: string; netsuite_internal_id: number }>;
     expenseCategories: Array<{ id: string; name: string; netsuite_internal_id: number }>;
-    subsidiaries: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    subsidiaries: Array<{ id: string; name: string; netsuite_internal_id: number; country: string | null }>;
     locations: Array<{ id: string; name: string; netsuite_internal_id: number }>;
     departments: Array<{ id: string; name: string; netsuite_internal_id: number }>;
     classes: Array<{ id: string; name: string; netsuite_internal_id: number }>;
     currencies: Array<{ id: string; name: string; symbol: string; netsuite_internal_id: number }>;
+    taxCodes: Array<{ id: string; name: string; rate: number | null; description: string | null; country: string | null; netsuite_internal_id: number }>;
   }>({
     employees: [],
     expenseCategories: [],
@@ -194,7 +196,11 @@ export default function OCRExpensePage() {
     departments: [],
     classes: [],
     currencies: [],
+    taxCodes: [],
   });
+  
+  // 根據選定的 subsidiary 的 country 篩選後的稅碼
+  const [filteredTaxCodes, setFilteredTaxCodes] = useState<Array<{ id: string; name: string; rate: number | null; description: string | null; country: string | null; netsuite_internal_id: number }>>([]);
   const [loadingFormOptions, setLoadingFormOptions] = useState(false);
   
   // Expense Report Lines (表身)
@@ -202,27 +208,25 @@ export default function OCRExpensePage() {
   const [nextRefNo, setNextRefNo] = useState(1);
   const [useMultiCurrency, setUseMultiCurrency] = useState(false);
 
-  // 當 expenseLines 改變且未使用多幣別時，自動更新收據金額
+  // 當 expenseLines 改變時，自動更新收據金額（一律由 expense line items 的總金額加總）
   useEffect(() => {
-    if (!useMultiCurrency) {
-      // 計算所有 expense lines 的總金額
-      const total = expenseLines.reduce((sum, line) => {
-        const grossAmt = parseFloat(line.grossAmt || '0') || 0;
-        return sum + grossAmt;
-      }, 0);
-      const totalAmount = total.toFixed(2);
-      setFormData(prev => {
-        // 只有當金額改變時才更新，避免不必要的重新渲染
-        if (prev.receiptAmount !== totalAmount) {
-          return {
-            ...prev,
-            receiptAmount: totalAmount,
-          };
-        }
-        return prev;
-      });
-    }
-  }, [expenseLines, useMultiCurrency]);
+    // 計算所有 expense lines 的總金額
+    const total = expenseLines.reduce((sum, line) => {
+      const grossAmt = parseFloat(line.grossAmt || '0') || 0;
+      return sum + grossAmt;
+    }, 0);
+    const totalAmount = total.toFixed(2);
+    setFormData(prev => {
+      // 只有當金額改變時才更新，避免不必要的重新渲染
+      if (prev.receiptAmount !== totalAmount) {
+        return {
+          ...prev,
+          receiptAmount: totalAmount,
+        };
+      }
+      return prev;
+    });
+  }, [expenseLines]);
   
   // 拖拽相關 state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -374,6 +378,20 @@ export default function OCRExpensePage() {
   };
 
   const handleInputChange = (field: string, value: any) => {
+    // 當選擇 subsidiary 時，根據 country 篩選稅碼
+    if (field === 'subsidiary') {
+      const selectedSubsidiary = formOptions.subsidiaries.find(sub => sub.id === value);
+      const country = selectedSubsidiary?.country || null;
+      
+      // 根據 country 篩選稅碼
+      if (country) {
+        const filtered = formOptions.taxCodes.filter(tc => tc.country === country);
+        setFilteredTaxCodes(filtered);
+      } else {
+        // 如果沒有 country，顯示所有稅碼
+        setFilteredTaxCodes(formOptions.taxCodes);
+      }
+    }
     setFormData((prev) => ({
       ...prev,
       [field]: value,
@@ -614,19 +632,23 @@ export default function OCRExpensePage() {
           .eq('id', user.id)
           .maybeSingle();
         
-        // 載入表單選項
+        // 載入表單選項（先載入所有稅碼，之後根據 country 篩選）
         const response = await fetch('/api/expense-form-options');
         const result = await response.json();
         
         if (result.success && result.data) {
+          const subsidiaries = result.data.subsidiaries || [];
+          const taxCodes = result.data.taxCodes || [];
+          
           setFormOptions({
             employees: result.data.employees || [],
             expenseCategories: result.data.expenseCategories || [],
-            subsidiaries: result.data.subsidiaries || [],
+            subsidiaries: subsidiaries,
             locations: result.data.locations || [],
             departments: result.data.departments || [],
             classes: result.data.classes || [],
             currencies: result.data.currencies || [],
+            taxCodes: taxCodes,
           });
           
           // 如果有警告，顯示在 console
@@ -634,8 +656,9 @@ export default function OCRExpensePage() {
             console.warn('載入表單選項時有部分錯誤:', result.warnings);
           }
           
-          // 如果有 mapping 的員工，自動填入員工和公司別
-          if (userProfile?.netsuite_employee_id) {
+          // 如果有 mapping 的員工，自動填入員工和公司別（僅在非編輯模式時執行）
+          // 編輯模式時不執行，避免覆蓋已載入的資料
+          if (!expenseReviewId && userProfile?.netsuite_employee_id) {
             // 查詢員工資料
             const { data: employeeData } = await supabase
               .from('ns_entities_employees')
@@ -659,7 +682,7 @@ export default function OCRExpensePage() {
               
               // 如果有 subsidiary_id，自動填入公司別
               if (employeeData.subsidiary_id) {
-                const matchedSubsidiary = result.data.subsidiaries?.find(
+                const matchedSubsidiary = subsidiaries.find(
                   (sub: any) => sub.netsuite_internal_id === employeeData.subsidiary_id
                 );
                 
@@ -668,6 +691,15 @@ export default function OCRExpensePage() {
                     ...prev,
                     subsidiary: matchedSubsidiary.id,
                   }));
+                  
+                  // 根據 subsidiary 的 country 篩選稅碼
+                  const country = matchedSubsidiary.country;
+                  if (country) {
+                    const filtered = taxCodes.filter((tc: any) => tc.country === country);
+                    setFilteredTaxCodes(filtered);
+                  } else {
+                    setFilteredTaxCodes(taxCodes);
+                  }
                 }
               }
               
@@ -686,6 +718,133 @@ export default function OCRExpensePage() {
 
     loadFormOptions();
   }, []);
+
+  // 當 formOptions 或 formData.subsidiary 改變時，更新篩選後的稅碼和記賬幣別
+  useEffect(() => {
+    const updateTaxCodesAndCurrency = async () => {
+      // 如果正在載入資料，不執行自動更新（避免覆蓋載入的幣別）
+      if (loadingData) {
+        return;
+      }
+
+      if (formData.subsidiary && formOptions.subsidiaries.length > 0) {
+        const selectedSubsidiary = formOptions.subsidiaries.find(sub => sub.id === formData.subsidiary);
+        
+        if (selectedSubsidiary) {
+          // 1. 更新稅碼篩選（根據 country）
+          if (formOptions.taxCodes.length > 0) {
+            const country = selectedSubsidiary.country || null;
+            
+            if (country) {
+              const filtered = formOptions.taxCodes.filter(tc => tc.country === country);
+              setFilteredTaxCodes(filtered);
+            } else {
+              setFilteredTaxCodes(formOptions.taxCodes);
+            }
+          }
+
+          // 2. 更新記賬幣別（根據公司別的 base_currency_id）
+          try {
+            const supabase = createClient();
+            
+            // 查詢公司別的 base_currency_id
+            const { data: subsidiaryData } = await supabase
+              .from('ns_subsidiaries')
+              .select('base_currency_id')
+              .eq('id', formData.subsidiary)
+              .maybeSingle();
+
+            if (subsidiaryData?.base_currency_id && formOptions.currencies.length > 0) {
+              // 找到對應的幣別（根據 netsuite_internal_id）
+              const matchedCurrency = formOptions.currencies.find(
+                (curr: any) => curr.netsuite_internal_id === subsidiaryData.base_currency_id
+              );
+
+              if (matchedCurrency) {
+                // 更新記賬幣別（使用 symbol 或 name）
+                const currencyValue = matchedCurrency.symbol || matchedCurrency.name || 'TWD';
+                setFormData(prev => ({
+                  ...prev,
+                  receiptCurrency: currencyValue,
+                }));
+              }
+            }
+          } catch (error) {
+            console.error('根據公司別更新幣別時發生錯誤:', error);
+          }
+        }
+      } else if (formOptions.taxCodes.length > 0) {
+        // 如果沒有選擇 subsidiary，顯示所有稅碼
+        setFilteredTaxCodes(formOptions.taxCodes);
+      }
+    };
+
+    updateTaxCodesAndCurrency();
+  }, [formData.subsidiary, formOptions.subsidiaries, formOptions.taxCodes, formOptions.currencies, loadingData]);
+
+  // 當員工改變時，自動更新公司別（僅在非載入狀態時執行，避免載入資料時覆蓋）
+  useEffect(() => {
+    const updateSubsidiaryFromEmployee = async () => {
+      // 如果正在載入資料，不執行自動更新（避免覆蓋載入的公司別）
+      if (loadingData) {
+        return;
+      }
+
+      // 如果沒有選擇員工或表單選項還沒載入完成，不執行
+      if (!formData.employee || formOptions.employees.length === 0 || formOptions.subsidiaries.length === 0) {
+        return;
+      }
+
+      try {
+        const supabase = createClient();
+        
+        // 找到選中的員工
+        const selectedEmployee = formOptions.employees.find(
+          (emp: any) => emp.id === formData.employee
+        );
+
+        if (!selectedEmployee?.netsuite_internal_id) {
+          return;
+        }
+
+        // 查詢員工資料以取得 subsidiary_id
+        const { data: employeeData } = await supabase
+          .from('ns_entities_employees')
+          .select('id, netsuite_internal_id, subsidiary_id')
+          .eq('netsuite_internal_id', selectedEmployee.netsuite_internal_id)
+          .eq('is_inactive', false)
+          .maybeSingle();
+
+        if (employeeData?.subsidiary_id) {
+          // 找到對應的公司別
+          const matchedSubsidiary = formOptions.subsidiaries.find(
+            (sub: any) => sub.netsuite_internal_id === employeeData.subsidiary_id
+          );
+
+          if (matchedSubsidiary) {
+            // 更新公司別
+            setFormData(prev => ({
+              ...prev,
+              subsidiary: matchedSubsidiary.id,
+            }));
+
+            // 根據 subsidiary 的 country 篩選稅碼
+            const country = matchedSubsidiary.country;
+            if (country) {
+              const filtered = formOptions.taxCodes.filter((tc: any) => tc.country === country);
+              setFilteredTaxCodes(filtered);
+            } else {
+              setFilteredTaxCodes(formOptions.taxCodes);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('根據員工更新公司別時發生錯誤:', error);
+      }
+    };
+
+    updateSubsidiaryFromEmployee();
+  }, [formData.employee, formOptions.employees, formOptions.subsidiaries, formOptions.taxCodes, loadingData]);
 
   // 載入報支資料（編輯模式）
   useEffect(() => {
@@ -716,6 +875,9 @@ export default function OCRExpensePage() {
           subsidiary: header.subsidiary_id || '',
           description: header.description || '',
         }));
+        
+        // 載入「使用多幣別」設定
+        setUseMultiCurrency(header.use_multi_currency || false);
 
         // 載入 lines 資料
         if (lines && lines.length > 0) {
@@ -893,9 +1055,7 @@ export default function OCRExpensePage() {
       // 自動填充相關欄位
       // 注意：報支日期不從 OCR 回寫，保持預設值（今天的日期）或讓用戶自行修改
       // OCR 的「開立時間」只回寫到 invoiceDate 欄位（已在上面處理）
-      if (ocrData['總計金額']) {
-        handleInputChange('receiptAmount', ocrData['總計金額']);
-      }
+      // 注意：收據金額不再從 OCR 直接填入，而是由 expense line items 的總金額自動加總
     }
 
     // 處理頂層元數據欄位
@@ -952,6 +1112,7 @@ export default function OCRExpensePage() {
       ocrFileId: ocrResult.fileId || '',
       ocrWebViewLink: ocrResult.webViewLink || '',
       ocrProcessedAt: ocrResult.processedAt || '',
+      expenseType: ocrData['費用類型'] || ocrData['費用類別'] || undefined, // OCR 辨識的費用類型
     };
   };
 
@@ -986,12 +1147,105 @@ export default function OCRExpensePage() {
     const ocrOutput = ocrResult.output || {};
     const uniqueId = ocrData.ocrFileId || `fileIndex_${fileIndex}_${Date.now()}_${Math.random()}`;
     
+    // 從 OCR 結果取得費用類型，並匹配到 expense category
+    const expenseTypeFromOCR = ocrOutput['費用類型'] || ocrOutput['費用類別'] || '';
+    let matchedCategoryId = '';
+    
+    if (expenseTypeFromOCR && formOptions.expenseCategories.length > 0) {
+      // 優先嘗試：將費用類型轉換為數字，用 netsuite_internal_id 匹配
+      // N8N 傳回的「費用類型」通常是 NetSuite 的 internal ID（如 "11"）
+      const expenseTypeAsNumber = parseInt(String(expenseTypeFromOCR).trim());
+      if (!isNaN(expenseTypeAsNumber)) {
+        const idMatch = formOptions.expenseCategories.find(
+          cat => cat.netsuite_internal_id === expenseTypeAsNumber
+        );
+        
+        if (idMatch) {
+          matchedCategoryId = idMatch.id;
+          console.log(`[createExpenseLineFromOCR] 透過 netsuite_internal_id (${expenseTypeAsNumber}) 匹配到費用類別: ${idMatch.name}`);
+        }
+      }
+      
+      // 如果 ID 匹配失敗，嘗試用名稱匹配（作為 fallback）
+      if (!matchedCategoryId) {
+        // 將費用類型轉換為小寫以便進行大小寫不敏感匹配
+        const expenseTypeLower = String(expenseTypeFromOCR).trim().toLowerCase();
+        
+        // 嘗試精確匹配名稱（大小寫不敏感）
+        const exactMatch = formOptions.expenseCategories.find(
+          cat => cat.name.trim().toLowerCase() === expenseTypeLower
+        );
+        
+        if (exactMatch) {
+          matchedCategoryId = exactMatch.id;
+          console.log(`[createExpenseLineFromOCR] 透過名稱匹配到費用類別: ${exactMatch.name}`);
+        } else {
+          // 嘗試模糊匹配（包含關係，大小寫不敏感）
+          const fuzzyMatch = formOptions.expenseCategories.find(
+            cat => {
+              const catNameLower = cat.name.trim().toLowerCase();
+              return catNameLower.includes(expenseTypeLower) || expenseTypeLower.includes(catNameLower);
+            }
+          );
+          
+          if (fuzzyMatch) {
+            matchedCategoryId = fuzzyMatch.id;
+            console.log(`[createExpenseLineFromOCR] 透過模糊匹配到費用類別: ${fuzzyMatch.name}`);
+          } else {
+            // 如果找不到匹配，記錄到 console 以便除錯
+            console.warn(`[createExpenseLineFromOCR] 無法匹配費用類型 "${expenseTypeFromOCR}" 到任何 expense category`);
+            console.log(`[createExpenseLineFromOCR] 可用的 expense categories:`, formOptions.expenseCategories.map(c => ({ id: c.netsuite_internal_id, name: c.name })));
+          }
+        }
+      }
+    }
+    
     // 將檔案數據和類型添加到 ocrData 中
     const ocrDataWithAttachment = {
       ...ocrData,
       attachmentImageData: attachmentData,
       attachmentFileType: attachmentFileType,
     };
+    
+    // 檢查是否有稅額，如果有則自動填入「5%營業稅」
+    const taxAmount = ocrOutput['稅額'] || '';
+    const taxAmountNum = parseFloat(String(taxAmount).trim());
+    let matchedTaxCode = '';
+    let matchedTaxRate = '';
+    
+    // 如果有稅額且大於 0，嘗試匹配「5%營業稅」
+    if (taxAmountNum > 0 && filteredTaxCodes.length > 0) {
+      // 優先匹配「5%營業稅」，然後是「5%」，最後是「營業稅」
+      let taxCodeMatch = filteredTaxCodes.find(tc => {
+        const name = String(tc.name || '').trim();
+        return name.includes('5%營業稅');
+      });
+      
+      // 如果沒找到「5%營業稅」，嘗試匹配「5%」
+      if (!taxCodeMatch) {
+        taxCodeMatch = filteredTaxCodes.find(tc => {
+          const name = String(tc.name || '').trim();
+          return name.includes('5%');
+        });
+      }
+      
+      // 如果還是沒找到，嘗試匹配「營業稅」
+      if (!taxCodeMatch) {
+        taxCodeMatch = filteredTaxCodes.find(tc => {
+          const name = String(tc.name || '').trim();
+          return name.includes('營業稅');
+        });
+      }
+      
+      if (taxCodeMatch) {
+        matchedTaxCode = taxCodeMatch.name || '';
+        // 如果稅碼有 rate，自動填入稅率
+        if (taxCodeMatch.rate !== null && taxCodeMatch.rate !== undefined) {
+          matchedTaxRate = (taxCodeMatch.rate * 100).toFixed(2);
+        }
+        console.log(`[createExpenseLineFromOCR] 自動填入稅碼: ${matchedTaxCode}`);
+      }
+    }
     
     // 使用函數式更新確保 refNo 的正確順序
     setExpenseLines(prev => {
@@ -1006,14 +1260,14 @@ export default function OCRExpensePage() {
           id: `line-${uniqueId}`,
           refNo: processingRefNo, // 使用正在處理行的參考編號，保持連續性
           date: formData.expenseDate,
-          category: '', // 費用類別在表身每一行中選擇
+          category: matchedCategoryId, // 自動填入 OCR 辨識的費用類別
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
           exchangeRate: '1.00',
           amount: ocrOutput['總計金額'] || formData.receiptAmount || '',
-          taxCode: '',
-          taxRate: '',
-          taxAmt: ocrOutput['稅額'] || '',
+          taxCode: matchedTaxCode, // 如果有稅額，自動填入「5%營業稅」
+          taxRate: matchedTaxRate, // 如果有稅額，自動填入稅率
+          taxAmt: taxAmount, // OCR 辨識的稅額
           grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
           memo: formData.description || '',
           department: '', // 部門在表身每一行中選擇
@@ -1054,14 +1308,14 @@ export default function OCRExpensePage() {
           id: `line-${uniqueId}`,
           refNo: prevRefNo,
           date: formData.expenseDate,
-          category: '', // 費用類別在表身每一行中選擇
+          category: matchedCategoryId, // 自動填入 OCR 辨識的費用類別
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
           exchangeRate: '1.00',
           amount: ocrOutput['總計金額'] || formData.receiptAmount || '',
-          taxCode: '',
-          taxRate: '',
-          taxAmt: ocrOutput['稅額'] || '',
+          taxCode: matchedTaxCode, // 如果有稅額，自動填入「5%營業稅」
+          taxRate: matchedTaxRate, // 如果有稅額，自動填入稅率
+          taxAmt: taxAmount, // OCR 辨識的稅額
           grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
           memo: formData.description || '',
           department: '', // 部門在表身每一行中選擇
@@ -2042,6 +2296,7 @@ export default function OCRExpensePage() {
           employee: formData.employee,
           subsidiary: formData.subsidiary,
           description: formData.description || '',
+          useMultiCurrency: useMultiCurrency, // 使用多幣別
         },
         lines: processedLines,
         reviewStatus: action === 'submit' ? 'pending' : 'draft', // 提交時為 pending，儲存時為 draft
@@ -2138,7 +2393,7 @@ export default function OCRExpensePage() {
         if (action === 'submit') {
           alert(`已提交費用報告，請到「我的報支」頁面檢視狀態。`);
         } else {
-          alert(`已儲存為草稿，請到「我的報支」頁面檢視。若您要提交費用報告，也請到該確認頁面提交。`);
+          alert(`已儲存費用報告，請到「我的報支」頁面檢視。若您要提交費用報告，也請到該確認頁面提交。`);
         }
         
         // 導航到「我的報支」頁面
@@ -2296,7 +2551,7 @@ export default function OCRExpensePage() {
               {/* Receipt Amount */}
               <div className="space-y-1">
                 <Label htmlFor="receiptAmount" className="text-sm font-semibold">
-                  收據金額 <span className="text-red-500">*</span>
+                  費用報告總金額 <span className="text-red-500">*</span>
                 </Label>
                 <div className="flex gap-2">
                   <Select
@@ -2326,12 +2581,11 @@ export default function OCRExpensePage() {
                     type="number"
                     step="0.01"
                     value={formData.receiptAmount}
-                    onChange={(e) => handleInputChange('receiptAmount', e.target.value)}
                     placeholder="0.00"
-                    className="flex-1"
+                    className="flex-1 bg-gray-100 dark:bg-gray-800 cursor-not-allowed"
                     required
-                    readOnly={!useMultiCurrency}
-                    title={!useMultiCurrency ? "收據金額會自動加總所有行的總金額" : ""}
+                    readOnly={true}
+                    title="費用報告總金額會自動加總所有行的總金額"
                   />
                 </div>
               </div>
@@ -2345,8 +2599,9 @@ export default function OCRExpensePage() {
                   id="description"
                   value={formData.description}
                   onChange={(e) => handleInputChange('description', e.target.value)}
-                  rows={4}
+                  rows={2}
                   placeholder="輸入報支項目描述..."
+                  className="min-h-[40px]"
                 />
               </div>
             </div>
@@ -2360,7 +2615,7 @@ export default function OCRExpensePage() {
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
                   className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col overflow-hidden"
-                  style={{ height: '350px' }}
+                  style={{ height: '310px' }}
                 >
                   <input
                     type="file"
@@ -2493,7 +2748,7 @@ export default function OCRExpensePage() {
                       <p className="text-lg text-gray-500 dark:text-gray-500">
                         支援PDF或圖片格式上傳，可上傳多個附件。
                       </p>
-                      <p className="text-lg text-gray-400 dark:text-gray-500 mt-1">
+                      <p className="text-lg text-gray-500 dark:text-gray-500 mt-1">
                         單據請以單張掃描，勿上傳多張收據在一個圖片中，以免影響辨識效果。
                       </p>
                     </div>
@@ -2584,10 +2839,10 @@ export default function OCRExpensePage() {
               <div
                 ref={previewRef}
                 className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
-                style={{ minHeight: '490px', height: '490px' }}
+                style={{ minHeight: '368px', height: '368px' }}
               >
                 {previewImage ? (
-                  <div className="relative w-full h-full" style={{ minHeight: '600px', height: '600px' }}>
+                  <div className="relative w-full h-full" style={{ minHeight: '450px', height: '450px' }}>
                     {/* 檢查當前檔案類型 */}
                     {(() => {
                       const currentFileType = previewFileTypes[previewImageIndex] || '';
@@ -2659,7 +2914,7 @@ export default function OCRExpensePage() {
                               <iframe
                                 src={previewImage}
                                 className="w-full h-full border-0"
-                                style={{ minHeight: '600px', height: '600px' }}
+                                style={{ minHeight: '450px', height: '450px' }}
                                 title="PDF 預覽"
                               />
                             </div>
@@ -2671,8 +2926,8 @@ export default function OCRExpensePage() {
                               onMouseUp={handleMouseUp}
                               onMouseLeave={handleMouseUp}
                               style={{
-                                minHeight: '600px',
-                                height: '600px',
+                                minHeight: '300px',
+                                height: '300px',
                               }}
                             >
                               <img
@@ -2700,7 +2955,7 @@ export default function OCRExpensePage() {
                     })()}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full min-h-[490px] gap-3" style={{ height: '600px' }}>
+                  <div className="flex flex-col items-center justify-center h-full gap-3" style={{ minHeight: '368px', height: '450px' }}>
                     <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
                     <p className="text-gray-400 dark:text-gray-500 text-center text-sm">檔案預覽</p>
                   </div>
@@ -2846,7 +3101,7 @@ export default function OCRExpensePage() {
                   <TableRow className="bg-gray-100 dark:bg-gray-800">
                     <TableHead className="w-16 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">參考編號</TableHead>
                     <TableHead className="w-24 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">操作</TableHead>
-                    <TableHead className="w-14 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">OCR明細</TableHead>
+                    <TableHead className="w-14 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">單據明細</TableHead>
                     <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">日期 <span className="text-red-500">*</span></TableHead>
                     <TableHead className="w-40 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">類別 <span className="text-red-500">*</span></TableHead>
                     {useMultiCurrency && <TableHead className="w-32 text-center text-sm bg-gray-100 dark:bg-gray-800 px-1">外幣金額</TableHead>}
@@ -2890,21 +3145,30 @@ export default function OCRExpensePage() {
                           updatePreviewForLine(line);
                         }}
                         onKeyDown={(e) => {
-                          // 當按下 Enter 鍵時，在當前行下方插入新行
-                          // 只有在輸入框、文字區域或下拉選單中按下 Enter 時才觸發
+                          // 當按下 Enter 鍵時，只在金額和備註欄位跳到下一行的同一個欄位位置
                           const target = e.target as HTMLElement;
-                          if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
-                            if (e.key === 'Enter' && !e.shiftKey) {
+                          if (target.tagName === 'INPUT' && e.key === 'Enter' && !e.shiftKey) {
+                            const fieldType = target.getAttribute('data-field');
+                            // 只處理金額和備註欄位
+                            if (fieldType === 'amount' || fieldType === 'memo') {
                               e.preventDefault();
-                              insertBlankLineAfter(index);
-                              // 延遲一下，讓新行渲染後再聚焦到新行的第一個輸入框
+                              
+                              // 計算下一行的索引（如果是最後一行，則回到第一行）
+                              const nextIndex = index + 1 >= expenseLines.length ? 0 : index + 1;
+                              
+                              // 延遲一下，確保 DOM 已更新
                               setTimeout(() => {
-                                const newRowIndex = index + 1;
-                                const newRowInputs = document.querySelectorAll(`tr[data-row-index="${newRowIndex}"] input, tr[data-row-index="${newRowIndex}"] select`);
-                                if (newRowInputs.length > 0) {
-                                  (newRowInputs[0] as HTMLElement).focus();
+                                // 找到下一行的同一個欄位
+                                const nextRowField = document.querySelector(
+                                  `tr[data-row-index="${nextIndex}"] [data-field="${fieldType}"]`
+                                ) as HTMLInputElement;
+                                  
+                                if (nextRowField) {
+                                  nextRowField.focus();
+                                  // 選取所有文字以便快速替換
+                                  nextRowField.select();
                                 }
-                              }, 100);
+                              }, 10);
                             }
                           }
                         }}
@@ -3098,25 +3362,48 @@ export default function OCRExpensePage() {
                                   variant="outline"
                                   size="sm"
                                   className={`h-7 text-sm px-3 w-full ${
-                                    line.ocrData.ocrFileName || line.ocrData.invoiceNumber
-                                      ? 'rounded-full bg-[#F4A460] hover:bg-[#E9967A] border-[#F4A460] text-white dark:bg-[#4A90E2] dark:hover:bg-[#357ABD] dark:border-[#4A90E2] dark:text-white'
+                                    // 如果有 OCR 資料，根據 ocrSuccess 判斷成功或失敗
+                                    (line.ocrData.ocrFileName || line.ocrData.invoiceNumber)
+                                      ? (line.ocrData.ocrSuccess === false
+                                          // OCR 失敗（success: false），顯示桃紅色
+                                          ? 'rounded-full bg-pink-500 hover:bg-pink-600 border-pink-500 text-white dark:bg-pink-500 dark:hover:bg-pink-600 dark:border-pink-500 dark:text-white'
+                                          // OCR 成功（success: true），顯示橘色
+                                          : 'rounded-full bg-orange-500 hover:bg-orange-600 border-orange-500 text-white dark:bg-orange-500 dark:hover:bg-orange-600 dark:border-orange-500 dark:text-white')
+                                      // 沒有 OCR 資料，顯示灰色
                                       : 'rounded-full bg-white hover:bg-gray-50 border-gray-300 text-gray-900 dark:bg-transparent dark:hover:bg-gray-800/50 dark:border-white dark:text-white'
                                   }`}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                   }}
                                 >
-                                  {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <Eye className="h-3 w-3 text-white" />
-                                      <span className="text-white font-medium">查看 OCR</span>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center gap-1.5">
-                                      <Eye className="h-3 w-3 text-gray-900 dark:text-white" />
-                                      <span className="text-gray-900 dark:text-white font-medium">無 OCR</span>
-                                    </div>
-                                  )}
+                                  {(() => {
+                                    // 如果有 OCR 資料，根據 ocrSuccess 判斷成功或失敗
+                                    if (line.ocrData.ocrFileName || line.ocrData.invoiceNumber) {
+                                      // OCR 失敗（success: false），顯示「OCR 失敗」
+                                      if (line.ocrData.ocrSuccess === false) {
+                                        return (
+                                          <div className="flex items-center gap-1.5">
+                                            <Eye className="h-3 w-3 text-white" />
+                                            <span className="text-white font-medium">OCR 失敗</span>
+                                          </div>
+                                        );
+                                      }
+                                      // OCR 成功（success: true），顯示「查看 OCR」
+                                      return (
+                                        <div className="flex items-center gap-1.5">
+                                          <Eye className="h-3 w-3 text-white" />
+                                          <span className="text-white font-medium">查看 OCR</span>
+                                        </div>
+                                      );
+                                    }
+                                    // 沒有 OCR 資料，顯示眼睛圖標和「明細」
+                                    return (
+                                      <div className="flex items-center gap-1.5">
+                                        <Eye className="h-3 w-3 text-gray-900 dark:text-white" />
+                                        <span className="text-gray-900 dark:text-white font-medium">明細</span>
+                                      </div>
+                                    );
+                                  })()}
                                 </Button>
                               </DialogTrigger>
                             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -3126,11 +3413,10 @@ export default function OCRExpensePage() {
                                   {line.ocrData.invoiceNumber ? `發票號碼: ${line.ocrData.invoiceNumber}` : '尚未進行 OCR 辨識'}
                                 </DialogDescription>
                               </DialogHeader>
-                              {line.ocrData.ocrFileName || line.ocrData.invoiceNumber ? (
-                                <div className="space-y-4">
-                                  {/* 第一部分：OCR 發票資訊（最上面） */}
-                                  <div>
-                                    <h3 className="text-sm font-semibold mb-4">發票資訊</h3>
+                              <div className="space-y-4">
+                                {/* 第一部分：OCR 發票資訊（最上面） */}
+                                <div>
+                                  <h3 className="text-sm font-semibold mb-4">發票資訊</h3>
                                     <div className="grid grid-cols-2 gap-4">
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">發票標題</Label>
@@ -3331,11 +3617,24 @@ export default function OCRExpensePage() {
                                       <div className="space-y-2">
                                         <Label className="text-sm font-semibold">辨識狀態</Label>
                                         <p className="text-sm">
-                                          {line.ocrData.ocrSuccess ? (
-                                            <span className="text-green-600 dark:text-green-400">✓ 成功</span>
-                                          ) : (
-                                            <span className="text-red-600 dark:text-red-400">✗ 失敗</span>
-                                          )}
+                                          {(() => {
+                                            // 判斷是否有 OCR 資料（檢查是否有執行過 OCR）
+                                            const hasOcrData = line.ocrData.ocrFileName || 
+                                                              line.ocrData.ocrFileId || 
+                                                              line.ocrData.ocrProcessedAt ||
+                                                              line.ocrData.invoiceNumber;
+                                            
+                                            if (!hasOcrData) {
+                                              // 沒有 OCR 資料，顯示「無資料」
+                                              return <span className="text-gray-600 dark:text-gray-400">無資料</span>;
+                                            } else if (line.ocrData.ocrSuccess) {
+                                              // OCR 成功
+                                              return <span className="text-green-600 dark:text-green-400">✓ 成功</span>;
+                                            } else {
+                                              // OCR 失敗（有執行過但失敗）
+                                              return <span className="text-red-600 dark:text-red-400">✗ 失敗</span>;
+                                            }
+                                          })()}
                                         </p>
                                       </div>
                                       <div className="space-y-2">
@@ -3409,12 +3708,6 @@ export default function OCRExpensePage() {
                                     </div>
                                   </div>
                                 </div>
-                              ) : (
-                                <div className="text-center py-8">
-                                  <p>此明細尚未進行 OCR 辨識</p>
-                                  <p className="text-xs mt-2">請先上傳收據圖片並執行 OCR 辨識</p>
-                                </div>
-                              )}
                             </DialogContent>
                           </Dialog>
                           )}
@@ -3483,6 +3776,20 @@ export default function OCRExpensePage() {
                                 onChange={(e) => {
                                   const newLines = [...expenseLines];
                                   newLines[index].foreignAmount = e.target.value;
+                                  
+                                  // 如果使用多幣別，自動計算金額和總金額
+                                  if (useMultiCurrency) {
+                                    const foreignAmount = parseFloat(e.target.value) || 0;
+                                    const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                    const calculatedAmount = foreignAmount * exchangeRate;
+                                    const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
+                                    
+                                    // 更新金額（外幣金額 × 匯率）
+                                    newLines[index].amount = calculatedAmount.toFixed(2);
+                                    // 更新總金額（金額 + 稅額）
+                                    newLines[index].grossAmt = (calculatedAmount + taxAmt).toFixed(2);
+                                  }
+                                  
                                   setExpenseLines(newLines);
                                 }}
                                 className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -3533,6 +3840,20 @@ export default function OCRExpensePage() {
                                 onChange={(e) => {
                                   const newLines = [...expenseLines];
                                   newLines[index].exchangeRate = e.target.value;
+                                  
+                                  // 如果使用多幣別，自動計算金額和總金額
+                                  if (useMultiCurrency) {
+                                    const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
+                                    const exchangeRate = parseFloat(e.target.value) || 1.0;
+                                    const calculatedAmount = foreignAmount * exchangeRate;
+                                    const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
+                                    
+                                    // 更新金額（外幣金額 × 匯率）
+                                    newLines[index].amount = calculatedAmount.toFixed(2);
+                                    // 更新總金額（金額 + 稅額）
+                                    newLines[index].grossAmt = (calculatedAmount + taxAmt).toFixed(2);
+                                  }
+                                  
                                   setExpenseLines(newLines);
                                 }}
                                 className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -3548,8 +3869,15 @@ export default function OCRExpensePage() {
                             <Input
                               type="number"
                               step="0.01"
+                              data-field="amount"
                               value={line.amount && parseFloat(line.amount) !== 0 ? line.amount : ''}
+                              readOnly={useMultiCurrency} // 使用多幣別時，金額欄位為唯讀（由外幣金額 × 匯率自動計算）
                             onChange={(e) => {
+                              // 如果使用多幣別，不允許手動編輯金額
+                              if (useMultiCurrency) {
+                                return;
+                              }
+                              
                               const newLines = [...expenseLines];
                               newLines[index].amount = e.target.value;
                               // 自動計算 Gross Amt
@@ -3559,26 +3887,82 @@ export default function OCRExpensePage() {
                               setExpenseLines(newLines);
                             }}
                             onFocus={() => updatePreviewForLine(line)}
-                            className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className={`h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${useMultiCurrency ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''}`}
                             placeholder="0.00"
-                          />
+                            />
                           )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
                           {line.isProcessing ? (
                             <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           ) : (
-                            <Input
-                              value={line.taxCode}
-                            onChange={(e) => {
-                              const newLines = [...expenseLines];
-                              newLines[index].taxCode = e.target.value;
-                              setExpenseLines(newLines);
-                            }}
-                            onFocus={() => updatePreviewForLine(line)}
-                            className="h-7 text-sm px-1.5"
-                            placeholder="稅碼"
-                          />
+                            <Select
+                              value={line.taxCode || '__empty__'}
+                              onValueChange={(value) => {
+                                const newLines = [...expenseLines];
+                                
+                                // 如果選擇空白選項（__empty__），清除稅碼、稅率和稅額
+                                if (value === '__empty__') {
+                                  newLines[index].taxCode = '';
+                                  newLines[index].taxRate = '';
+                                  newLines[index].taxAmt = '';
+                                  // 重新計算 Gross Amt（只使用金額，不含稅）
+                                  const amount = parseFloat(newLines[index].amount) || 0;
+                                  newLines[index].grossAmt = amount.toFixed(2);
+                                } else {
+                                  // value 是 taxCode.name，直接使用
+                                  newLines[index].taxCode = value;
+                                  
+                                  // 找到對應的稅碼物件，用於取得 rate
+                                  const selectedTaxCode = filteredTaxCodes.find(tc => tc.name === value);
+                                  
+                                  // 如果稅碼有 rate，自動填入稅率
+                                  if (selectedTaxCode?.rate !== null && selectedTaxCode?.rate !== undefined) {
+                                    newLines[index].taxRate = (selectedTaxCode.rate * 100).toFixed(2);
+                                    // 自動計算稅額
+                                    // 如果使用多幣別，需要先確保金額是從外幣金額 × 匯率計算出來的
+                                    let amount = parseFloat(newLines[index].amount) || 0;
+                                    if (useMultiCurrency) {
+                                      // 重新計算金額（確保是最新的）
+                                      const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
+                                      const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                      amount = foreignAmount * exchangeRate;
+                                      newLines[index].amount = amount.toFixed(2);
+                                    }
+                                    const rate = selectedTaxCode.rate;
+                                    newLines[index].taxAmt = (amount * rate).toFixed(2);
+                                    // 重新計算 Gross Amt
+                                    const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
+                                    newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
+                                  }
+                                }
+                                setExpenseLines(newLines);
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-sm px-1.5">
+                                <SelectValue placeholder="選擇稅碼（選填）" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {/* 空白選項 */}
+                                <SelectItem value="__empty__">
+                                  <span className="text-gray-500 italic">無稅碼（選填）</span>
+                                </SelectItem>
+                                {/* 稅碼選項 */}
+                                {filteredTaxCodes.length > 0 ? (
+                                  filteredTaxCodes.map((taxCode) => (
+                                    <SelectItem key={taxCode.id} value={taxCode.name}>
+                                      {taxCode.name}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  formData.subsidiary && (
+                                    <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                                      無可用稅碼
+                                    </div>
+                                  )
+                                )}
+                              </SelectContent>
+                            </Select>
                           )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
@@ -3593,7 +3977,15 @@ export default function OCRExpensePage() {
                               const newLines = [...expenseLines];
                               newLines[index].taxRate = e.target.value;
                               // 自動計算稅額
-                              const amount = parseFloat(newLines[index].amount) || 0;
+                              // 如果使用多幣別，需要先確保金額是從外幣金額 × 匯率計算出來的
+                              let amount = parseFloat(newLines[index].amount) || 0;
+                              if (useMultiCurrency) {
+                                // 重新計算金額（確保是最新的）
+                                const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
+                                const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                amount = foreignAmount * exchangeRate;
+                                newLines[index].amount = amount.toFixed(2);
+                              }
                               const rate = parseFloat(e.target.value) || 0;
                               newLines[index].taxAmt = (amount * rate / 100).toFixed(2);
                               // 重新計算 Gross Amt
@@ -3619,7 +4011,15 @@ export default function OCRExpensePage() {
                               const newLines = [...expenseLines];
                               newLines[index].taxAmt = e.target.value;
                               // 重新計算 Gross Amt
-                              const amount = parseFloat(newLines[index].amount) || 0;
+                              // 如果使用多幣別，需要先確保金額是從外幣金額 × 匯率計算出來的
+                              let amount = parseFloat(newLines[index].amount) || 0;
+                              if (useMultiCurrency) {
+                                // 重新計算金額（確保是最新的）
+                                const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
+                                const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                amount = foreignAmount * exchangeRate;
+                                newLines[index].amount = amount.toFixed(2);
+                              }
                               const taxAmt = parseFloat(e.target.value) || 0;
                               newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
                               setExpenseLines(newLines);
@@ -3649,6 +4049,7 @@ export default function OCRExpensePage() {
                             <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           ) : (
                             <Input
+                              data-field="memo"
                               value={line.memo}
                             onChange={(e) => {
                               const newLines = [...expenseLines];
@@ -3843,7 +4244,7 @@ export default function OCRExpensePage() {
             variant="outline"
           >
             <Save className="h-4 w-4 mr-2" />
-            {loading ? '儲存中...' : '儲存為草稿'}
+            {loading ? '儲存中...' : '儲存費用報告'}
           </Button>
           <Button
             onClick={handleSubmitReport}

@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { expenseDate, employee, subsidiary, description } = header;
+    const { expenseDate, employee, subsidiary, description, useMultiCurrency } = header;
 
     // 驗證表頭必填欄位
     if (!expenseDate || !employee || !subsidiary) {
@@ -132,6 +132,7 @@ export async function POST(request: Request) {
         subsidiary_id: subsidiaryId,
         subsidiary_name: subsidiaryName,
         description: description || null,
+        use_multi_currency: useMultiCurrency || false, // 使用多幣別
         review_status: status, // draft 或 pending
         netsuite_sync_status: 'pending',
         created_by: user.id,
