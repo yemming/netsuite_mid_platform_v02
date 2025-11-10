@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 
+// 強制動態渲染，因為需要使用 cookies 進行認證
+export const dynamic = 'force-dynamic';
+
 /**
  * 取得報支表單所需的所有選項資料
  * 一次查詢 7 張表：員工、費用類別、公司別、地點、部門、類別、幣別
