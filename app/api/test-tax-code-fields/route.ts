@@ -70,8 +70,8 @@ export async function GET() {
     if (suiteqlItems.length > 0) {
       // 取得前 5 筆記錄的詳細資料，檢查是否有 country 相關資訊
       for (let i = 0; i < Math.min(5, suiteqlItems.length); i++) {
+        const item = suiteqlItems[i];
         try {
-          const item = suiteqlItems[i];
           // 嘗試使用 salestaxitem 作為 record type
           const detail = await netsuite.getRecord('salestaxitem', item.id);
           
