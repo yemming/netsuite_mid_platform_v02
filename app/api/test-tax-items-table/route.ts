@@ -54,8 +54,8 @@ export async function GET() {
       // 嘗試用 REST API 查詢這些 taxitem（最多查詢 5 筆）
       for (const item of salestaxitemIds.slice(0, 5)) {
         try {
-          // 嘗試使用 taxitem 作為 record type
-          const detail = await netsuite.getRecord('taxitem', item.id);
+          // 嘗試使用 salestaxitem 作為 record type
+          const detail = await netsuite.getRecord('salestaxitem', item.id);
           
           // 分析所有欄位，找出可能的地理相關欄位
           const allKeys = Object.keys(detail);

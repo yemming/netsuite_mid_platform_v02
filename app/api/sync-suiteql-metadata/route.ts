@@ -53,8 +53,13 @@ function getSuiteQLTable(recordType: string): {
   
   // 檢查是否為主檔類型
   if (MASTER_RECORD_TYPES.includes(lowerRecordType)) {
-    // 特殊處理：inventoryitem -> item
-    const tableName = lowerRecordType === 'inventoryitem' ? 'item' : lowerRecordType;
+    // 特殊處理：inventoryitem -> item, taxitem -> salestaxitem
+    let tableName = lowerRecordType;
+    if (lowerRecordType === 'inventoryitem') {
+      tableName = 'item';
+    } else if (lowerRecordType === 'taxitem') {
+      tableName = 'salestaxitem';
+    }
     return {
       suiteqlTable: tableName,
       category: 'master',
