@@ -36,13 +36,14 @@ export default function Home() {
     
     const checkUser = async () => {
       try {
-        // 先檢查 session
-        const { data: { session: sessionData }, error: sessionError } = await supabase.auth.getSession()
-        console.log('當前 session:', !!sessionData, '錯誤:', sessionError)
+        // 並行檢查 session 和 user，減少等待時間
+        const [sessionResult, userResult] = await Promise.all([
+          supabase.auth.getSession(),
+          supabase.auth.getUser()
+        ])
         
-        // 再檢查 user
-        const { data: { user }, error } = await supabase.auth.getUser()
-        console.log('當前用戶:', user?.email || '無', '錯誤:', error)
+        const { data: { session: sessionData }, error: sessionError } = sessionResult
+        const { data: { user }, error } = userResult
         
         if (error) {
           console.error('檢查用戶時發生錯誤:', error)
@@ -107,19 +108,9 @@ export default function Home() {
         }
         
         if (data.session) {
-          console.log('登入成功，session:', !!data.session)
-          console.log('Session details:', {
-            access_token: !!data.session.access_token,
-            refresh_token: !!data.session.refresh_token,
-            expires_at: data.session.expires_at,
-          })
-          
-          // 等待一小段時間確保 session 已寫入 cookie
-          await new Promise(resolve => setTimeout(resolve, 100))
-          
+          // 直接跳轉，不需要等待
+          // Supabase 會自動處理 session cookie
           router.push('/dashboard')
-          // 強制重新載入以確保 session 生效
-          router.refresh()
         } else {
           console.error('登入失敗：無法建立 session', data)
           setError('登入失敗：無法建立 session。請檢查 Supabase 設定。')

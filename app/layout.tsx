@@ -14,8 +14,9 @@ export const metadata: Metadata = {
     apple: '/apple-icon.svg',
   },
   manifest: '/manifest.json',
+  // 移除 appleWebApp.capable 以避免棄用警告
+  // 如果需要 PWA 功能，可以在 manifest.json 中設定
   appleWebApp: {
-    capable: true,
     statusBarStyle: 'default',
     title: 'NetSuite AI Nexus',
   },

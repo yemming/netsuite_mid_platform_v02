@@ -30,13 +30,14 @@ export default function DashboardLayout({
           return
         }
         
-        // 先檢查 session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-        console.log('Session check:', { session: !!session, error: sessionError })
+        // 並行檢查 session 和 user，減少等待時間
+        const [sessionResult, userResult] = await Promise.all([
+          supabase.auth.getSession(),
+          supabase.auth.getUser()
+        ])
         
-        // 再檢查 user
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        console.log('User check:', { user: !!user, email: user?.email, error: userError })
+        const { data: { session }, error: sessionError } = sessionResult
+        const { data: { user }, error: userError } = userResult
         
         if (userError) {
           console.error('Auth error:', userError)
