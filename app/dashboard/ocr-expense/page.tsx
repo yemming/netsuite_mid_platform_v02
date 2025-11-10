@@ -69,6 +69,7 @@ interface ExpenseReportLine {
     ocrWebViewLink: string;
     ocrProcessedAt: string;
     attachmentImageData?: string; // 附件圖片的 base64 數據（用於在 OCR 明細中顯示）
+    attachmentFileType?: string; // 附件檔案類型（用於判斷是圖片還是 PDF）
   };
   customer: string; // 客戶
   projectTask: string; // 專案任務
@@ -139,41 +140,12 @@ export default function OCRExpensePage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewImageIndex, setPreviewImageIndex] = useState<number>(0);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
+  const [previewFileTypes, setPreviewFileTypes] = useState<string[]>([]); // 追蹤每個預覽檔案的類型
   const [zoom, setZoom] = useState(1);
 
-  // 當附件改變時，自動載入預覽圖片
+  // 當附件改變時，自動載入預覽檔案（圖片和 PDF）
   useEffect(() => {
-    const loadImages = async () => {
-      if (attachments.length > 0) {
-        const imageFiles = attachments.filter(file => file.type.startsWith('image/'));
-        const promises = imageFiles.map(file => {
-          return new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              resolve(e.target?.result as string);
-            };
-            reader.readAsDataURL(file);
-          });
-        });
-        const images = await Promise.all(promises);
-        setPreviewImages(images);
-        if (images.length > 0) {
-          setPreviewImageIndex(prevIndex => {
-            const newIndex = prevIndex >= images.length ? 0 : prevIndex;
-            setPreviewImage(images[newIndex]);
-            return newIndex;
-          });
-        } else {
-          setPreviewImage(null);
-          setPreviewImageIndex(0);
-        }
-      } else {
-        setPreviewImages([]);
-        setPreviewImage(null);
-        setPreviewImageIndex(0);
-      }
-    };
-    loadImages();
+    loadPreviewImages(attachments);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachments.length]); // 只在附件數量改變時觸發
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -401,27 +373,35 @@ export default function OCRExpensePage() {
     }));
   };
 
-  // 將所有圖片附件轉換為 base64 預覽
+  // 將所有圖片和 PDF 附件轉換為 base64 預覽
   const loadPreviewImages = async (files: File[]) => {
-    const imageFiles = files.filter(file => file.type.startsWith('image/'));
-    const promises = imageFiles.map(file => {
-      return new Promise<string>((resolve) => {
+    const supportedFiles = files.filter(file => 
+      file.type.startsWith('image/') || file.type === 'application/pdf'
+    );
+    const promises = supportedFiles.map(file => {
+      return new Promise<{ data: string; type: string }>((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => {
-          resolve(e.target?.result as string);
+          resolve({
+            data: e.target?.result as string,
+            type: file.type
+          });
         };
         reader.readAsDataURL(file);
       });
     });
-    const images = await Promise.all(promises);
+    const results = await Promise.all(promises);
+    const images = results.map(r => r.data);
+    const fileTypes = results.map(r => r.type);
     setPreviewImages(images);
+    setPreviewFileTypes(fileTypes);
     if (images.length > 0) {
-      // 如果當前沒有預覽圖片，顯示第一張
+      // 如果當前沒有預覽檔案，顯示第一個
       if (!previewImage) {
         setPreviewImage(images[0]);
         setPreviewImageIndex(0);
       } else {
-        // 如果有預覽圖片，檢查當前索引是否有效
+        // 如果有預覽檔案，檢查當前索引是否有效
         if (previewImageIndex >= images.length) {
           setPreviewImageIndex(0);
           setPreviewImage(images[0]);
@@ -432,6 +412,7 @@ export default function OCRExpensePage() {
     } else {
       setPreviewImage(null);
       setPreviewImageIndex(0);
+      setPreviewFileTypes([]);
     }
   };
 
@@ -484,29 +465,33 @@ export default function OCRExpensePage() {
     }
   };
 
-  // 點擊附件時切換到對應的圖片預覽
+  // 點擊附件時切換到對應的檔案預覽（圖片或 PDF）
   const handleAttachmentClick = (fileIndex: number) => {
     const file = attachments[fileIndex];
-    if (file && file.type.startsWith('image/')) {
-      // 找到該檔案在所有圖片中的索引
-      const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
-      const imageIndex = imageFiles.findIndex(f => f === file);
-      if (imageIndex !== -1) {
-        setPreviewImageIndex(imageIndex);
-        setPreviewImage(previewImages[imageIndex]);
+    if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
+      // 找到該檔案在所有支援檔案中的索引
+      const supportedFiles = attachments.filter(f => 
+        f.type.startsWith('image/') || f.type === 'application/pdf'
+      );
+      const fileIndexInPreview = supportedFiles.findIndex(f => f === file);
+      if (fileIndexInPreview !== -1 && fileIndexInPreview < previewImages.length) {
+        setPreviewImageIndex(fileIndexInPreview);
+        setPreviewImage(previewImages[fileIndexInPreview]);
         setZoom(1);
         setPosition({ x: 0, y: 0 });
       }
     }
   };
 
-  // 檢查附件是否為當前預覽的圖片
+  // 檢查附件是否為當前預覽的檔案
   const isAttachmentSelected = (fileIndex: number) => {
     const file = attachments[fileIndex];
-    if (file && file.type.startsWith('image/')) {
-      const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
-      const imageIndex = imageFiles.findIndex(f => f === file);
-      return imageIndex === previewImageIndex;
+    if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
+      const supportedFiles = attachments.filter(f => 
+        f.type.startsWith('image/') || f.type === 'application/pdf'
+      );
+      const fileIndexInPreview = supportedFiles.findIndex(f => f === file);
+      return fileIndexInPreview === previewImageIndex;
     }
     return false;
   };
@@ -522,6 +507,20 @@ export default function OCRExpensePage() {
   const handleResetZoom = () => {
     setZoom(1);
     setPosition({ x: 0, y: 0 });
+  };
+
+  // 更新預覽區域顯示對應行的附件（圖片或 PDF）
+  const updatePreviewForLine = (line: ExpenseReportLine) => {
+    if (line.ocrData?.attachmentImageData) {
+      setPreviewImage(line.ocrData.attachmentImageData);
+      // 設定檔案類型，讓預覽區域能正確顯示 PDF 或圖片
+      if (line.ocrData.attachmentFileType) {
+        setPreviewFileTypes([line.ocrData.attachmentFileType]);
+        setPreviewImageIndex(0);
+      }
+      setZoom(1);
+      setPosition({ x: 0, y: 0 });
+    }
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -798,16 +797,20 @@ export default function OCRExpensePage() {
     // 標記為已建立（在建立之前就標記，防止競態條件）
     createdExpenseLineFileIndexesRef.current.add(fileIndex);
     
-    // 取得對應的圖片數據
+    // 取得對應的檔案數據（圖片或 PDF）
     const file = attachments[fileIndex];
-    let imageData: string | undefined = undefined;
+    let attachmentData: string | undefined = undefined;
+    let attachmentFileType: string | undefined = undefined;
     
-    // 從 previewImages 中取得對應的圖片數據
+    // 從 previewImages 和 previewFileTypes 中取得對應的檔案數據
     if (file && previewImages.length > 0) {
-      const imageFiles = attachments.filter(f => f.type.startsWith('image/'));
-      const imageIndex = imageFiles.indexOf(file);
-      if (imageIndex >= 0 && imageIndex < previewImages.length) {
-        imageData = previewImages[imageIndex];
+      const supportedFiles = attachments.filter(f => 
+        f.type.startsWith('image/') || f.type === 'application/pdf'
+      );
+      const fileIndexInPreview = supportedFiles.indexOf(file);
+      if (fileIndexInPreview >= 0 && fileIndexInPreview < previewImages.length) {
+        attachmentData = previewImages[fileIndexInPreview];
+        attachmentFileType = previewFileTypes[fileIndexInPreview] || file.type;
       }
     }
     
@@ -815,10 +818,11 @@ export default function OCRExpensePage() {
     const ocrOutput = ocrResult.output || {};
     const uniqueId = ocrData.ocrFileId || `fileIndex_${fileIndex}_${Date.now()}_${Math.random()}`;
     
-    // 將圖片數據添加到 ocrData 中
-    const ocrDataWithImage = {
+    // 將檔案數據和類型添加到 ocrData 中
+    const ocrDataWithAttachment = {
       ...ocrData,
-      attachmentImageData: imageData,
+      attachmentImageData: attachmentData,
+      attachmentFileType: attachmentFileType,
     };
     
     // 使用函數式更新確保 refNo 的正確順序
@@ -848,7 +852,7 @@ export default function OCRExpensePage() {
           class: '', // 類別在表身每一行中選擇
           location: '', // 地點在表身每一行中選擇
           ocrDetail: ocrOutput['發票號碼'] || ocrData.ocrFileName || '',
-          ocrData: ocrDataWithImage,
+          ocrData: ocrDataWithAttachment,
           customer: '',
           projectTask: '',
           billable: false,
@@ -896,7 +900,7 @@ export default function OCRExpensePage() {
           class: '', // 類別在表身每一行中選擇
           location: '', // 地點在表身每一行中選擇
           ocrDetail: ocrOutput['發票號碼'] || ocrData.ocrFileName || '',
-          ocrData: ocrDataWithImage,
+          ocrData: ocrDataWithAttachment,
           customer: '',
           projectTask: '',
           billable: false,
@@ -1435,10 +1439,12 @@ export default function OCRExpensePage() {
       return;
     }
 
-    // 過濾出圖片檔案
-    const imageFiles = attachments.filter(file => file.type.startsWith('image/'));
-    if (imageFiles.length === 0) {
-      alert('請先上傳收據圖片');
+    // 過濾出支援的檔案（圖片和 PDF）
+    const supportedFiles = attachments.filter(file => 
+      file.type.startsWith('image/') || file.type === 'application/pdf'
+    );
+    if (supportedFiles.length === 0) {
+      alert('請先上傳收據圖片或 PDF');
       return;
     }
 
@@ -1456,7 +1462,7 @@ export default function OCRExpensePage() {
     }>();
     
     // 先初始化所有任務為 processing 狀態
-    imageFiles.forEach((file, i) => {
+    supportedFiles.forEach((file, i) => {
       const fileIndex = attachments.indexOf(file);
       newTasks.set(fileIndex, {
         jobId: '',
@@ -1478,7 +1484,7 @@ export default function OCRExpensePage() {
       const startRefNo = maxRefNo + 1;
       
       // 創建「正在辨識中」的 expense lines（模糊效果）
-      const processingLines: ExpenseReportLine[] = imageFiles.map((file, i) => {
+      const processingLines: ExpenseReportLine[] = supportedFiles.map((file, i) => {
         const fileIndex = attachments.indexOf(file);
         return {
           id: `processing-${fileIndex}-${Date.now()}-${i}`,
@@ -1538,7 +1544,7 @@ export default function OCRExpensePage() {
       });
       
       // 更新 nextRefNo 為下一個可用的參考編號
-      setNextRefNo(startRefNo + imageFiles.length);
+      setNextRefNo(startRefNo + supportedFiles.length);
       
       // 添加「正在辨識中」的行
       return [...prevLines, ...processingLines];
@@ -1548,8 +1554,8 @@ export default function OCRExpensePage() {
     const processedFiles = new Set<string>();
     
     // 串行處理每個附件：一次處理一個，完成後再處理下一個
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
+    for (let i = 0; i < supportedFiles.length; i++) {
+      const file = supportedFiles[i];
       // 使用檔案名稱作為標識，因為 fileIndex 會隨著附件被移除而改變
       const fileKey = `${file.name}_${file.size}_${file.lastModified}`;
       
@@ -1611,10 +1617,12 @@ export default function OCRExpensePage() {
 
   const handleAIOCR = async () => {
     // 統一使用多附件處理邏輯，這樣單一附件和多附件都會建立 expense line
-    const imageFiles = attachments.filter(file => file.type.startsWith('image/'));
+    const supportedFiles = attachments.filter(file => 
+      file.type.startsWith('image/') || file.type === 'application/pdf'
+    );
     
-    if (imageFiles.length === 0) {
-      alert('請先上傳收據圖片');
+    if (supportedFiles.length === 0) {
+      alert('請先上傳收據圖片或 PDF');
       return;
     }
     
@@ -1969,14 +1977,18 @@ export default function OCRExpensePage() {
                   placeholder="輸入報支項目描述..."
                 />
               </div>
+            </div>
 
+            {/* Right Column - Preview */}
+            <div className="space-y-4 flex flex-col">
               {/* Attachments */}
-              <div className="space-y-2 flex-1 flex flex-col">
+              <div className="space-y-2 flex flex-col">
                 <Label className="text-sm font-semibold">附件（選填）</Label>
                 <div
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
-                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex-1 min-h-[150px] flex flex-col"
+                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col overflow-hidden"
+                  style={{ height: '350px' }}
                 >
                   <input
                     type="file"
@@ -1986,7 +1998,7 @@ export default function OCRExpensePage() {
                     multiple
                     className="hidden"
                   />
-                  <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-4 flex-1">
+                  <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-4 flex-shrink-0">
                     {/* Decorative Icon - Leaves with Paperclip */}
                     <div className="flex-shrink-0 ml-2">
                       <svg
@@ -2102,35 +2114,50 @@ export default function OCRExpensePage() {
                     </div>
                     
                     {/* Text Content */}
-                    <div className="flex-1 text-center">
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 font-medium">
+                    <div className="flex-1 text-left">
+                      <p className="text-lg text-gray-600 dark:text-gray-400 mb-1 font-medium">
                         將發票圖片拖曳到此處或點擊上傳
                       </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-500">
-                        支援圖片格式，可上傳多個附件
+                      <p className="text-lg text-gray-500 dark:text-gray-500">
+                        支援PDF或圖片格式上傳，可上傳多個附件。
+                      </p>
+                      <p className="text-lg text-gray-400 dark:text-gray-500 mt-1">
+                        單據請以單張掃描，勿上傳多張收據在一個圖片中，以免影響辨識效果。
                       </p>
                     </div>
                   </label>
                   {attachments.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
-                      <div className="flex flex-wrap gap-2 justify-center">
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex-1 overflow-y-auto min-h-0">
+                      <div className={`flex flex-wrap gap-2 justify-start ${attachments.length > 6 ? 'gap-1.5' : 'gap-2'}`}>
                         {attachments.map((file, index) => {
                           const isSelected = isAttachmentSelected(index);
                           const isImage = file.type.startsWith('image/');
+                          const isPdf = file.type === 'application/pdf';
+                          const isSupported = isImage || isPdf;
+                          // 當附件超過 6 個時，縮小圖標
+                          const isCompact = attachments.length > 6;
                           return (
                             <div
                               key={index}
-                              onClick={() => isImage && handleAttachmentClick(index)}
-                              className={`flex items-center gap-1.5 px-2 py-1 border rounded-full text-xs transition-colors ${
+                              onClick={() => isSupported && handleAttachmentClick(index)}
+                              className={`flex items-center gap-2 border rounded-full text-sm transition-colors ${
+                                isCompact 
+                                  ? 'px-2 py-1' 
+                                  : 'px-3 py-1.5'
+                              } ${
                                 isSelected
                                   ? 'bg-purple-600 dark:bg-purple-700 border-purple-600 dark:border-purple-700 cursor-pointer'
-                                  : isImage
+                                  : isSupported
                                   ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-200 dark:hover:bg-purple-800/50'
                                   : 'bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-700'
                               }`}
                             >
                               <span
-                                className={`text-xs truncate max-w-[100px] ${
+                                className={`text-sm truncate ${
+                                  isCompact 
+                                    ? 'max-w-[80px]' 
+                                    : 'max-w-[120px]'
+                                } ${
                                   isSelected
                                     ? 'text-white'
                                     : 'text-purple-700 dark:text-purple-300'
@@ -2145,14 +2172,14 @@ export default function OCRExpensePage() {
                                   e.stopPropagation();
                                   handleRemoveFile(index);
                                 }}
-                                className={`h-4 w-4 p-0 rounded-full ${
+                                className={`${isCompact ? 'h-4 w-4' : 'h-5 w-5'} p-0 rounded-full ${
                                   isSelected
                                     ? 'hover:bg-purple-700 dark:hover:bg-purple-800'
                                     : 'hover:bg-purple-200 dark:hover:bg-purple-800'
                                 }`}
                               >
                                 <X
-                                  className={`h-2.5 w-2.5 ${
+                                  className={`${isCompact ? 'h-2.5 w-2.5' : 'h-3 w-3'} ${
                                     isSelected
                                       ? 'text-white'
                                       : 'text-purple-600 dark:text-purple-400'
@@ -2168,214 +2195,242 @@ export default function OCRExpensePage() {
                 </div>
               </div>
             </div>
-
-            {/* Right Column - Preview */}
-            <div className="space-y-4 flex flex-col">
-              {/* Image Preview */}
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">圖片預覽</Label>
-                <div
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
-                  style={{ minHeight: '490px', height: '490px' }}
-                  onWheel={handleWheel}
-                >
-                  {previewImage ? (
-                    <div className="relative w-full h-full" style={{ minHeight: '550px', height: '550px' }}>
-                      {/* Zoom Controls */}
-                      <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-lg p-1 border border-gray-200 dark:border-gray-700">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleZoomOut}
-                          disabled={zoom <= 0.5}
-                          className="h-7 w-7 p-0"
-                        >
-                          <ZoomOut className="h-4 w-4" />
-                        </Button>
-                        <span className="px-2 py-1 text-sm font-medium flex items-center text-gray-700 dark:text-gray-300">
-                          {Math.round(zoom * 100)}%
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleZoomIn}
-                          disabled={zoom >= 3}
-                          className="h-7 w-7 p-0"
-                        >
-                          <ZoomIn className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleResetZoom}
-                          className="h-7 w-7 p-0"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      {/* Navigation Arrows */}
-                      {previewImages.length > 1 && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handlePreviousImage}
-                            className="absolute left-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
-                          >
-                            <ChevronLeft className="h-5 w-5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleNextImage}
-                            className="absolute right-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
-                          >
-                            <ChevronRight className="h-5 w-5" />
-                          </Button>
-                        </>
-                      )}
-
-                      {/* Image Container */}
-                      <div
-                        className="w-full h-full flex items-center justify-center overflow-hidden cursor-move"
-                        onMouseDown={handleMouseDown}
-                        onMouseMove={handleMouseMove}
-                        onMouseUp={handleMouseUp}
-                        onMouseLeave={handleMouseUp}
-                        style={{
-                          minHeight: '490px',
-                          height: '490px',
-                        }}
-                      >
-                        <img
-                          src={previewImage}
-                          alt="收據預覽"
-                          className="max-w-full max-h-full object-contain select-none"
-                          style={{
-                            transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,
-                            transition: isDragging ? 'none' : 'transform 0.1s ease-out',
-                            cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default',
-                          }}
-                          draggable={false}
-                        />
-                      </div>
-
-                      {/* Image Counter */}
-                      {previewImages.length > 1 && (
-                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/50 text-white px-3 py-1 rounded-full text-xs">
-                          {previewImageIndex + 1} / {previewImages.length}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full min-h-[490px] gap-3" style={{ height: '550px' }}>
-                      <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
-                      <p className="text-gray-400 dark:text-gray-500 text-center text-sm">圖片預覽</p>
-                    </div>
-                  )}
-                </div>
-                
-                {/* AI OCR Button */}
-                <Button
-                  onClick={handleAIOCR}
-                  disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
-                  className="w-full text-white"
-                  style={{ backgroundColor: '#1a5490' }}
-                  onMouseEnter={(e) => {
-                    if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
-                      e.currentTarget.style.backgroundColor = '#174880';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
-                      e.currentTarget.style.backgroundColor = '#1a5490';
-                    }
-                  }}
-                >
-                  {ocrProcessing || multiOcrTasks.size > 0 ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      {multiOcrTasks.size > 0 
-                        ? `處理中 (${Array.from(multiOcrTasks.values()).filter(t => t.status === 'completed').length}/${multiOcrTasks.size})`
-                        : '等待 OCR 辨識結果...'}
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      AI OCR 識別
-                    </>
-                  )}
-                </Button>
-                
-                {/* OCR 處理中的載入提示 */}
-                {(ocrProcessing || multiOcrTasks.size > 0) && (
-                  <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>
-                          {multiOcrTasks.size > 0
-                            ? `正在處理 ${multiOcrTasks.size} 個附件的 OCR 辨識，請稍候...`
-                            : '正在處理 OCR 辨識，請稍候...'}
-                        </span>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleCancelOCR}
-                        className="h-7 px-3 text-sm border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800"
-                      >
-                        <X className="h-3 w-3 mr-1" />
-                        取消
-                      </Button>
-                    </div>
-                    <p className="text-sm text-blue-600 dark:text-blue-400 mt-1 ml-6">
-                      {multiOcrTasks.size > 0
-                        ? '辨識結果將自動建立對應的費用明細行'
-                        : '辨識結果將自動填入表單'}
-                    </p>
-                    {/* 多附件處理狀態列表 */}
-                    {multiOcrTasks.size > 0 && (
-                      <div className="mt-3 space-y-1">
-                        {Array.from(multiOcrTasks.entries()).map(([fileIndex, task]) => {
-                          const file = attachments[fileIndex];
-                          return (
-                            <div
-                              key={fileIndex}
-                              className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400"
-                            >
-                              {task.status === 'processing' && (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              )}
-                              {task.status === 'completed' && (
-                                <Check className="h-3 w-3 text-green-600" />
-                              )}
-                              {task.status === 'error' && (
-                                <X className="h-3 w-3 text-red-600" />
-                              )}
-                              <span className="truncate flex-1">
-                                {file?.name || task.fileName}
-                              </span>
-                              <span className="text-blue-500">
-                                {task.status === 'processing' && '處理中...'}
-                                {task.status === 'completed' && '已完成'}
-                                {task.status === 'error' && '失敗'}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* OCR 識別結果已移至表身的 OCR明細欄位中，每個 expense line 都有自己的 OCR 資料 */}
+
+      {/* File Preview and OCR - Full Width Horizontal Section */}
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <div className="space-y-4">
+            {/* File Preview */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">檔案預覽</Label>
+              <div
+                className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
+                style={{ minHeight: '490px', height: '490px' }}
+                onWheel={handleWheel}
+              >
+                {previewImage ? (
+                  <div className="relative w-full h-full" style={{ minHeight: '600px', height: '600px' }}>
+                    {/* 檢查當前檔案類型 */}
+                    {(() => {
+                      const currentFileType = previewFileTypes[previewImageIndex] || '';
+                      const isPdf = currentFileType === 'application/pdf';
+                      const isImage = currentFileType.startsWith('image/');
+                      
+                      return (
+                        <>
+                          {/* Zoom Controls - 僅圖片顯示 */}
+                          {isImage && (
+                            <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-lg p-1 border border-gray-200 dark:border-gray-700">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleZoomOut}
+                                disabled={zoom <= 0.5}
+                                className="h-7 w-7 p-0"
+                              >
+                                <ZoomOut className="h-4 w-4" />
+                              </Button>
+                              <span className="px-2 py-1 text-sm font-medium flex items-center text-gray-700 dark:text-gray-300">
+                                {Math.round(zoom * 100)}%
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleZoomIn}
+                                disabled={zoom >= 3}
+                                className="h-7 w-7 p-0"
+                              >
+                                <ZoomIn className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleResetZoom}
+                                className="h-7 w-7 p-0"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Navigation Arrows */}
+                          {previewImages.length > 1 && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handlePreviousImage}
+                                className="absolute left-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
+                              >
+                                <ChevronLeft className="h-5 w-5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleNextImage}
+                                className="absolute right-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
+                              >
+                                <ChevronRight className="h-5 w-5" />
+                              </Button>
+                            </>
+                          )}
+
+                          {/* File Container */}
+                          {isPdf ? (
+                            <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                              <iframe
+                                src={previewImage}
+                                className="w-full h-full border-0"
+                                style={{ minHeight: '600px', height: '600px' }}
+                                title="PDF 預覽"
+                              />
+                            </div>
+                          ) : isImage ? (
+                            <div
+                              className="w-full h-full flex items-center justify-center overflow-hidden cursor-move"
+                              onMouseDown={handleMouseDown}
+                              onMouseMove={handleMouseMove}
+                              onMouseUp={handleMouseUp}
+                              onMouseLeave={handleMouseUp}
+                              style={{
+                                minHeight: '600px',
+                                height: '600px',
+                              }}
+                            >
+                              <img
+                                src={previewImage}
+                                alt="收據預覽"
+                                className="max-w-full max-h-full object-contain select-none"
+                                style={{
+                                  transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,
+                                  transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+                                  cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default',
+                                }}
+                                draggable={false}
+                              />
+                            </div>
+                          ) : null}
+
+                          {/* File Counter */}
+                          {previewImages.length > 1 && (
+                            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/50 text-white px-3 py-1 rounded-full text-xs">
+                              {previewImageIndex + 1} / {previewImages.length}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full min-h-[490px] gap-3" style={{ height: '600px' }}>
+                    <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+                    <p className="text-gray-400 dark:text-gray-500 text-center text-sm">檔案預覽</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* AI OCR Button */}
+            <Button
+              onClick={handleAIOCR}
+              disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
+              className="w-full text-white"
+              style={{ backgroundColor: '#1a5490' }}
+              onMouseEnter={(e) => {
+                if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
+                  e.currentTarget.style.backgroundColor = '#174880';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
+                  e.currentTarget.style.backgroundColor = '#1a5490';
+                }
+              }}
+            >
+              {ocrProcessing || multiOcrTasks.size > 0 ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {multiOcrTasks.size > 0 
+                    ? `處理中 (${Array.from(multiOcrTasks.values()).filter(t => t.status === 'completed').length}/${multiOcrTasks.size})`
+                    : '等待 OCR 辨識結果...'}
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI OCR 識別
+                </>
+              )}
+            </Button>
+            
+            {/* OCR 處理中的載入提示 */}
+            {(ocrProcessing || multiOcrTasks.size > 0) && (
+              <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>
+                      {multiOcrTasks.size > 0
+                        ? `正在處理 ${multiOcrTasks.size} 個附件的 OCR 辨識，請稍候...`
+                        : '正在處理 OCR 辨識，請稍候...'}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelOCR}
+                    className="h-7 px-3 text-sm border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    取消
+                  </Button>
+                </div>
+                <p className="text-sm text-blue-600 dark:text-blue-400 mt-1 ml-6">
+                  {multiOcrTasks.size > 0
+                    ? '辨識結果將自動建立對應的費用明細行'
+                    : '辨識結果將自動填入表單'}
+                </p>
+                {/* 多附件處理狀態列表 */}
+                {multiOcrTasks.size > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {Array.from(multiOcrTasks.entries()).map(([fileIndex, task]) => {
+                      const file = attachments[fileIndex];
+                      return (
+                        <div
+                          key={fileIndex}
+                          className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400"
+                        >
+                          {task.status === 'processing' && (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          )}
+                          {task.status === 'completed' && (
+                            <Check className="h-3 w-3 text-green-600" />
+                          )}
+                          {task.status === 'error' && (
+                            <X className="h-3 w-3 text-red-600" />
+                          )}
+                          <span className="truncate flex-1">
+                            {file?.name || task.fileName}
+                          </span>
+                          <span className="text-blue-500">
+                            {task.status === 'processing' && '處理中...'}
+                            {task.status === 'completed' && '已完成'}
+                            {task.status === 'error' && '失敗'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Expense Report Lines (表身) - 參考 NetSuite 標準 */}
       <Card className="mb-6">
@@ -2457,12 +2512,8 @@ export default function OCRExpensePage() {
                           if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('textarea') || target.closest('[role="dialog"]')) {
                             return;
                           }
-                          // 如果有 OCR 圖片，顯示在預覽區域
-                          if (line.ocrData?.attachmentImageData) {
-                            setPreviewImage(line.ocrData.attachmentImageData);
-                            setZoom(1);
-                            setPosition({ x: 0, y: 0 });
-                          }
+                          // 如果有 OCR 附件（圖片或 PDF），顯示在預覽區域
+                          updatePreviewForLine(line);
                         }}
                         onKeyDown={(e) => {
                           // 當按下 Enter 鍵時，在當前行下方插入新行
@@ -2875,16 +2926,26 @@ export default function OCRExpensePage() {
                                     )}
                                   </div>
                                   
-                                  {/* 第二部分：附件圖片（中間） */}
+                                  {/* 第二部分：附件檔案（中間）- 支援圖片和 PDF */}
                                   {line.ocrData.attachmentImageData && (
                                     <div className="border-t pt-4">
-                                      <h3 className="text-sm font-semibold mb-4">附件圖片</h3>
+                                      <h3 className="text-sm font-semibold mb-4">
+                                        {line.ocrData.attachmentFileType === 'application/pdf' ? '附件 PDF' : '附件圖片'}
+                                      </h3>
                                       <div className="flex justify-center">
-                                        <img
-                                          src={line.ocrData.attachmentImageData}
-                                          alt="收據附件"
-                                          className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm"
-                                        />
+                                        {line.ocrData.attachmentFileType === 'application/pdf' ? (
+                                          <iframe
+                                            src={line.ocrData.attachmentImageData}
+                                            className="w-full h-[600px] rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm"
+                                            title="PDF 預覽"
+                                          />
+                                        ) : (
+                                          <img
+                                            src={line.ocrData.attachmentImageData}
+                                            alt="收據附件"
+                                            className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm"
+                                          />
+                                        )}
                                       </div>
                                     </div>
                                   )}
@@ -2997,6 +3058,7 @@ export default function OCRExpensePage() {
                                 newLines[index].date = e.target.value;
                                 setExpenseLines(newLines);
                               }}
+                              onFocus={() => updatePreviewForLine(line)}
                               className="h-7 text-sm px-1.5 pr-8 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-moz-calendar-picker-indicator]:opacity-0 [&::-moz-calendar-picker-indicator]:absolute [&::-moz-calendar-picker-indicator]:right-0 [&::-moz-calendar-picker-indicator]:w-full [&::-moz-calendar-picker-indicator]:h-full [&::-moz-calendar-picker-indicator]:cursor-pointer"
                             />
                             <Calendar 
@@ -3015,6 +3077,11 @@ export default function OCRExpensePage() {
                               const newLines = [...expenseLines];
                               newLines[index].category = value;
                               setExpenseLines(newLines);
+                            }}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                updatePreviewForLine(line);
+                              }
                             }}
                           >
                             <SelectTrigger className="h-7 text-sm px-1.5">
@@ -3060,6 +3127,11 @@ export default function OCRExpensePage() {
                               const newLines = [...expenseLines];
                               newLines[index].currency = value;
                               setExpenseLines(newLines);
+                            }}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                updatePreviewForLine(line);
+                              }
                             }}
                           >
                             <SelectTrigger className="h-7 text-sm px-1.5">
@@ -3112,6 +3184,7 @@ export default function OCRExpensePage() {
                               newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
                               setExpenseLines(newLines);
                             }}
+                            onFocus={() => updatePreviewForLine(line)}
                             className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                           />
@@ -3128,6 +3201,7 @@ export default function OCRExpensePage() {
                               newLines[index].taxCode = e.target.value;
                               setExpenseLines(newLines);
                             }}
+                            onFocus={() => updatePreviewForLine(line)}
                             className="h-7 text-sm px-1.5"
                             placeholder="稅碼"
                           />
@@ -3153,6 +3227,7 @@ export default function OCRExpensePage() {
                               newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
                               setExpenseLines(newLines);
                             }}
+                            onFocus={() => updatePreviewForLine(line)}
                             className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.0%"
                           />
@@ -3175,6 +3250,7 @@ export default function OCRExpensePage() {
                               newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
                               setExpenseLines(newLines);
                             }}
+                            onFocus={() => updatePreviewForLine(line)}
                             className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                           />
@@ -3205,6 +3281,7 @@ export default function OCRExpensePage() {
                               newLines[index].memo = e.target.value;
                               setExpenseLines(newLines);
                             }}
+                            onFocus={() => updatePreviewForLine(line)}
                             className="h-7 text-sm px-1.5 w-full"
                             placeholder="備註"
                           />
@@ -3220,6 +3297,11 @@ export default function OCRExpensePage() {
                               const newLines = [...expenseLines];
                               newLines[index].department = value;
                               setExpenseLines(newLines);
+                            }}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                updatePreviewForLine(line);
+                              }
                             }}
                           >
                             <SelectTrigger className="h-7 text-sm px-1.5">
@@ -3246,6 +3328,11 @@ export default function OCRExpensePage() {
                                 newLines[index].class = value;
                                 setExpenseLines(newLines);
                               }}
+                              onOpenChange={(open) => {
+                                if (open) {
+                                  updatePreviewForLine(line);
+                                }
+                              }}
                             >
                               <SelectTrigger className="h-7 text-sm px-1.5">
                                 <SelectValue placeholder="選擇類別" />
@@ -3270,6 +3357,11 @@ export default function OCRExpensePage() {
                                 const newLines = [...expenseLines];
                                 newLines[index].location = value;
                                 setExpenseLines(newLines);
+                              }}
+                              onOpenChange={(open) => {
+                                if (open) {
+                                  updatePreviewForLine(line);
+                                }
                               }}
                             >
                               <SelectTrigger className="h-7 text-sm px-1.5">
