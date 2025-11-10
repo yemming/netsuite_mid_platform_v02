@@ -7,9 +7,10 @@ import { getNetSuiteAPIClient } from '@/lib/netsuite-client';
  * 說明：將審核通過的報支項目同步到 NetSuite Expense Report
  */
 export async function POST(request: Request) {
+  let review_id: string | undefined;
   try {
     const body = await request.json();
-    const { review_id } = body;
+    review_id = body.review_id;
 
     if (!review_id) {
       return NextResponse.json(
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
-    // 取得報支審核資料
+    // 取得報支審核資料（表頭）
     const { data: review, error: reviewError } = await supabase
       .from('expense_reviews')
       .select('*')
@@ -31,6 +32,27 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: '找不到報支審核資料', details: reviewError?.message },
         { status: 404 }
+      );
+    }
+
+    // 取得報支明細資料（表身）
+    const { data: expenseLines, error: linesError } = await supabase
+      .from('expense_lines')
+      .select('*')
+      .eq('expense_review_id', review_id)
+      .order('line_number', { ascending: true });
+
+    if (linesError) {
+      return NextResponse.json(
+        { error: '找不到報支明細資料', details: linesError.message },
+        { status: 404 }
+      );
+    }
+
+    if (!expenseLines || expenseLines.length === 0) {
+      return NextResponse.json(
+        { error: '報支項目沒有明細資料，無法同步' },
+        { status: 400 }
       );
     }
 
@@ -141,14 +163,18 @@ export async function POST(request: Request) {
     // 3. Header Currency（使用公司的基準幣別，如果找不到則使用報支幣別作為備用）
     let headerCurrencyId: number | null = subsidiaryBaseCurrencyId;
 
-    // 4. Expense Item Currency（使用報支時選擇的幣別）
+    // 4. Expense Item Currency（從 expense_lines 取得幣別）
+    // 注意：現在幣別資訊在 expense_lines 表中，不在 expense_reviews 表頭
+    // 使用第一個 line 的幣別（如果所有 lines 使用相同幣別）
+    // 如果有多幣別，需要處理每個 line 的幣別
     let expenseItemCurrencyId: number | null = null;
-    if (review.currency_id) {
+    const firstLineCurrencyId = expenseLines[0]?.currency_id;
+    if (firstLineCurrencyId) {
       queries.push(
         supabase
           .from('ns_currencies')
           .select('netsuite_internal_id')
-          .eq('id', review.currency_id)
+          .eq('id', firstLineCurrencyId)
           .maybeSingle()
           .then(({ data: currency }) => {
             expenseItemCurrencyId = currency?.netsuite_internal_id || null;
@@ -156,14 +182,17 @@ export async function POST(request: Request) {
       );
     }
 
-    // 5. Expense Category
+    // 5. Expense Category（從 expense_lines 取得）
+    // 注意：現在費用類別資訊在 expense_lines 表中，不在 expense_reviews 表頭
+    // 使用第一個 line 的費用類別（如果所有 lines 使用相同類別）
     let expenseCategoryId: number | null = null;
-    if (review.expense_category_id) {
+    const firstLineCategoryId = expenseLines[0]?.category_id;
+    if (firstLineCategoryId) {
       queries.push(
         supabase
           .from('ns_expense_categories')
           .select('netsuite_internal_id')
-          .eq('id', review.expense_category_id)
+          .eq('id', firstLineCategoryId)
           .maybeSingle()
           .then(({ data: category }) => {
             expenseCategoryId = category?.netsuite_internal_id || null;
@@ -319,7 +348,7 @@ export async function POST(request: Request) {
     }
 
     // 組裝 NetSuite Expense Report Payload
-    // ⚠️ 重要：根據成功範例，accountingapproval 和 supervisorapproval 應該設為 false
+    // ⚠️ 重要：從中臺打進來的資料需要有「鋪路」的資料，所以 accountingapproval 和 supervisorapproval 設為 true
     // Header 層級的 currency 使用公司的基準幣別
     // 注意：此時 subsidiaryId, employeeId, headerCurrencyId 已經通過驗證，不會為 null
     const expenseReportPayload: any = {
@@ -328,8 +357,8 @@ export async function POST(request: Request) {
       entity: { id: String(employeeId) },
       currency: { id: String(headerCurrencyId) }, // Header 使用公司基準幣別
       trandate: review.expense_date, // 使用小寫 trandate（參考 Payroll 範例）
-      accountingapproval: false, // ⚠️ 根據成功範例，設為 false（NetSuite 會自動處理審批流程）
-      supervisorapproval: false, // ⚠️ 根據成功範例，設為 false（NetSuite 會自動處理審批流程）
+      accountingapproval: true, // ✅ 從中臺打進來的資料需要有「鋪路」的資料，設為 true
+      supervisorapproval: true, // ✅ 從中臺打進來的資料需要有「鋪路」的資料，設為 true
     };
 
     // 選填欄位
@@ -351,41 +380,172 @@ export async function POST(request: Request) {
     }
 
     // Expense Items（費用明細）
-    // ⚠️ 重要：參考 Payroll 範例，expense item 需要 expensedate 欄位
-    // Expense items 層級的 currency 使用報支時選擇的幣別
-    // ⚠️ 驗證：確保所有必填欄位都有值
-    if (!expenseCategoryId || !expenseItemCurrencyId || !review.receipt_amount) {
-      await supabase
-        .from('expense_reviews')
-        .update({
-          netsuite_sync_status: 'failed',
-          netsuite_sync_error: 'Expense item 缺少必填欄位：category, currency 或 amount',
-          netsuite_sync_retry_count: (review.netsuite_sync_retry_count || 0) + 1,
-        })
-        .eq('id', review_id);
+    // ⚠️ 重要：現在需要從 expense_lines 建立多個 expense items
+    // 每個 expense_line 對應一個 NetSuite expense item
+    
+    // 先查詢所有 expense_lines 需要的 NetSuite IDs（並行查詢）
+    const lineQueries: PromiseLike<any>[] = [];
+    const lineNetSuiteData: Array<{
+      categoryId: number | null;
+      currencyId: number | null;
+      departmentId: number | null;
+      classId: number | null;
+      locationId: number | null;
+    }> = [];
 
-      return NextResponse.json(
-        { error: 'Expense item 缺少必填欄位：category, currency 或 amount' },
-        { status: 400 }
-      );
+    // 為每個 line 查詢 NetSuite IDs
+    for (let i = 0; i < expenseLines.length; i++) {
+      const line = expenseLines[i];
+      lineNetSuiteData[i] = {
+        categoryId: null,
+        currencyId: null,
+        departmentId: null,
+        classId: null,
+        locationId: null,
+      };
+
+      // Category
+      if (line.category_id) {
+        lineQueries.push(
+          supabase
+            .from('ns_expense_categories')
+            .select('netsuite_internal_id')
+            .eq('id', line.category_id)
+            .maybeSingle()
+            .then(({ data: category }) => {
+              lineNetSuiteData[i].categoryId = category?.netsuite_internal_id || null;
+            })
+        );
+      }
+
+      // Currency
+      if (line.currency_id) {
+        lineQueries.push(
+          supabase
+            .from('ns_currencies')
+            .select('netsuite_internal_id')
+            .eq('id', line.currency_id)
+            .maybeSingle()
+            .then(({ data: currency }) => {
+              lineNetSuiteData[i].currencyId = currency?.netsuite_internal_id || null;
+            })
+        );
+      }
+
+      // Department (可選)
+      if (line.department_id) {
+        lineQueries.push(
+          supabase
+            .from('ns_departments')
+            .select('netsuite_internal_id')
+            .eq('id', line.department_id)
+            .maybeSingle()
+            .then(({ data: department }) => {
+              lineNetSuiteData[i].departmentId = department?.netsuite_internal_id || null;
+            })
+        );
+      }
+
+      // Class (可選)
+      if (line.class_id) {
+        lineQueries.push(
+          supabase
+            .from('ns_classes')
+            .select('netsuite_internal_id')
+            .eq('id', line.class_id)
+            .maybeSingle()
+            .then(({ data: classData }) => {
+              lineNetSuiteData[i].classId = classData?.netsuite_internal_id || null;
+            })
+        );
+      }
+
+      // Location (可選)
+      if (line.location_id) {
+        lineQueries.push(
+          supabase
+            .from('ns_locations')
+            .select('netsuite_internal_id')
+            .eq('id', line.location_id)
+            .maybeSingle()
+            .then(({ data: location }) => {
+              lineNetSuiteData[i].locationId = location?.netsuite_internal_id || null;
+            })
+        );
+      }
+    }
+
+    // 等待所有 line 的查詢完成
+    await Promise.all(lineQueries);
+
+    // 建立 expense items
+    const expenseItems: any[] = [];
+    for (let i = 0; i < expenseLines.length; i++) {
+      const line = expenseLines[i];
+      const lineData = lineNetSuiteData[i];
+
+      // 驗證必填欄位
+      if (!lineData.categoryId || !lineData.currencyId || !line.gross_amt) {
+        await supabase
+          .from('expense_reviews')
+          .update({
+            netsuite_sync_status: 'failed',
+            netsuite_sync_error: `第 ${i + 1} 筆明細缺少必填欄位：category, currency 或 amount`,
+            netsuite_sync_retry_count: (review.netsuite_sync_retry_count || 0) + 1,
+          })
+          .eq('id', review_id);
+
+        return NextResponse.json(
+          { error: `第 ${i + 1} 筆明細缺少必填欄位：category, currency 或 amount` },
+          { status: 400 }
+        );
+      }
+
+      const item: any = {
+        expensedate: line.date || review.expense_date,
+        category: { id: String(lineData.categoryId) },
+        amount: parseFloat(String(line.gross_amt)),
+        currency: { id: String(lineData.currencyId) },
+      };
+
+      // 可選欄位
+      if (line.memo) {
+        item.memo = line.memo.substring(0, 4000);
+      }
+
+      if (lineData.departmentId) {
+        item.department = { id: String(lineData.departmentId) };
+      }
+
+      if (lineData.classId) {
+        item.class = { id: String(lineData.classId) };
+      }
+
+      if (lineData.locationId) {
+        item.location = { id: String(lineData.locationId) };
+      }
+
+      expenseItems.push(item);
     }
 
     expenseReportPayload.expense = {
-      items: [
-        {
-          expensedate: review.expense_date, // ✅ 參考 Payroll 範例，expense item 需要 expensedate
-          category: { id: String(expenseCategoryId) },
-          amount: parseFloat(String(review.receipt_amount)), // 確保是數字類型
-          currency: { id: String(expenseItemCurrencyId) }, // Expense item 使用報支幣別
-          memo: (review.description || `${review.expense_category_name || ''} - ${review.invoice_number || ''}`.trim()).substring(0, 4000), // NetSuite memo 有長度限制
-        },
-      ],
+      items: expenseItems,
     };
 
-    // 如果有發票號碼，可以加到 memo
-    if (review.invoice_number) {
-      expenseReportPayload.memo = `${expenseReportPayload.memo || ''}\n發票號碼: ${review.invoice_number}`.trim();
+    // 使用第一個 line 的 category 和 currency 作為主要值（用於驗證和日誌）
+    expenseCategoryId = lineNetSuiteData[0]?.categoryId || null;
+    expenseItemCurrencyId = lineNetSuiteData[0]?.currencyId || null;
+
+    // 如果有發票號碼，可以加到 memo（從第一個 line 取得）
+    const firstLineInvoiceNumber = expenseLines[0]?.invoice_number;
+    if (firstLineInvoiceNumber) {
+      expenseReportPayload.memo = `${expenseReportPayload.memo || ''}\n發票號碼: ${firstLineInvoiceNumber}`.trim();
     }
+
+    // 計算總金額（從所有 expense_lines 加總）
+    const totalAmount = expenseLines.reduce((sum, line) => {
+      return sum + (parseFloat(String(line.gross_amt)) || 0);
+    }, 0);
 
     // Debug: 只在開發環境記錄（減少生產環境的日誌輸出）
     if (process.env.NODE_ENV === 'development') {
@@ -395,8 +555,14 @@ export async function POST(request: Request) {
         headerCurrencyId,
         expenseItemCurrencyId,
         expenseCategoryId,
-        amount: review.receipt_amount,
-        currency: review.receipt_currency,
+        totalAmount,
+        linesCount: expenseLines.length,
+        items: expenseItems.map(item => ({
+          category: item.category.id,
+          currency: item.currency.id,
+          amount: item.amount,
+        })),
+        payload: JSON.stringify(expenseReportPayload, null, 2), // 記錄完整 payload
       });
     }
 
@@ -499,8 +665,35 @@ export async function POST(request: Request) {
       console.error('NetSuite API 錯誤:', netsuiteError);
 
       // 更新同步狀態為「失敗」
-      const errorMessage = netsuiteError.message || netsuiteError.toString() || '未知錯誤';
+      let errorMessage = netsuiteError.message || netsuiteError.toString() || '未知錯誤';
       const errorDetails = netsuiteError.response?.data || netsuiteError.body || null;
+      
+      // 解析 NetSuite 錯誤詳情，提供更清楚的錯誤訊息
+      if (errorDetails && typeof errorDetails === 'object') {
+        // 檢查是否有 o:errorDetails 陣列
+        if (errorDetails['o:errorDetails'] && Array.isArray(errorDetails['o:errorDetails'])) {
+          const errorDetail = errorDetails['o:errorDetails'][0];
+          if (errorDetail && errorDetail.detail) {
+            const detail = errorDetail.detail;
+            
+            // 處理稅務期間錯誤
+            if (detail.includes('tax period') || detail.includes('Tax Period')) {
+              errorMessage = `NetSuite 稅務期間錯誤：${detail}\n\n請在 NetSuite 中設定稅務期間：\n1. 前往 Setup > Manage Tax Periods\n2. 建立對應報支日期的稅務期間\n3. 確保稅務期間狀態為「開放」（Open）`;
+            } else {
+              // 其他 NetSuite 錯誤，直接使用 detail
+              errorMessage = `NetSuite 錯誤：${detail}`;
+            }
+          }
+        } else if (errorDetails.detail) {
+          // 如果錯誤詳情直接在 detail 欄位
+          const detail = errorDetails.detail;
+          if (detail.includes('tax period') || detail.includes('Tax Period')) {
+            errorMessage = `NetSuite 稅務期間錯誤：${detail}\n\n請在 NetSuite 中設定稅務期間：\n1. 前往 Setup > Manage Tax Periods\n2. 建立對應報支日期的稅務期間\n3. 確保稅務期間狀態為「開放」（Open）`;
+          } else {
+            errorMessage = `NetSuite 錯誤：${detail}`;
+          }
+        }
+      }
 
       await supabase
         .from('expense_reviews')
@@ -525,11 +718,37 @@ export async function POST(request: Request) {
 
   } catch (error: any) {
     console.error('同步報支到 NetSuite 錯誤:', error);
+    console.error('錯誤堆疊:', error.stack);
+    
+    // 更新同步狀態為「失敗」（如果 review_id 存在）
+    if (review_id) {
+      try {
+        const supabase = await createClient();
+        const { data: existingReview } = await supabase
+          .from('expense_reviews')
+          .select('netsuite_sync_retry_count')
+          .eq('id', review_id)
+          .single();
+        
+        await supabase
+          .from('expense_reviews')
+          .update({
+            netsuite_sync_status: 'failed',
+            netsuite_sync_error: error.message || error.toString() || '未知錯誤',
+            netsuite_sync_retry_count: (existingReview?.netsuite_sync_retry_count || 0) + 1,
+          })
+          .eq('id', review_id);
+      } catch (updateError) {
+        console.error('更新同步狀態失敗:', updateError);
+      }
+    }
+    
     return NextResponse.json(
       {
         error: '同步失敗',
         message: error.message || '未知錯誤',
         details: error.toString(),
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
       },
       { status: 500 }
     );

@@ -1,10 +1,16 @@
 # NetSuite 串接中臺建置完全指南
 ## 從零到一的實戰手冊
 
-> **文檔版本**: v1.2  
-> **最後更新**: 2025-11-09  
+> **文檔版本**: v1.3  
+> **最後更新**: 2025-01-XX  
 > **作者**: Claude x 你的團隊  
 > **適用場景**: POS、EC、WMS、MES 系統串接 NetSuite
+> 
+> **v1.3 更新內容（2025-01-XX）**：
+> - 新增「12.11 報支系統資料庫結構重構（表頭-表身架構）」章節
+> - 記錄從單一表改為表頭+表身結構的重大變更
+> - 詳細說明 `expense_reviews`（表頭）和 `expense_lines`（表身）的設計
+> - 記錄編輯功能、API 變更、前端實作等完整變動
 > 
 > **v1.2 更新內容（2025-11-09）**：
 > - 新增「12. 報支審核流程完整實作」章節，詳細記錄報支審核系統的完整研發過程
@@ -4927,6 +4933,563 @@ if (!subsidiaryId || !employeeId || !currencyId || !expenseCategoryId) {
 - [ ] `transaction_references` 表已正確記錄交易對應關係
 - [ ] 前端可以正確顯示 NetSuite 同步狀態
 - [ ] 附件可以正常上傳到 Supabase Storage 並顯示
+
+### 12.11 報支系統資料庫結構重構（表頭-表身架構）⭐ 重大變更
+
+> **更新日期**: 2025-01-XX  
+> **變更性質**: 架構重構（Breaking Change）  
+> **影響範圍**: 資料庫結構、API、前端頁面
+
+#### 12.11.1 變更背景與動機
+
+**問題**：
+原本的 `expense_reviews` 表是一個單一表結構，將所有報支資料（表頭 + 單一明細）都放在同一張表中。這種設計有以下問題：
+
+1. **無法支援多筆明細**：NetSuite 的 Expense Report 支援多個 expense items，但原本的設計只能儲存一筆
+2. **OCR 資料混雜**：OCR 識別結果、發票資料、附件資訊都混在表頭，無法區分是哪一筆明細的
+3. **編輯困難**：無法針對單一明細進行編輯，必須整筆報支重新提交
+4. **不符合 NetSuite 結構**：NetSuite 的 Expense Report 本身就是 Header-Line 結構
+
+**解決方案**：
+將資料庫結構重構為 **表頭（Header）+ 表身（Lines）** 的架構，完全對應 NetSuite 的 Expense Report 結構。
+
+#### 12.11.2 資料庫結構變更
+
+##### 12.11.2.1 表頭表（expense_reviews）簡化
+
+**變更前**：`expense_reviews` 包含所有欄位（表頭 + 單一明細 + OCR + 附件）
+
+**變更後**：`expense_reviews` 只包含表頭資訊
+
+```sql
+-- ============================================
+-- 報支審核表（Expense Review）- 表頭
+-- 說明：只儲存表頭資訊，明細資料移至 expense_lines 表
+-- ============================================
+CREATE TABLE expense_reviews (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- ============================================
+  -- 基本報支資訊（表頭）
+  -- ============================================
+  expense_date DATE NOT NULL,                      -- 報支日期
+  employee_id UUID,                                -- 員工 ID（對應 ns_entities_employees.id）
+  employee_name VARCHAR(255),                      -- 員工名稱（快取）
+  subsidiary_id UUID,                              -- 公司別 ID（對應 ns_subsidiaries.id）
+  subsidiary_name VARCHAR(255),                   -- 公司別名稱（快取）
+  description TEXT,                                -- 報支描述
+  
+  -- ============================================
+  -- 審核狀態
+  -- ============================================
+  review_status VARCHAR(50) DEFAULT 'pending',     -- 審核狀態
+  reviewed_by UUID,                                 -- 審核人員 ID
+  reviewed_by_name VARCHAR(255),                   -- 審核人員名稱
+  reviewed_at TIMESTAMPTZ,                         -- 審核時間
+  review_notes TEXT,                                -- 審核備註
+  rejection_reason TEXT,                           -- 拒絕原因
+  
+  -- ============================================
+  -- NetSuite 同步狀態
+  -- ============================================
+  netsuite_sync_status VARCHAR(50) DEFAULT 'pending',
+  netsuite_internal_id INTEGER,
+  netsuite_tran_id VARCHAR(100),
+  netsuite_sync_error TEXT,
+  netsuite_synced_at TIMESTAMPTZ,
+  netsuite_sync_retry_count INTEGER DEFAULT 0,
+  netsuite_url TEXT,                                -- NetSuite UI 連結
+  netsuite_request_payload JSONB,
+  netsuite_response_payload JSONB,
+  
+  -- ============================================
+  -- 審計欄位
+  -- ============================================
+  created_by UUID,
+  created_by_name VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 移除的欄位（移至 expense_lines）：
+-- ❌ expense_category_id, expense_category_name
+-- ❌ receipt_amount, receipt_currency, currency_id
+-- ❌ location_id, location_name, department_id, department_name, class_id, class_name
+-- ❌ 所有 OCR 相關欄位（invoice_title, invoice_number, ...）
+-- ❌ 所有附件欄位（attachment_url, attachment_base64）
+```
+
+**關鍵變更**：
+- ✅ 表頭只保留：報支日期、員工、公司別、描述
+- ❌ 移除所有明細相關欄位（金額、費用類別、部門、地點、類別）
+- ❌ 移除所有 OCR 相關欄位
+- ❌ 移除所有附件欄位
+
+##### 12.11.2.2 新增表身表（expense_lines）
+
+**新增表**：`expense_lines` 儲存所有明細資料
+
+```sql
+-- ============================================
+-- 報支明細表（Expense Lines）- 表身
+-- 說明：每個報支可以有多筆明細，每筆明細包含完整的 OCR 資料、發票資料、文件檔案資訊
+-- ============================================
+CREATE TABLE expense_lines (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  expense_review_id UUID NOT NULL REFERENCES expense_reviews(id) ON DELETE CASCADE,
+  
+  -- ============================================
+  -- 基本欄位
+  -- ============================================
+  line_number INTEGER NOT NULL,                    -- 行號（對應 refNo，從 1 開始）
+  
+  -- ============================================
+  -- 手動輸入欄位（表身資料）
+  -- ============================================
+  date DATE NOT NULL,                              -- 報支日期（line 層級）
+  category_id UUID,                                -- 費用類別 ID
+  category_name VARCHAR(255),                      -- 費用類別名稱（快取）
+  currency_id UUID,                                -- 幣別 ID
+  currency VARCHAR(10),                            -- 幣別符號（TWD, USD 等）
+  foreign_amount DECIMAL(15,2),                    -- 外幣金額
+  exchange_rate DECIMAL(15,6) DEFAULT 1.0,         -- 匯率
+  amount DECIMAL(15,2) NOT NULL,                   -- 金額（必填）
+  tax_code VARCHAR(50),                            -- 稅碼
+  tax_rate DECIMAL(5,2),                           -- 稅率（%）
+  tax_amt DECIMAL(15,2),                           -- 稅額
+  gross_amt DECIMAL(15,2) NOT NULL,                -- 總金額（必填）
+  memo TEXT,                                       -- 備註
+  department_id UUID,                              -- 部門 ID（line 層級）
+  department_name VARCHAR(255),                    -- 部門名稱（快取）
+  class_id UUID,                                   -- 類別 ID（line 層級）
+  class_name VARCHAR(255),                        -- 類別名稱（快取）
+  location_id UUID,                                -- 地點 ID（line 層級）
+  location_name VARCHAR(255),                      -- 地點名稱（快取）
+  customer_id UUID,                                -- 客戶 ID（可選）
+  customer_name VARCHAR(255),                     -- 客戶名稱（快取）
+  project_task_id UUID,                            -- 專案任務 ID（可選）
+  project_task_name VARCHAR(255),                  -- 專案任務名稱（快取）
+  billable BOOLEAN DEFAULT FALSE,                  -- 可計費
+  
+  -- ============================================
+  -- OCR 識別結果（發票資訊）
+  -- ============================================
+  invoice_title VARCHAR(255),
+  invoice_period VARCHAR(50),
+  invoice_number VARCHAR(100),
+  invoice_date DATE,
+  random_code VARCHAR(50),
+  format_code VARCHAR(50),
+  seller_name VARCHAR(255),
+  seller_tax_id VARCHAR(50),
+  seller_address TEXT,
+  buyer_name VARCHAR(255),
+  buyer_tax_id VARCHAR(50),
+  buyer_address TEXT,
+  untaxed_amount DECIMAL(15,2),
+  tax_amount DECIMAL(15,2),
+  total_amount DECIMAL(15,2),
+  
+  -- ============================================
+  -- OCR 元數據
+  -- ============================================
+  ocr_success BOOLEAN DEFAULT FALSE,
+  ocr_confidence DECIMAL(5,2),
+  ocr_document_type VARCHAR(100),
+  ocr_errors TEXT,
+  ocr_warnings TEXT,
+  ocr_error_count INTEGER DEFAULT 0,
+  ocr_warning_count INTEGER DEFAULT 0,
+  ocr_quality_grade VARCHAR(50),
+  ocr_file_name VARCHAR(255),
+  ocr_file_id VARCHAR(255),
+  ocr_web_view_link TEXT,
+  ocr_processed_at TIMESTAMPTZ,
+  
+  -- ============================================
+  -- 文件檔案資訊
+  -- ============================================
+  document_file_name VARCHAR(255),                 -- 文件檔案名稱
+  document_file_path TEXT,                         -- 文件檔案路徑（Supabase Storage 路徑）
+  attachment_url TEXT,                              -- 附件 URL（Supabase Storage URL）
+  attachment_base64 TEXT,                          -- 附件 Base64（備用）
+  
+  -- ============================================
+  -- 審計欄位
+  -- ============================================
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  
+  -- ============================================
+  -- 唯一約束
+  -- ============================================
+  CONSTRAINT unique_expense_review_line_number UNIQUE (expense_review_id, line_number)
+);
+
+-- 索引
+CREATE INDEX idx_expense_lines_review_id ON expense_lines(expense_review_id);
+CREATE INDEX idx_expense_lines_line_number ON expense_lines(expense_review_id, line_number);
+```
+
+**關鍵設計**：
+- ✅ 每個 line 都有獨立的 OCR 資料和附件
+- ✅ 支援多幣別（每個 line 可以有不同幣別）
+- ✅ 支援多部門、多地點、多類別（每個 line 可以不同）
+- ✅ 外鍵約束：`ON DELETE CASCADE`（刪除表頭時自動刪除所有 lines）
+
+#### 12.11.3 API 變更
+
+##### 12.11.3.1 建立報支 API 變更
+
+**端點**：`POST /api/create-expense-report`
+
+**變更前**：接收單一物件，包含所有欄位
+
+```typescript
+// ❌ 舊格式
+{
+  expenseDate: '2025-01-15',
+  employee: 'employee-uuid',
+  subsidiary: 'subsidiary-uuid',
+  expenseCategory: 'category-uuid',
+  receiptAmount: '1000',
+  receiptCurrency: 'TWD',
+  // ... 所有欄位混在一起
+}
+```
+
+**變更後**：接收表頭 + 多個 lines 的結構
+
+```typescript
+// ✅ 新格式
+{
+  header: {
+    expenseDate: '2025-01-15',
+    employee: 'employee-uuid',
+    subsidiary: 'subsidiary-uuid',
+    description: '報支說明'
+  },
+  lines: [
+    {
+      refNo: 1,
+      date: '2025-01-15',
+      category: 'category-uuid',
+      currency: 'currency-uuid',
+      amount: '1000',
+      grossAmt: '1000',
+      memo: '第一筆明細',
+      department: 'dept-uuid',
+      class: 'class-uuid',
+      location: 'location-uuid',
+      ocrData: {
+        invoiceTitle: '...',
+        invoiceNumber: '...',
+        // ... OCR 資料
+      },
+      attachment_url: 'https://...',
+      attachment_base64: '...',
+      document_file_name: 'receipt.jpg',
+      document_file_path: 'user-id/timestamp_receipt.jpg'
+    },
+    {
+      refNo: 2,
+      // ... 第二筆明細
+    }
+  ]
+}
+```
+
+**實作邏輯**：
+1. 驗證表頭必填欄位（`expenseDate`, `employee`, `subsidiary`）
+2. 驗證每個 line 的必填欄位（`date`, `category`, `currency`, `amount`, `grossAmt`）
+3. 查詢主檔 ID（employee, subsidiary, category, currency, department, class, location）
+4. 插入表頭到 `expense_reviews`
+5. 批次插入所有 lines 到 `expense_lines`
+6. 如果 line 插入失敗，刪除已建立的表頭（Rollback）
+
+##### 12.11.3.2 新增取得報支 API
+
+**端點**：`GET /api/expense-reports/[id]`
+
+**功能**：取得完整的報支資料（表頭 + 所有 lines）
+
+```typescript
+// 回應格式
+{
+  success: true,
+  data: {
+    header: {
+      id: 'uuid',
+      expense_date: '2025-01-15',
+      employee_id: 'uuid',
+      employee_name: '張三',
+      // ... 表頭資料
+    },
+    lines: [
+      {
+        id: 'uuid',
+        line_number: 1,
+        date: '2025-01-15',
+        category_id: 'uuid',
+        category_name: '交通費',
+        // ... line 資料（包含 OCR 和附件）
+      },
+      // ... 更多 lines
+    ]
+  }
+}
+```
+
+**權限檢查**：
+- 只有建立者可以取得報支資料（用於編輯）
+- 檢查 `created_by === user.id`
+
+##### 12.11.3.3 新增更新報支 API
+
+**端點**：`PUT /api/expense-reports/[id]`
+
+**功能**：更新報支資料（表頭 + 所有 lines）
+
+**請求格式**：與 `POST /api/create-expense-report` 相同
+
+**實作邏輯**：
+1. 檢查報支是否存在且使用者有權限
+2. 檢查審核狀態（只能編輯 `review_status === 'pending'` 的報支）
+3. 更新表頭
+4. 刪除所有現有的 lines
+5. 插入新的 lines（與建立邏輯相同）
+
+**關鍵設計**：
+- 採用「刪除舊 lines + 插入新 lines」的策略（簡化實作，避免複雜的 diff 邏輯）
+- 確保資料一致性（如果 line 插入失敗，不更新表頭）
+
+#### 12.11.4 前端變更
+
+##### 12.11.4.1 OCR Expense 頁面變更
+
+**路徑**：`/dashboard/ocr-expense`
+
+**變更內容**：
+
+1. **表單結構變更**：
+   - 表頭只保留：報支日期、員工、公司別、描述
+   - 移除：費用類別、金額、幣別、部門、地點、類別（移至表身）
+
+2. **新增 Expense Lines 管理**：
+   - 使用 `expenseLines` state 管理多筆明細
+   - 每筆明細包含：日期、費用類別、幣別、金額、總金額、備註、部門、地點、類別、OCR 資料、附件
+   - 支援新增、刪除、排序、編輯明細
+
+3. **編輯模式支援**：
+   - 從 URL 參數讀取 `expense_review_id`（`?id=xxx`）
+   - 自動載入報支資料（表頭 + 所有 lines）
+   - 顯示載入狀態
+   - 頁面標題動態顯示（「編輯報支項目」或「建立報支項目」）
+
+4. **附件處理**：
+   - 每個 line 可以有獨立的附件
+   - 編輯模式時，優先使用現有的 `attachment_url`（避免重複上傳）
+   - 新建或更新附件時，上傳到 Supabase Storage
+
+**關鍵程式碼**：
+
+```typescript
+// 編輯模式：從 URL 參數讀取 expense_review_id
+const expenseReviewId = searchParams.get('id');
+const [isEditMode, setIsEditMode] = useState(false);
+
+// 載入報支資料
+useEffect(() => {
+  if (!expenseReviewId) return;
+  
+  const loadExpenseReport = async () => {
+    const response = await fetch(`/api/expense-reports/${expenseReviewId}`);
+    const { header, lines } = await response.json();
+    
+    // 載入表頭
+    setFormData({
+      expenseDate: header.expense_date,
+      employee: header.employee_id,
+      subsidiary: header.subsidiary_id,
+      description: header.description || '',
+    });
+    
+    // 載入 lines
+    setExpenseLines(lines.map(line => ({
+      refNo: line.line_number,
+      date: line.date,
+      category: line.category_id,
+      // ... 其他欄位
+      ocrData: {
+        invoiceTitle: line.invoice_title,
+        // ... OCR 資料
+        attachmentUrl: line.attachment_url, // 保存現有 URL
+      }
+    })));
+  };
+  
+  loadExpenseReport();
+}, [expenseReviewId]);
+
+// 提交時判斷使用 POST 或 PUT
+const apiUrl = isEditMode && expenseReviewId
+  ? `/api/expense-reports/${expenseReviewId}`
+  : '/api/create-expense-report';
+const method = isEditMode && expenseReviewId ? 'PUT' : 'POST';
+```
+
+##### 12.11.4.2 我的報支頁面變更
+
+**路徑**：`/dashboard/ocr-expense/my-expenses`
+
+**變更內容**：
+
+1. **列表顯示變更**：
+   - 移除「費用類別」欄位（表頭不再有）
+   - 新增「員工」欄位（顯示 `employee_name`）
+   - 總金額從 `expense_lines` 計算（`SUM(gross_amt)`）
+
+2. **新增編輯功能**：
+   - 在「操作」欄位新增「編輯」按鈕
+   - 只有 `review_status === 'pending'` 的報支可以編輯
+   - 點擊「編輯」跳轉到 `/dashboard/ocr-expense?id={expense_review_id}`
+
+**關鍵程式碼**：
+
+```typescript
+// 查詢時計算總金額
+const { data } = await supabase
+  .from('expense_reviews')
+  .select(`
+    *,
+    expense_lines (
+      gross_amt,
+      currency
+    )
+  `)
+  .eq('created_by', user.id);
+
+// 處理資料：計算總金額
+const processedData = data.map(review => ({
+  ...review,
+  receipt_amount: review.expense_lines?.reduce(
+    (sum, line) => sum + (parseFloat(line.gross_amt) || 0),
+    0
+  ) || 0,
+  receipt_currency: review.expense_lines?.[0]?.currency || 'TWD',
+}));
+
+// 編輯按鈕
+{review.review_status === 'pending' && (
+  <Button
+    onClick={() => router.push(`/dashboard/ocr-expense?id=${review.id}`)}
+  >
+    編輯
+  </Button>
+)}
+```
+
+#### 12.11.5 資料遷移
+
+**重要**：本次重構**不清除舊資料**，但**不進行資料遷移**。
+
+**原因**：
+1. 舊資料結構與新結構差異太大，遷移複雜度高
+2. 舊資料可能不符合新的業務邏輯（例如：只有一筆明細）
+3. 建議重新建立報支，確保資料完整性
+
+**執行步驟**：
+
+```sql
+-- 1. 建立新的 expense_lines 表
+-- （執行 create_expense_lines_table.sql）
+
+-- 2. 簡化 expense_reviews 表
+-- （執行 simplify_expense_reviews_table.sql）
+-- 注意：此 SQL 會 TRUNCATE 表，清除所有舊資料
+
+-- 3. 確認外鍵約束
+ALTER TABLE expense_lines 
+  ADD CONSTRAINT fk_expense_lines_review 
+  FOREIGN KEY (expense_review_id) 
+  REFERENCES expense_reviews(id) 
+  ON DELETE CASCADE;
+```
+
+#### 12.11.6 影響範圍與注意事項
+
+##### 12.11.6.1 影響範圍
+
+1. **資料庫**：
+   - ✅ `expense_reviews` 表結構大幅簡化
+   - ✅ 新增 `expense_lines` 表
+   - ⚠️ 舊資料會被清除（`TRUNCATE`）
+
+2. **API**：
+   - ✅ `POST /api/create-expense-report` 請求格式變更
+   - ✅ 新增 `GET /api/expense-reports/[id]`
+   - ✅ 新增 `PUT /api/expense-reports/[id]`
+
+3. **前端**：
+   - ✅ OCR Expense 頁面結構變更
+   - ✅ 我的報支頁面顯示邏輯變更
+   - ✅ 新增編輯功能
+
+4. **NetSuite 同步**：
+   - ⚠️ 需要更新同步邏輯，從 `expense_lines` 讀取明細資料
+   - ⚠️ 需要組裝多個 expense items
+
+##### 12.11.6.2 注意事項
+
+1. **資料一致性**：
+   - 確保表頭和 lines 的資料一致性（例如：表頭的 `expense_date` 應該與 lines 的 `date` 一致）
+   - 使用資料庫約束（外鍵、唯一約束）確保資料完整性
+
+2. **效能考量**：
+   - 查詢報支列表時，使用 JOIN 或子查詢計算總金額
+   - 避免在列表查詢時載入所有 lines（只載入必要的欄位）
+
+3. **編輯權限**：
+   - 只有建立者可以編輯
+   - 只能編輯待審核的報支（`review_status === 'pending'`）
+
+4. **附件處理**：
+   - 編輯模式時，如果已有 `attachment_url`，不會重新上傳
+   - 新建或更新附件時，上傳到 Supabase Storage
+
+5. **NetSuite 同步**：
+   - 需要從 `expense_lines` 讀取所有明細
+   - 組裝 NetSuite 的 `expense.items` 陣列
+
+#### 12.11.7 檢查清單
+
+**資料庫**：
+- [ ] `expense_reviews` 表已簡化（移除明細、OCR、附件欄位）
+- [ ] `expense_lines` 表已建立並包含所有必要欄位
+- [ ] 外鍵約束已設定（`ON DELETE CASCADE`）
+- [ ] 唯一約束已設定（`unique_expense_review_line_number`）
+- [ ] 索引已建立（`expense_review_id`, `line_number`）
+
+**API**：
+- [ ] `POST /api/create-expense-report` 已更新為新格式
+- [ ] `GET /api/expense-reports/[id]` 已實作
+- [ ] `PUT /api/expense-reports/[id]` 已實作
+- [ ] 權限檢查已實作（只有建立者可以編輯）
+- [ ] 狀態檢查已實作（只能編輯待審核的報支）
+
+**前端**：
+- [ ] OCR Expense 頁面已更新為表頭+表身結構
+- [ ] Expense Lines 管理功能已實作（新增、刪除、排序、編輯）
+- [ ] 編輯模式已實作（從 URL 載入資料）
+- [ ] 我的報支頁面已更新（顯示員工、計算總金額）
+- [ ] 編輯按鈕已新增（只有待審核的報支可以編輯）
+
+**測試**：
+- [ ] 可以建立新的報支（表頭 + 多筆明細）
+- [ ] 可以編輯待審核的報支
+- [ ] 編輯後可以正確更新資料
+- [ ] 附件可以正常上傳和顯示
+- [ ] 列表可以正確顯示總金額
 
 ---
 

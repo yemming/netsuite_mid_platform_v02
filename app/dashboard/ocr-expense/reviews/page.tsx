@@ -22,30 +22,9 @@ import { createClient } from '@/utils/supabase/client';
 interface ExpenseReview {
   id: string;
   expense_date: string;
-  expense_category_name: string | null;
   employee_name: string | null;
   subsidiary_name: string | null;
-  location_name: string | null;
-  department_name: string | null;
-  class_name: string | null;
-  receipt_amount: number;
-  receipt_currency: string;
   description: string | null;
-  receipt_missing: boolean;
-  invoice_title: string | null;
-  invoice_number: string | null;
-  invoice_date: string | null;
-  seller_name: string | null;
-  buyer_name: string | null;
-  total_amount: number | null;
-  ocr_success: boolean;
-  ocr_confidence: number | null;
-  ocr_quality_grade: string | null;
-  ocr_file_name: string | null; // OCR 檔案名稱
-  ocr_file_id: string | null; // OCR 檔案 ID
-  ocr_processed_at: string | null; // OCR 處理時間
-  attachment_url: string | null; // Supabase Storage URL（優先使用）
-  attachment_base64: string | null; // Base64 備用
   review_status: string;
   netsuite_sync_status: string | null; // NetSuite 同步狀態
   netsuite_internal_id: number | null; // NetSuite Internal ID
@@ -56,12 +35,48 @@ interface ExpenseReview {
   created_at: string;
   review_notes: string | null;
   rejection_reason: string | null;
+  // 從 expense_lines 取得的資料（聚合）
+  receipt_amount: number; // 從 expense_lines 加總的 gross_amt
+  receipt_currency: string; // 從第一個 expense_line 取得的 currency
+  expense_category_name: string | null; // 從第一個 expense_line 取得的 category_name
+  location_name: string | null; // 從第一個 expense_line 取得的 location_name
+  department_name: string | null; // 從第一個 expense_line 取得的 department_name
+  class_name: string | null; // 從第一個 expense_line 取得的 class_name
+  invoice_number: string | null; // 從第一個 expense_line 取得的 invoice_number
+  ocr_success: boolean; // 從第一個 expense_line 取得的 ocr_success
+  ocr_file_name: string | null; // 從第一個 expense_line 取得的 ocr_file_name
+  ocr_processed_at: string | null; // 從第一個 expense_line 取得的 ocr_processed_at
+  // 以下欄位保留以維持向後相容（但可能為 null）
+  receipt_missing: boolean;
+  invoice_title: string | null;
+  invoice_date: string | null;
+  seller_name: string | null;
+  buyer_name: string | null;
+  total_amount: number | null;
+  ocr_confidence: number | null;
+  ocr_quality_grade: string | null;
+  ocr_file_id: string | null;
+  attachment_url: string | null;
+  attachment_base64: string | null;
 }
 
 type ReviewStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
-// 附件圖片組件（處理 Signed URL）
-function AttachmentImage({ 
+// 判斷檔案類型是否為 PDF
+const isPDF = (url: string | null, base64: string | null): boolean => {
+  if (url) {
+    const lowerUrl = url.toLowerCase();
+    return lowerUrl.includes('.pdf') || lowerUrl.includes('application/pdf');
+  }
+  if (base64) {
+    // PDF 的 Base64 開頭通常是 "JVBERi0" (PDF 檔案的 magic number)
+    return base64.startsWith('JVBERi0') || base64.startsWith('data:application/pdf');
+  }
+  return false;
+};
+
+// 附件預覽組件（支援圖片和 PDF）
+function AttachmentPreview({ 
   attachmentUrl, 
   signedUrl, 
   base64Fallback,
@@ -72,14 +87,17 @@ function AttachmentImage({
   base64Fallback: string | null;
   onGetSignedUrl: (url: string) => Promise<string | null>;
 }) {
-  const [imageSrc, setImageSrc] = useState<string | null>(signedUrl || null);
+  const [fileSrc, setFileSrc] = useState<string | null>(signedUrl || null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // 判斷是否為 PDF
+  const isPdfFile = isPDF(attachmentUrl, base64Fallback);
+
   useEffect(() => {
-    const loadImage = async () => {
+    const loadFile = async () => {
       if (signedUrl) {
-        setImageSrc(signedUrl);
+        setFileSrc(signedUrl);
         setLoading(false);
         return;
       }
@@ -88,19 +106,19 @@ function AttachmentImage({
       try {
         const url = await onGetSignedUrl(attachmentUrl);
         if (url) {
-          setImageSrc(url);
+          setFileSrc(url);
         } else {
           setError(true);
         }
       } catch (err) {
-        console.error('載入圖片錯誤:', err);
+        console.error('載入附件錯誤:', err);
         setError(true);
       } finally {
         setLoading(false);
       }
     };
 
-    loadImage();
+    loadFile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachmentUrl, signedUrl]); // 移除 onGetSignedUrl 避免無限循環
 
@@ -108,40 +126,78 @@ function AttachmentImage({
     return (
       <div className="flex items-center justify-center p-8 border border-gray-200 dark:border-gray-700 rounded-lg">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <span className="ml-2 text-gray-600 dark:text-gray-400">載入圖片中...</span>
+        <span className="ml-2 text-gray-600 dark:text-gray-400">載入附件中...</span>
       </div>
     );
   }
 
   if (error && base64Fallback) {
     // 如果 Signed URL 失敗，使用 Base64 備用
-    return (
-      <img
-        src={`data:image/jpeg;base64,${base64Fallback}`}
-        alt="收據附件"
-        className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700"
-      />
-    );
+    if (isPdfFile) {
+      // PDF Base64
+      const pdfData = base64Fallback.startsWith('data:') 
+        ? base64Fallback 
+        : `data:application/pdf;base64,${base64Fallback}`;
+      return (
+        <iframe
+          src={pdfData}
+          className="w-full h-[600px] rounded-lg border border-gray-200 dark:border-gray-700"
+          title="PDF 附件"
+        />
+      );
+    } else {
+      // 圖片 Base64
+      return (
+        <img
+          src={`data:image/jpeg;base64,${base64Fallback}`}
+          alt="收據附件"
+          className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700"
+        />
+      );
+    }
   }
 
-  if (!imageSrc) {
+  if (!fileSrc) {
     return (
       <div className="flex items-center justify-center p-8 border border-gray-200 dark:border-gray-700 rounded-lg">
         <AlertCircle className="h-6 w-6 text-red-500" />
-        <span className="ml-2 text-red-600 dark:text-red-400">無法載入圖片</span>
+        <span className="ml-2 text-red-600 dark:text-red-400">無法載入附件</span>
       </div>
     );
   }
 
+  // 如果是 PDF，使用 iframe 顯示
+  if (isPdfFile) {
+    return (
+      <iframe
+        src={fileSrc}
+        className="w-full h-[600px] rounded-lg border border-gray-200 dark:border-gray-700"
+        title="PDF 附件"
+        onError={() => {
+          // 如果 Signed URL 載入失敗，嘗試使用 Base64 備用
+          if (base64Fallback) {
+            const pdfData = base64Fallback.startsWith('data:') 
+              ? base64Fallback 
+              : `data:application/pdf;base64,${base64Fallback}`;
+            setFileSrc(pdfData);
+          } else {
+            setError(true);
+          }
+        }}
+      />
+    );
+  }
+
+  // 如果是圖片，使用 img 標籤顯示
   return (
     <img
-      src={imageSrc}
+      src={fileSrc}
       alt="收據附件"
       className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700"
       onError={() => {
         // 如果 Signed URL 載入失敗，嘗試使用 Base64 備用
         if (base64Fallback) {
-          setImageSrc(`data:image/jpeg;base64,${base64Fallback}`);
+          setFileSrc(`data:image/jpeg;base64,${base64Fallback}`);
         } else {
           setError(true);
         }
@@ -155,6 +211,7 @@ export default function ExpenseReviewsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedReview, setSelectedReview] = useState<ExpenseReview | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject' | 'cancel' | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
@@ -210,24 +267,15 @@ export default function ExpenseReviewsPage() {
     
     try {
       // ⚠️ 效能優化：列表查詢時只選擇列表顯示需要的欄位
-      // 排除大型欄位（attachment_base64, description 等）和不需要的 OCR 詳細資訊
+      // 注意：expense_reviews 已簡化為表頭，明細資料在 expense_lines 表中
       let query = supabase
         .from('expense_reviews')
         .select(`
           id,
           expense_date,
-          expense_category_name,
           employee_name,
           subsidiary_name,
-          location_name,
-          department_name,
-          class_name,
-          receipt_amount,
-          receipt_currency,
-          invoice_number,
-          ocr_success,
-          ocr_file_name,
-          ocr_processed_at,
+          description,
           review_status,
           netsuite_sync_status,
           netsuite_internal_id,
@@ -235,7 +283,19 @@ export default function ExpenseReviewsPage() {
           netsuite_sync_error,
           netsuite_url,
           created_by_name,
-          created_at
+          created_at,
+          expense_lines (
+            category_name,
+            location_name,
+            department_name,
+            class_name,
+            currency,
+            gross_amt,
+            invoice_number,
+            ocr_success,
+            ocr_file_name,
+            ocr_processed_at
+          )
         `)
         .order('created_at', { ascending: false })
         .limit(100); // 限制最多 100 筆，避免載入過多資料
@@ -259,7 +319,50 @@ export default function ExpenseReviewsPage() {
         throw error;
       }
       
-      setReviews((data || []) as ExpenseReview[]);
+      // 處理查詢結果：將 expense_lines 資料扁平化
+      const processedData = (data || []).map((review: any) => {
+        const lines = review.expense_lines || [];
+        const firstLine = lines[0] || null;
+        
+        // 計算總金額（加總所有 lines 的 gross_amt）
+        const receiptAmount = lines.reduce((sum: number, line: any) => {
+          return sum + (parseFloat(line.gross_amt) || 0);
+        }, 0);
+        
+        // 從第一個 line 取得其他資訊
+        // 確保 currency 有有效值（不能是空字串或 null）
+        const currency = firstLine?.currency && firstLine.currency.trim() !== '' 
+          ? firstLine.currency.trim() 
+          : 'TWD';
+        
+        return {
+          ...review,
+          receipt_amount: receiptAmount,
+          receipt_currency: currency,
+          expense_category_name: firstLine?.category_name || null,
+          location_name: firstLine?.location_name || null,
+          department_name: firstLine?.department_name || null,
+          class_name: firstLine?.class_name || null,
+          invoice_number: firstLine?.invoice_number || null,
+          ocr_success: firstLine?.ocr_success || false,
+          ocr_file_name: firstLine?.ocr_file_name || null,
+          ocr_processed_at: firstLine?.ocr_processed_at || null,
+          // 向後相容欄位
+          receipt_missing: false,
+          invoice_title: null,
+          invoice_date: null,
+          seller_name: null,
+          buyer_name: null,
+          total_amount: receiptAmount,
+          ocr_confidence: null,
+          ocr_quality_grade: null,
+          ocr_file_id: null,
+          attachment_url: null,
+          attachment_base64: null,
+        };
+      });
+      
+      setReviews(processedData as ExpenseReview[]);
     } catch (error: any) {
       console.error('[loadReviews] 載入報支審核列表錯誤:', error);
       console.error('[loadReviews] 錯誤詳情:', {
@@ -330,11 +433,34 @@ export default function ExpenseReviewsPage() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || result.message || '同步失敗');
+        // 如果是「正在同步中」的錯誤，這是正常的（可能是重複調用），不當作錯誤處理
+        if (result.error && result.error.includes('正在同步中')) {
+          console.log('報支已在同步中，跳過重複同步');
+          // 更新 UI 狀態為同步中（如果還沒更新的話）
+          setReviews(prevReviews => 
+            prevReviews.map(review => 
+              review.id === reviewId && review.netsuite_sync_status !== 'syncing'
+                ? { ...review, netsuite_sync_status: 'syncing' }
+                : review
+            )
+          );
+          // 如果當前選中的報支是這個，也更新它
+          if (selectedReview && selectedReview.id === reviewId) {
+            setSelectedReview(prev => prev && prev.netsuite_sync_status !== 'syncing' ? {
+              ...prev,
+              netsuite_sync_status: 'syncing',
+            } : prev);
+          }
+          return; // 正常返回，不拋出錯誤
+        }
+        
+        const error = new Error(result.error || result.message || '同步失敗');
+        (error as any).details = result.details;
+        throw error;
       }
 
       if (result.success) {
-        // 背景同步成功，不顯示通知，只更新列表狀態
+        // 背景同步成功，靜默更新列表狀態（不顯示通知）
         // 優化：只更新列表中的該項目，而不是重新載入整個列表
         setReviews(prevReviews => 
           prevReviews.map(review => 
@@ -364,12 +490,52 @@ export default function ExpenseReviewsPage() {
             netsuite_synced_at: new Date().toISOString(),
           } : null);
         }
+        
+        // 背景更新資料庫（API 已經更新了，這裡是確保前端狀態一致）
+        // 注意：API 端點已經更新了資料庫，這裡主要是為了確保前端狀態同步
       } else {
         throw new Error(result.error || '同步失敗');
       }
     } catch (error: any) {
       console.error('同步到 NetSuite 錯誤:', error);
-      alert(`同步失敗: ${error.message || '未知錯誤'}\n\n請稍後再試，或檢查報支詳細資訊中的錯誤訊息。`);
+      const errorMessage = error.message || '未知錯誤';
+      
+      // 靜默更新失敗狀態（不顯示 alert，讓使用者從列表中看到狀態）
+      setReviews(prevReviews => 
+        prevReviews.map(review => 
+          review.id === reviewId 
+            ? {
+                ...review,
+                netsuite_sync_status: 'failed',
+                netsuite_sync_error: errorMessage,
+              }
+            : review
+        )
+      );
+      
+      // 如果當前選中的報支是這個，也更新它
+      if (selectedReview && selectedReview.id === reviewId) {
+        setSelectedReview(prev => prev ? {
+          ...prev,
+          netsuite_sync_status: 'failed',
+          netsuite_sync_error: errorMessage,
+        } : null);
+      }
+      
+      // 背景更新資料庫中的失敗狀態
+      supabase
+        .from('expense_reviews')
+        .update({
+          netsuite_sync_status: 'failed',
+          netsuite_sync_error: errorMessage,
+        })
+        .eq('id', reviewId)
+        .then(() => {
+          // 更新成功
+        })
+        .catch((dbError) => {
+          console.error('更新資料庫同步狀態失敗:', dbError);
+        });
     } finally {
       setSyncingIds(prev => {
         const newSet = new Set(prev);
@@ -431,55 +597,94 @@ export default function ExpenseReviewsPage() {
     }
   }, [signedUrls, supabase, extractFilePath]);
 
-  // 開啟詳細資訊對話框（優化：先顯示對話框，再在背景載入完整資料）
+  // 開啟詳細資訊對話框（使用與「我的報支」相同的 API，確保能顯示明細）
   const handleViewDetails = async (review: ExpenseReview) => {
-    // 先顯示對話框，然後在背景載入完整資料（提升使用者體驗）
     setIsDetailDialogOpen(true);
-    setIsEditing(false); // 重置編輯狀態
-    
-    // 先用列表資料初始化（快速顯示）
-    setSelectedReview(review);
-    setEditingData(review as any);
+    setIsEditing(false); // 重置編輯狀態（審核頁面不允許編輯）
+    setDetailLoading(true);
+    setSelectedReview(null);
 
-    // 如果有 attachment_url，在背景取得 Signed URL（不阻塞 UI）
-    if (review.attachment_url) {
-      getSignedUrl(review.attachment_url).then(signedUrl => {
-        if (signedUrl) {
-          setSignedUrls(prev => ({ ...prev, [review.attachment_url!]: signedUrl }));
-        }
-      }).catch(err => {
-        console.error('取得 Signed URL 錯誤:', err);
-      });
-    }
+    try {
+      // 使用與「我的報支」相同的 API，確保能取得完整的 expense_lines 資料
+      const response = await fetch(`/api/expense-reports/${review.id}`);
+      const result = await response.json();
 
-    // 如果列表資料中沒有 attachment_base64 或 ID 欄位，在背景載入完整資料
-    // 因為列表查詢時已經排除了這個大型欄位
-    if ((!review.attachment_base64 || !(review as any).employee_id) && review.id) {
-      // 在背景載入，不阻塞 UI
-      Promise.resolve(
-        supabase
-          .from('expense_reviews')
-          .select('*')
-          .eq('id', review.id)
-          .single()
-      )
-        .then(({ data: fullReview, error }) => {
-          if (!error && fullReview) {
-            setSelectedReview(fullReview as ExpenseReview);
-            // 初始化編輯資料（包含所有 ID 欄位）
-            setEditingData({
-              ...fullReview,
-              expense_date: fullReview.expense_date,
-              receipt_amount: fullReview.receipt_amount,
-              description: fullReview.description || '',
-              receipt_missing: fullReview.receipt_missing || false,
-            } as any);
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '取得報支詳細資料失敗');
+      }
+
+      const { header, lines } = result.data;
+
+      // 確保金額欄位是數字類型（處理資料庫可能返回字串的情況）
+      // 如果表頭的 receipt_amount 為 0 或空，從明細加總計算
+      let receiptAmount = typeof header.receipt_amount === 'string' 
+        ? parseFloat(header.receipt_amount) || 0 
+        : (header.receipt_amount || 0);
+      
+      // 如果表頭金額為 0，從明細加總
+      if (receiptAmount === 0 && lines && lines.length > 0) {
+        receiptAmount = lines.reduce((sum: number, line: any) => {
+          return sum + (parseFloat(line.gross_amt) || 0);
+        }, 0);
+      }
+
+      const processedHeader = {
+        ...header,
+        receipt_amount: receiptAmount,
+        total_amount: header.total_amount 
+          ? (typeof header.total_amount === 'string' 
+            ? parseFloat(header.total_amount) || null 
+            : header.total_amount)
+          : null,
+      };
+
+      // 組裝詳細資料（包含 expense_lines）
+      const detail: ExpenseReview = {
+        ...processedHeader,
+        // 將 lines 資料附加到 review 物件中（用於顯示明細）
+        expense_lines: (lines || []).map((line: any) => ({
+          id: line.id || `line-${Date.now()}-${Math.random()}`,
+          line_number: line.line_number || 0,
+          date: line.date || '',
+          category_name: line.category_name || null,
+          currency: line.currency || 'TWD',
+          amount: line.amount ? (typeof line.amount === 'number' ? line.amount : parseFloat(String(line.amount)) || 0) : 0,
+          gross_amt: line.gross_amt ? (typeof line.gross_amt === 'number' ? line.gross_amt : parseFloat(String(line.gross_amt)) || 0) : 0,
+          memo: line.memo || null,
+          department_name: line.department_name || null,
+          class_name: line.class_name || null,
+          location_name: line.location_name || null,
+          invoice_title: line.invoice_title || null,
+          invoice_number: line.invoice_number || null,
+          invoice_date: line.invoice_date || null,
+          seller_name: line.seller_name || null,
+          buyer_name: line.buyer_name || null,
+          total_amount: line.total_amount ? (typeof line.total_amount === 'number' ? line.total_amount : parseFloat(String(line.total_amount)) || null) : null,
+          ocr_success: line.ocr_success || false,
+          ocr_confidence: line.ocr_confidence || null,
+          attachment_url: line.attachment_url || null,
+          attachment_base64: line.attachment_base64 || null,
+        })),
+      } as any;
+
+      setSelectedReview(detail);
+      setEditingData(detail as any);
+
+      // 為所有有附件的 lines 取得 Signed URL
+      for (const line of (detail as any).expense_lines || []) {
+        if (line.attachment_url) {
+          const signedUrl = await getSignedUrl(line.attachment_url);
+          if (signedUrl) {
+            setSignedUrls(prev => ({ ...prev, [line.attachment_url!]: signedUrl }));
           }
-        })
-        .catch(err => {
-          console.error('載入完整報支資料錯誤:', err);
-          // 如果載入失敗，繼續使用列表資料
-        });
+        }
+      }
+    } catch (error: any) {
+      console.error('載入報支詳細資料錯誤:', error);
+      alert(`載入詳細資料失敗: ${error.message}`);
+      setIsDetailDialogOpen(false);
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -677,6 +882,9 @@ export default function ExpenseReviewsPage() {
       // 優化：立即更新列表中的該項目狀態，而不是重新載入整個列表
       const newStatus = reviewAction === 'approve' ? 'approved' : reviewAction === 'reject' ? 'rejected' : 'cancelled';
       
+      // 如果審核通過，立即更新狀態為「與 NetSuite 同步中」
+      const netsuiteSyncStatus = reviewAction === 'approve' ? 'syncing' : review.netsuite_sync_status;
+      
       // 更新列表中的該項目
       setReviews(prevReviews => {
         const updatedReviews = prevReviews.map(review => 
@@ -688,8 +896,8 @@ export default function ExpenseReviewsPage() {
                 reviewed_at: new Date().toISOString(),
                 review_notes: reviewNotes || null,
                 rejection_reason: reviewAction === 'reject' ? rejectionReason : null,
-                // 如果審核通過，初始化 NetSuite 同步狀態
-                netsuite_sync_status: reviewAction === 'approve' ? 'pending' : review.netsuite_sync_status,
+                // 如果審核通過，立即顯示「與 NetSuite 同步中」
+                netsuite_sync_status: netsuiteSyncStatus,
               }
             : review
         );
@@ -702,23 +910,33 @@ export default function ExpenseReviewsPage() {
         return updatedReviews;
       });
 
-      // 如果審核通過，自動同步到 NetSuite（背景執行，不顯示通知）
-      if (reviewAction === 'approve') {
-        // 背景同步到 NetSuite（不阻塞 UI，不顯示通知）
-        syncToNetSuite(selectedReview.id).catch((syncError) => {
-          console.error('自動同步失敗:', syncError);
-          // 同步失敗時也不顯示錯誤訊息，讓使用者可以手動重試
-          // 使用者可以從列表中的 NetSuite 同步狀態看到失敗狀態
-        });
-        // 只顯示審批通過的訊息，不提及同步（同步在背景執行）
-        alert('報支已審核通過');
-      } else {
-        alert(`報支已${reviewAction === 'reject' ? '拒絕' : '取消'}`);
-      }
-
+      // 保存 reviewAction 和 reviewId 到變數（因為我們會在關閉對話框後使用）
+      const currentReviewAction = reviewAction;
+      const currentReviewId = selectedReview.id;
+      
+      // 立即關閉對話框並顯示成功訊息（不等待 NetSuite 同步）
       setIsReviewDialogOpen(false);
       setSelectedReview(null);
       setReviewAction(null);
+      
+      if (currentReviewAction === 'approve') {
+        alert('單據已審核通過');
+      } else {
+        alert(`報支已${currentReviewAction === 'reject' ? '拒絕' : '取消'}`);
+      }
+
+      // 如果審核通過，背景異步同步到 NetSuite（不阻塞 UI）
+      if (currentReviewAction === 'approve') {
+        // 使用 setTimeout 確保在下一事件循環中執行，不阻塞 UI
+        setTimeout(() => {
+          // 直接調用 syncToNetSuite，讓 API 端點自己處理狀態更新
+          // API 端點會檢查並更新狀態為 'syncing'，避免重複同步
+          syncToNetSuite(currentReviewId).catch((syncError) => {
+            console.error('自動同步失敗:', syncError);
+            // 同步失敗時靜默處理，使用者可以從列表中的 NetSuite 同步狀態看到失敗狀態
+          });
+        }, 0);
+      }
       
       // 優化：如果當前有狀態篩選，且該項目不再符合篩選條件，已經從列表中移除了
       // 但如果用戶切換到對應的狀態標籤（例如從「待審核」切換到「已通過」），
@@ -727,7 +945,9 @@ export default function ExpenseReviewsPage() {
     } catch (error: any) {
       console.error('提交審核錯誤:', error);
       alert(`審核失敗: ${error.message}`);
+      // 錯誤時不關閉對話框，讓使用者可以重試
     } finally {
+      // 確保 submitting 狀態被重置（即使背景同步還在進行）
       setSubmitting(false);
     }
   };
@@ -743,13 +963,54 @@ export default function ExpenseReviewsPage() {
   };
 
   // 格式化金額
-  const formatAmount = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('zh-TW', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(amount);
+  const formatAmount = (amount: number | null | undefined | string, currency: string | null | undefined) => {
+    // 處理 null、undefined 或空值
+    if (amount === null || amount === undefined || amount === '') {
+      return '-';
+    }
+    
+    // 轉換為數字（處理字串類型的數字）
+    let numericAmount: number;
+    if (typeof amount === 'string') {
+      numericAmount = parseFloat(amount);
+      if (isNaN(numericAmount)) {
+        console.warn(`無法解析金額: ${amount}`);
+        return '-';
+      }
+    } else {
+      numericAmount = amount;
+    }
+    
+    // 檢查是否為有效數字
+    if (isNaN(numericAmount) || !isFinite(numericAmount)) {
+      console.warn(`無效的金額值: ${amount}`);
+      return '-';
+    }
+    
+    // 確保 currency 有有效值，如果沒有則使用預設值 'TWD'
+    const validCurrency = (currency && currency.trim() !== '') ? currency.trim() : 'TWD';
+    
+    // 如果 currency 不是有效的 ISO 4217 代碼，使用數字格式
+    try {
+      return new Intl.NumberFormat('zh-TW', {
+        style: 'currency',
+        currency: validCurrency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      }).format(numericAmount);
+    } catch (error) {
+      // 如果 currency 代碼無效，使用數字格式
+      console.warn(`無效的幣別代碼: ${validCurrency}，使用數字格式`);
+      try {
+        return new Intl.NumberFormat('zh-TW', {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        }).format(numericAmount) + ` ${validCurrency}`;
+      } catch (formatError) {
+        console.error('格式化金額失敗:', formatError, { amount, numericAmount, currency });
+        return `${numericAmount} ${validCurrency}`;
+      }
+    }
   };
 
   // 取得狀態標籤
@@ -758,7 +1019,7 @@ export default function ExpenseReviewsPage() {
       case 'pending':
         return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800">待審核</Badge>;
       case 'approved':
-        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">已通過</Badge>;
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">已核准</Badge>;
       case 'rejected':
         return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">已拒絕</Badge>;
       case 'cancelled':
@@ -782,7 +1043,7 @@ export default function ExpenseReviewsPage() {
       case 'success':
         return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">✅ 已同步</Badge>;
       case 'syncing':
-        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800">🔄 同步中</Badge>;
+        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800">🔄 與 NetSuite 同步中</Badge>;
       case 'failed':
         return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">❌ 同步失敗</Badge>;
       default:
@@ -821,7 +1082,7 @@ export default function ExpenseReviewsPage() {
           variant={statusFilter === 'approved' ? 'default' : 'outline'}
           onClick={() => setStatusFilter('approved')}
         >
-          已通過
+          已核准
         </Button>
         <Button
           variant={statusFilter === 'rejected' ? 'default' : 'outline'}
@@ -842,7 +1103,7 @@ export default function ExpenseReviewsPage() {
         <CardHeader>
           <CardTitle>報支列表</CardTitle>
           <CardDescription>
-            {statusFilter === 'all' ? '所有報支項目' : `狀態：${statusFilter === 'pending' ? '待審核' : statusFilter === 'approved' ? '已通過' : statusFilter === 'rejected' ? '已拒絕' : '已取消'}`}
+            {statusFilter === 'all' ? '所有報支項目' : `狀態：${statusFilter === 'pending' ? '待審核' : statusFilter === 'approved' ? '已核准' : statusFilter === 'rejected' ? '已拒絕' : '已取消'}`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -859,11 +1120,10 @@ export default function ExpenseReviewsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">查看</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報支日期</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">員工</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">費用類別</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">金額</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">發票號碼</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">OCR 狀態</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">審核狀態</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">建立時間</TableHead>
@@ -874,13 +1134,21 @@ export default function ExpenseReviewsPage() {
               <TableBody>
                 {reviews.map((review) => (
                   <TableRow key={review.id}>
+                    <TableCell className="text-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleViewDetails(review)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        查看
+                      </Button>
+                    </TableCell>
                     <TableCell className="text-center">{formatDate(review.expense_date)}</TableCell>
                     <TableCell className="text-center">{review.employee_name || '-'}</TableCell>
-                    <TableCell className="text-center">{review.expense_category_name || '-'}</TableCell>
                     <TableCell className="text-center font-medium">
                       {formatAmount(review.receipt_amount, review.receipt_currency)}
                     </TableCell>
-                    <TableCell className="text-center">{review.invoice_number || '-'}</TableCell>
                     <TableCell className="text-center">
                       {(() => {
                         // 判斷是否有執行過 OCR（檢查是否有 OCR 相關資料）
@@ -917,14 +1185,6 @@ export default function ExpenseReviewsPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewDetails(review)}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          查看
-                        </Button>
                         {review.review_status === 'pending' && (
                           <>
                             <Button
@@ -934,7 +1194,7 @@ export default function ExpenseReviewsPage() {
                               onClick={() => handleReview(review, 'approve')}
                             >
                               <CheckCircle2 className="h-4 w-4 mr-1" />
-                              通過
+                              核准
                             </Button>
                             <Button
                               variant="destructive"
@@ -976,50 +1236,15 @@ export default function ExpenseReviewsPage() {
               報支編號：{selectedReview?.id}
             </DialogDescription>
           </DialogHeader>
-          {selectedReview && editingData && (
+          {detailLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-primary mr-2" />
+              <span>載入詳細資料中...</span>
+            </div>
+          ) : selectedReview && editingData ? (
             <div className="space-y-6">
-              {/* 編輯模式切換按鈕 */}
-              <div className="flex justify-end gap-2">
-                {!isEditing ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsEditing(true)}
-                    disabled={selectedReview.review_status === 'approved' && selectedReview.netsuite_sync_status === 'success'}
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    編輯
-                  </Button>
-                ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsEditing(false);
-                        setEditingData(selectedReview as any); // 重置為原始資料
-                      }}
-                      disabled={saving}
-                    >
-                      取消
-                    </Button>
-                    <Button
-                      onClick={handleSaveEdit}
-                      disabled={saving}
-                    >
-                      {saving ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          保存中...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="h-4 w-4 mr-2" />
-                          保存
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                )}
-              </div>
+              {/* 編輯模式切換按鈕（審核頁面不允許編輯，隱藏編輯按鈕） */}
+              {/* 注意：審核頁面只允許查看，不允許編輯 */}
 
               {/* 基本資訊 */}
               <div className="grid grid-cols-2 gap-4">
@@ -1324,14 +1549,155 @@ export default function ExpenseReviewsPage() {
                 </div>
               )}
 
-              {/* 附件圖片 */}
-              {(selectedReview.attachment_url || selectedReview.attachment_base64) && (
+              {/* 報支明細（Expense Lines） */}
+              {(selectedReview as any).expense_lines && (selectedReview as any).expense_lines.length > 0 && (
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-4">報支明細</h3>
+                  <div className="space-y-6">
+                    {(selectedReview as any).expense_lines.map((line: any, index: number) => (
+                      <div key={line.id || `line-${index}`} className="border rounded-lg p-4 space-y-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-semibold">明細 #{line.line_number}</h4>
+                          <span className="text-sm font-medium text-primary">
+                            {formatAmount(line.gross_amt, line.currency)}
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">日期</Label>
+                            <p className="mt-1">{formatDate(line.date)}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">費用類別</Label>
+                            <p className="mt-1">{line.category_name || '-'}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">金額</Label>
+                            <p className="mt-1">{formatAmount(line.amount, line.currency)}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">總金額</Label>
+                            <p className="mt-1 font-medium">{formatAmount(line.gross_amt, line.currency)}</p>
+                          </div>
+                          {line.department_name && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">部門</Label>
+                              <p className="mt-1">{line.department_name}</p>
+                            </div>
+                          )}
+                          {line.class_name && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">類別</Label>
+                              <p className="mt-1">{line.class_name}</p>
+                            </div>
+                          )}
+                          {line.location_name && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">地點</Label>
+                              <p className="mt-1">{line.location_name}</p>
+                            </div>
+                          )}
+                          {line.memo && (
+                            <div className="col-span-2">
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">備註</Label>
+                              <p className="mt-1">{line.memo}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* OCR 發票資訊 */}
+                        {(line.invoice_number || line.invoice_title) && (
+                          <div className="border-t pt-4 mt-4">
+                            <h5 className="text-sm font-semibold mb-3">發票資訊</h5>
+                            <div className="grid grid-cols-2 gap-4">
+                              {line.invoice_number && (
+                                <div>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票號碼</Label>
+                                  <p className="mt-1">{line.invoice_number}</p>
+                                </div>
+                              )}
+                              {line.invoice_date && (
+                                <div>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票日期</Label>
+                                  <p className="mt-1">{formatDate(line.invoice_date)}</p>
+                                </div>
+                              )}
+                              {line.seller_name && (
+                                <div>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">賣方名稱</Label>
+                                  <p className="mt-1">{line.seller_name}</p>
+                                </div>
+                              )}
+                              {line.buyer_name && (
+                                <div>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">買方名稱</Label>
+                                  <p className="mt-1">{line.buyer_name}</p>
+                                </div>
+                              )}
+                              {line.total_amount && (
+                                <div>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">總計金額</Label>
+                                  <p className="mt-1 font-medium">{formatAmount(line.total_amount, line.currency)}</p>
+                                </div>
+                              )}
+                              {line.ocr_confidence && (
+                                <div>
+                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">OCR 信心度</Label>
+                                  <p className="mt-1">{line.ocr_confidence}%</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 附件預覽 */}
+                        {(line.attachment_url || line.attachment_base64) && (
+                          <div className="border-t pt-4 mt-4">
+                            <h5 className="text-sm font-semibold mb-3">附件</h5>
+                            <div className="flex justify-center">
+                              {line.attachment_url ? (
+                                <AttachmentPreview
+                                  attachmentUrl={line.attachment_url}
+                                  signedUrl={signedUrls[line.attachment_url]}
+                                  base64Fallback={line.attachment_base64}
+                                  onGetSignedUrl={getSignedUrl}
+                                />
+                              ) : line.attachment_base64 ? (
+                                isPDF(null, line.attachment_base64) ? (
+                                  <iframe
+                                    src={line.attachment_base64.startsWith('data:') 
+                                      ? line.attachment_base64 
+                                      : `data:application/pdf;base64,${line.attachment_base64}`}
+                                    className="w-full h-[600px] rounded-lg border border-gray-200 dark:border-gray-700"
+                                    title={`PDF 附件 - 明細 #${line.line_number}`}
+                                  />
+                                ) : (
+                                  <img
+                                    src={`data:image/jpeg;base64,${line.attachment_base64}`}
+                                    alt={`收據附件 - 明細 #${line.line_number}`}
+                                    className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700"
+                                  />
+                                )
+                              ) : null}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 附件預覽（表頭層級的附件，如果沒有明細層級的附件） */}
+              {(!(selectedReview as any).expense_lines || (selectedReview as any).expense_lines.length === 0) && 
+               (selectedReview.attachment_url || selectedReview.attachment_base64) && (
                 <div className="border-t pt-4">
                   <h3 className="text-lg font-semibold mb-4">附件</h3>
                   <div className="flex justify-center">
                     {selectedReview.attachment_url ? (
                       // 優先使用 Signed URL（Private bucket 需要）
-                      <AttachmentImage
+                      <AttachmentPreview
                         attachmentUrl={selectedReview.attachment_url}
                         signedUrl={signedUrls[selectedReview.attachment_url]}
                         base64Fallback={selectedReview.attachment_base64}
@@ -1339,11 +1705,21 @@ export default function ExpenseReviewsPage() {
                       />
                     ) : selectedReview.attachment_base64 ? (
                       // 備用 Base64
-                      <img
-                        src={`data:image/jpeg;base64,${selectedReview.attachment_base64}`}
-                        alt="收據附件"
-                        className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700"
-                      />
+                      isPDF(null, selectedReview.attachment_base64) ? (
+                        <iframe
+                          src={selectedReview.attachment_base64.startsWith('data:') 
+                            ? selectedReview.attachment_base64 
+                            : `data:application/pdf;base64,${selectedReview.attachment_base64}`}
+                          className="w-full h-[600px] rounded-lg border border-gray-200 dark:border-gray-700"
+                          title="PDF 附件"
+                        />
+                      ) : (
+                        <img
+                          src={`data:image/jpeg;base64,${selectedReview.attachment_base64}`}
+                          alt="收據附件"
+                          className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-gray-700"
+                        />
+                      )
                     ) : null}
                   </div>
                 </div>
@@ -1356,7 +1732,7 @@ export default function ExpenseReviewsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">審核狀態</Label>
-                      <p className="mt-1">{getStatusBadge(selectedReview.review_status)}</p>
+                      <div className="mt-1">{getStatusBadge(selectedReview.review_status)}</div>
                     </div>
                     {selectedReview.review_notes && (
                       <div className="col-span-2">
@@ -1381,17 +1757,17 @@ export default function ExpenseReviewsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">同步狀態</Label>
-                      <p className="mt-1">
+                      <div className="mt-1">
                         {selectedReview.netsuite_sync_status === 'success' ? (
                           <Badge className="bg-green-500">✅ 已同步</Badge>
                         ) : selectedReview.netsuite_sync_status === 'syncing' ? (
-                          <Badge className="bg-yellow-500">🔄 同步中</Badge>
+                          <Badge className="bg-yellow-500">🔄 與 NetSuite 同步中</Badge>
                         ) : selectedReview.netsuite_sync_status === 'failed' ? (
                           <Badge className="bg-red-500">❌ 同步失敗</Badge>
                         ) : (
                           <Badge className="bg-gray-500">⏳ 待同步</Badge>
                         )}
-                      </p>
+                      </div>
                     </div>
                     {selectedReview.netsuite_url && (
                       <div>
@@ -1451,7 +1827,7 @@ export default function ExpenseReviewsPage() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>
               關閉

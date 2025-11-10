@@ -130,10 +130,29 @@ export class NetSuiteAPIClient {
       try {
         const errorJson = JSON.parse(responseText);
         console.error(`[NetSuite API] JSON 錯誤:`, JSON.stringify(errorJson, null, 2));
-        const errorDetail = errorJson.error || errorJson.message || JSON.stringify(errorJson);
-        throw new Error(
+        
+        // 嘗試從 NetSuite 錯誤格式中提取詳細錯誤訊息
+        let errorDetail = errorJson.error || errorJson.message;
+        
+        // NetSuite 錯誤格式：{"o:errorDetails": [{"detail": "...", "o:errorCode": "..."}]}
+        if (errorJson['o:errorDetails'] && Array.isArray(errorJson['o:errorDetails']) && errorJson['o:errorDetails'].length > 0) {
+          const firstError = errorJson['o:errorDetails'][0];
+          if (firstError.detail) {
+            errorDetail = firstError.detail;
+          }
+        }
+        
+        // 如果還是沒有找到，使用整個 JSON
+        if (!errorDetail) {
+          errorDetail = JSON.stringify(errorJson);
+        }
+        
+        // 建立錯誤物件，包含原始回應以便後續處理
+        const error = new Error(
           `NetSuite API error (${response.status}): ${errorDetail}`
         );
+        (error as any).response = { data: errorJson, status: response.status };
+        throw error;
       } catch (parseError) {
         // 如果不是 JSON，直接使用文字（限制長度避免過長）
         console.error(`[NetSuite API] 非 JSON 錯誤回應:`, responseText);

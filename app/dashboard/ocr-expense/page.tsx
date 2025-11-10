@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 import { Receipt, Calendar, Upload, Save, X, Plus, ZoomIn, ZoomOut, RotateCcw, Image, Sparkles, Loader2, Copy, Trash2, Check, Eye, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -70,6 +70,7 @@ interface ExpenseReportLine {
     ocrProcessedAt: string;
     attachmentImageData?: string; // 附件圖片的 base64 數據（用於在 OCR 明細中顯示）
     attachmentFileType?: string; // 附件檔案類型（用於判斷是圖片還是 PDF）
+    attachmentUrl?: string; // 附件 URL（Supabase Storage URL）
   };
   customer: string; // 客戶
   projectTask: string; // 專案任務
@@ -82,6 +83,12 @@ interface ExpenseReportLine {
 
 export default function OCRExpensePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  // 編輯模式：從 URL 參數讀取 expense_review_id
+  const expenseReviewId = searchParams.get('id');
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
   
   // 獲取今天的日期（格式：YYYY-MM-DD）
   const getTodayDate = () => {
@@ -543,11 +550,27 @@ export default function OCRExpensePage() {
     setIsDragging(false);
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setZoom((prev) => Math.max(0.5, Math.min(3, prev + delta)));
-  };
+  // 預覽區域的 ref（用於添加 wheel 事件監聽器）
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  // 使用原生事件監聽器處理 wheel 事件（避免 passive event listener 警告）
+  useEffect(() => {
+    const previewElement = previewRef.current;
+    if (!previewElement) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      setZoom((prev) => Math.max(0.5, Math.min(3, prev + delta)));
+    };
+
+    // 添加事件監聽器，設置 passive: false 以允許 preventDefault
+    previewElement.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      previewElement.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
 
   // 清理 polling 和 timeout
   useEffect(() => {
@@ -663,6 +686,151 @@ export default function OCRExpensePage() {
 
     loadFormOptions();
   }, []);
+
+  // 載入報支資料（編輯模式）
+  useEffect(() => {
+    const loadExpenseReport = async () => {
+      if (!expenseReviewId) {
+        setIsEditMode(false);
+        return;
+      }
+
+      setIsEditMode(true);
+      setLoadingData(true);
+
+      try {
+        const response = await fetch(`/api/expense-reports/${expenseReviewId}`);
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || result.message || '載入報支資料失敗');
+        }
+
+        const { header, lines } = result.data;
+
+        // 載入表頭資料
+        setFormData(prev => ({
+          ...prev,
+          expenseDate: header.expense_date || getTodayDate(),
+          employee: header.employee_id || '',
+          subsidiary: header.subsidiary_id || '',
+          description: header.description || '',
+        }));
+
+        // 載入 lines 資料
+        if (lines && lines.length > 0) {
+          const loadedLines: ExpenseReportLine[] = lines.map((line: any) => {
+            // 格式化日期
+            const formatDate = (date: string | null) => {
+              if (!date) return '';
+              const d = new Date(date);
+              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            };
+
+            // 格式化金額
+            const formatAmount = (amount: number | null) => {
+              return amount ? amount.toString() : '';
+            };
+
+            // 處理 currency：優先使用 currency（符號），如果沒有則從 currency_id 查找
+            let currencyValue = line.currency || '';
+            if (!currencyValue && line.currency_id) {
+              // 如果 currency 為空但 currency_id 有值，從 formOptions 中查找
+              const currencyOption = formOptions.currencies.find(
+                (curr) => curr.id === line.currency_id
+              );
+              if (currencyOption) {
+                currencyValue = currencyOption.symbol || currencyOption.name || '';
+              } else {
+                // 如果找不到，使用 currency_id 作為 fallback
+                currencyValue = line.currency_id;
+              }
+            }
+
+            return {
+              id: line.id || `line-${Date.now()}-${Math.random()}`,
+              refNo: line.line_number || 0,
+              date: formatDate(line.date),
+              category: line.category_id || '',
+              foreignAmount: formatAmount(line.foreign_amount),
+              exchangeRate: line.exchange_rate ? line.exchange_rate.toString() : '1.00',
+              currency: currencyValue,
+              amount: formatAmount(line.amount),
+              taxCode: line.tax_code || '',
+              taxRate: line.tax_rate ? line.tax_rate.toString() : '',
+              taxAmt: formatAmount(line.tax_amt),
+              grossAmt: formatAmount(line.gross_amt),
+              memo: line.memo || '',
+              department: line.department_id || '',
+              class: line.class_id || '',
+              location: line.location_id || '',
+              customer: line.customer_id || '',
+              projectTask: line.project_task_id || '',
+              billable: line.billable || false,
+              ocrDetail: line.ocr_success ? '有OCR' : '無OCR',
+              ocrData: {
+                invoiceTitle: line.invoice_title || '',
+                invoicePeriod: line.invoice_period || '',
+                invoiceNumber: line.invoice_number || '',
+                invoiceDate: formatDate(line.invoice_date),
+                randomCode: line.random_code || '',
+                formatCode: line.format_code || '',
+                sellerName: line.seller_name || '',
+                sellerTaxId: line.seller_tax_id || '',
+                sellerAddress: line.seller_address || '',
+                buyerName: line.buyer_name || '',
+                buyerTaxId: line.buyer_tax_id || '',
+                buyerAddress: line.buyer_address || '',
+                untaxedAmount: formatAmount(line.untaxed_amount),
+                taxAmount: formatAmount(line.tax_amount),
+                totalAmount: formatAmount(line.total_amount),
+                ocrSuccess: line.ocr_success || false,
+                ocrConfidence: line.ocr_confidence ? parseFloat(line.ocr_confidence.toString()) : 0,
+                ocrDocumentType: line.ocr_document_type || '',
+                ocrErrors: line.ocr_errors || '',
+                ocrWarnings: line.ocr_warnings || '',
+                ocrErrorCount: line.ocr_error_count || 0,
+                ocrWarningCount: line.ocr_warning_count || 0,
+                ocrQualityGrade: line.ocr_quality_grade || '',
+                ocrFileName: line.ocr_file_name || '',
+                ocrFileId: line.ocr_file_id || '',
+                ocrWebViewLink: line.ocr_web_view_link || '',
+                ocrProcessedAt: line.ocr_processed_at || '',
+                // 附件處理：優先使用 attachment_url，如果沒有則使用 base64
+                // 注意：attachment_url 需要在前端載入時取得 Signed URL
+                attachmentImageData: line.attachment_base64 ? `data:image/jpeg;base64,${line.attachment_base64}` : undefined,
+                attachmentFileType: line.document_file_name?.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+                // 保存 attachment_url 以便後續使用
+                attachmentUrl: line.attachment_url || undefined,
+              },
+              attachFile: '',
+              receipt: '',
+              isEditing: false,
+            };
+          });
+
+          setExpenseLines(loadedLines);
+          
+          // 設定 nextRefNo
+          const maxRefNo = loadedLines.length > 0
+            ? Math.max(...loadedLines.map(line => line.refNo || 0))
+            : 0;
+          setNextRefNo(maxRefNo + 1);
+        }
+      } catch (error) {
+        console.error('載入報支資料錯誤:', error);
+        alert(`載入報支資料失敗: ${error instanceof Error ? error.message : '未知錯誤'}`);
+        // 載入失敗時，清除編輯模式
+        setIsEditMode(false);
+        router.push('/dashboard/ocr-expense');
+      } finally {
+        setLoadingData(false);
+      }
+    };
+
+    loadExpenseReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseReviewId]);
 
   // 取消 OCR 處理
   const handleCancelOCR = () => {
@@ -1652,89 +1820,270 @@ export default function OCRExpensePage() {
     e.preventDefault();
   };
 
-  const handleSubmit = async () => {
-    // 驗證必填欄位
+  // 提交報告（將狀態改為 pending）
+  const handleSubmitReport = async () => {
+    // 先儲存為草稿，然後提交
+    await handleSubmit('submit');
+  };
+
+  // 儲存為草稿或提交報告
+  const handleSubmit = async (action: 'save' | 'submit' = 'save') => {
+    // 驗證表頭必填欄位
     if (!formData.expenseDate || !formData.subsidiary || !formData.employee) {
       alert('請填寫所有必填欄位（報支日期、員工、公司別）');
       return;
     }
 
-    if (!formData.receiptAmount || parseFloat(formData.receiptAmount) <= 0) {
-      alert('請輸入有效的收據金額');
+    // 驗證是否有 expense lines
+    if (!expenseLines || expenseLines.length === 0) {
+      alert('請至少新增一筆報支明細');
       return;
+    }
+
+    // 驗證每個 line 的必填欄位
+    for (let i = 0; i < expenseLines.length; i++) {
+      const line = expenseLines[i];
+      if (!line.date || !line.category || !line.currency || !line.amount || !line.grossAmt) {
+        alert(`第 ${i + 1} 筆明細缺少必填欄位（日期、類別、幣別、金額、總金額）`);
+        return;
+      }
+      if (parseFloat(line.amount) <= 0 || parseFloat(line.grossAmt) <= 0) {
+        alert(`第 ${i + 1} 筆明細的金額或總金額必須大於 0`);
+        return;
+      }
     }
 
     setLoading(true);
 
     try {
-      // 上傳附件到 Supabase Storage（如果有）
-      let attachmentUrl = null;
-      let attachmentBase64 = null; // 備用，如果 Storage 上傳失敗
+      const supabase = (await import('@/utils/supabase/client')).createClient();
       
-      if (attachments.length > 0 && attachments[0]) {
-        const file = attachments[0];
-        const supabase = (await import('@/utils/supabase/client')).createClient();
-        
-        // 取得當前使用者 ID
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          throw new Error('無法取得使用者資訊，請重新登入');
-        }
-
-        // 產生檔案名稱：{user_id}/{timestamp}_{filename}
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const fileExt = file.name.split('.').pop() || 'jpg';
-        const fileName = `${user.id}/${timestamp}_${Date.now()}.${fileExt}`;
-
-        try {
-          // 上傳到 Supabase Storage
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('expense-receipts')
-            .upload(fileName, file, {
-              cacheControl: '3600',
-              upsert: false,
-            });
-
-          if (uploadError) {
-            console.warn('Storage 上傳失敗，使用 Base64 備用方案:', uploadError);
-            // 如果上傳失敗，使用 Base64 備用方案
-            if (previewImage && previewImage.startsWith('data:')) {
-              attachmentBase64 = previewImage.split(',')[1]; // 移除 data:image/jpeg;base64, 前綴
-            }
-          } else {
-            // 取得公開 URL（如果是 Private bucket，需要取得 Signed URL）
-            const { data: urlData } = supabase.storage
-              .from('expense-receipts')
-              .getPublicUrl(fileName);
-            
-            attachmentUrl = urlData.publicUrl;
-          }
-        } catch (storageError: any) {
-          console.warn('Storage 上傳錯誤，使用 Base64 備用方案:', storageError);
-          // 如果 Storage 不可用，使用 Base64 備用方案
-          if (previewImage && previewImage.startsWith('data:')) {
-            attachmentBase64 = previewImage.split(',')[1];
-          }
-        }
+      // 取得當前使用者 ID
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('無法取得使用者資訊，請重新登入');
       }
 
-      // 發送請求到 API
-      const response = await fetch('/api/create-expense-report', {
-        method: 'POST',
+      // 處理每個 line 的附件上傳（優化：並行上傳，但有超時限制）
+      const processedLines = await Promise.all(
+        expenseLines.map(async (line, index) => {
+          let attachmentUrl: string | null = null;
+          let attachmentBase64: string | null = null;
+          let documentFileName: string | null = null;
+          let documentFilePath: string | null = null;
+
+          // 處理附件：優先使用現有的 attachment_url（編輯模式），否則處理新的附件
+          if (line.ocrData?.attachmentUrl) {
+            // 編輯模式：如果已經有 attachment_url，直接使用
+            attachmentUrl = line.ocrData.attachmentUrl;
+            documentFileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
+          } else if (line.ocrData?.attachmentImageData) {
+            // 新建模式或新增的附件：處理上傳
+            const imageData = line.ocrData.attachmentImageData;
+            
+            // 如果有 ocrFileName，使用它作為檔案名稱
+            const fileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
+            documentFileName = fileName;
+
+            // 檢查 Base64 大小（如果超過 500KB，直接使用 Base64，不上傳）
+            const base64Size = imageData.length * 0.75; // Base64 大約是原始大小的 1.33 倍
+            const maxBase64Size = 500 * 1024; // 500KB
+
+            // 嘗試從 attachments 陣列中找到對應的檔案
+            const fileIndex = attachments.findIndex((file, idx) => {
+              // 嘗試匹配檔案名稱或索引
+              return file.name === fileName || 
+                     (line.ocrData.ocrFileId && file.name.includes(line.ocrData.ocrFileId));
+            });
+
+            if (fileIndex >= 0 && attachments[fileIndex] && base64Size < maxBase64Size) {
+              const file = attachments[fileIndex];
+              const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+              const fileExt = file.name.split('.').pop() || (line.ocrData.attachmentFileType?.includes('pdf') ? 'pdf' : 'jpg');
+              const storageFileName = `${user.id}/${timestamp}_${Date.now()}_${index + 1}.${fileExt}`;
+              documentFilePath = storageFileName;
+
+              try {
+                // 上傳到 Supabase Storage（設定 10 秒超時）
+                const uploadPromise = supabase.storage
+                  .from('expense-receipts')
+                  .upload(storageFileName, file, {
+                    cacheControl: '3600',
+                    upsert: false,
+                  });
+
+                const timeoutPromise = new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('上傳超時')), 10000)
+                );
+
+                const { data: uploadData, error: uploadError } = await Promise.race([
+                  uploadPromise,
+                  timeoutPromise,
+                ]) as any;
+
+                if (uploadError) {
+                  console.warn(`Line ${index + 1} Storage 上傳失敗，使用 Base64 備用方案:`, uploadError);
+                  // 如果上傳失敗，使用 Base64 備用方案
+                  if (imageData.startsWith('data:')) {
+                    attachmentBase64 = imageData.split(',')[1];
+                  } else {
+                    attachmentBase64 = imageData;
+                  }
+                } else {
+                  // 取得公開 URL
+                  const { data: urlData } = supabase.storage
+                    .from('expense-receipts')
+                    .getPublicUrl(storageFileName);
+                  
+                  attachmentUrl = urlData.publicUrl;
+                }
+              } catch (storageError: any) {
+                console.warn(`Line ${index + 1} Storage 上傳錯誤，使用 Base64 備用方案:`, storageError);
+                // 如果 Storage 不可用或超時，使用 Base64 備用方案
+                if (imageData.startsWith('data:')) {
+                  attachmentBase64 = imageData.split(',')[1];
+                } else {
+                  attachmentBase64 = imageData;
+                }
+              }
+            } else {
+              // 如果找不到對應的檔案或檔案太大，直接使用 Base64 數據
+              if (imageData.startsWith('data:')) {
+                attachmentBase64 = imageData.split(',')[1];
+              } else {
+                attachmentBase64 = imageData;
+              }
+            }
+          }
+
+          // 將幣別符號轉換成 UUID（如果 line.currency 是符號）
+          let currencyId = line.currency;
+          if (line.currency && !line.currency.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+            // 如果不是 UUID 格式，則視為符號，需要轉換
+            const currencyOption = formOptions.currencies.find(
+              (curr) => curr.symbol === line.currency || curr.name === line.currency
+            );
+            if (currencyOption) {
+              currencyId = currencyOption.id;
+            } else {
+              // 如果找不到對應的幣別，使用預設的 TWD
+              const defaultCurrency = formOptions.currencies.find((curr) => curr.symbol === 'TWD');
+              if (defaultCurrency) {
+                currencyId = defaultCurrency.id;
+              } else {
+                console.warn(`找不到幣別 ${line.currency}，使用第一個可用幣別`);
+                currencyId = formOptions.currencies[0]?.id || '';
+              }
+            }
+          }
+
+          // 組裝 line 資料
+          return {
+            refNo: line.refNo || index + 1,
+            date: line.date,
+            category: line.category,
+            currency: currencyId, // 使用轉換後的 UUID
+            foreignAmount: line.foreignAmount || '',
+            exchangeRate: line.exchangeRate || '1.00',
+            amount: line.amount,
+            taxCode: line.taxCode || '',
+            taxRate: line.taxRate || '',
+            taxAmt: line.taxAmt || '',
+            grossAmt: line.grossAmt,
+            memo: line.memo || '',
+            department: line.department || '',
+            class: line.class || '',
+            location: line.location || '',
+            customer: line.customer || '',
+            projectTask: line.projectTask || '',
+            billable: line.billable || false,
+            ocrData: line.ocrData || {
+              invoiceTitle: '',
+              invoicePeriod: '',
+              invoiceNumber: '',
+              invoiceDate: '',
+              randomCode: '',
+              formatCode: '',
+              sellerName: '',
+              sellerTaxId: '',
+              sellerAddress: '',
+              buyerName: '',
+              buyerTaxId: '',
+              buyerAddress: '',
+              untaxedAmount: '',
+              taxAmount: '',
+              totalAmount: '',
+              ocrSuccess: false,
+              ocrConfidence: 0,
+              ocrDocumentType: '',
+              ocrErrors: '',
+              ocrWarnings: '',
+              ocrErrorCount: 0,
+              ocrWarningCount: 0,
+              ocrQualityGrade: '',
+              ocrFileName: '',
+              ocrFileId: '',
+              ocrWebViewLink: '',
+              ocrProcessedAt: '',
+            },
+            attachment_url: attachmentUrl,
+            attachment_base64: attachmentBase64,
+            document_file_name: documentFileName,
+            document_file_path: documentFilePath,
+          };
+        })
+      );
+
+      // 組裝請求資料
+      const requestData = {
+        expenseReviewId: isEditMode ? expenseReviewId : undefined, // 編輯模式時帶上 ID
+        header: {
+          expenseDate: formData.expenseDate,
+          employee: formData.employee,
+          subsidiary: formData.subsidiary,
+          description: formData.description || '',
+        },
+        lines: processedLines,
+        reviewStatus: action === 'submit' ? 'pending' : 'draft', // 提交時為 pending，儲存時為 draft
+      };
+
+      // 除錯：檢查請求資料格式
+      console.log('發送請求資料:', {
+        header: requestData.header,
+        linesCount: requestData.lines.length,
+        firstLine: requestData.lines[0] ? {
+          refNo: requestData.lines[0].refNo,
+          date: requestData.lines[0].date,
+          category: requestData.lines[0].category,
+          currency: requestData.lines[0].currency,
+          amount: requestData.lines[0].amount,
+          grossAmt: requestData.lines[0].grossAmt,
+          hasOcrData: !!requestData.lines[0].ocrData,
+        } : null,
+      });
+
+      // 發送請求到 API（編輯模式使用 PUT，新建模式使用 POST）
+      const apiUrl = isEditMode && expenseReviewId
+        ? `/api/expense-reports/${expenseReviewId}`
+        : '/api/create-expense-report';
+      const method = isEditMode && expenseReviewId ? 'PUT' : 'POST';
+
+      const response = await fetch(apiUrl, {
+        method,
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...formData,
-          attachment_url: attachmentUrl,
-          attachment: attachmentBase64, // 備用 Base64（如果 Storage 上傳失敗）
-        }),
+        body: JSON.stringify(requestData),
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || result.message || '提交失敗');
+        // 顯示更詳細的錯誤訊息
+        const errorMessage = result.message || result.error || '提交失敗';
+        const errorDetails = result.details ? `\n\n詳細資訊: ${result.details}` : '';
+        console.error('API 錯誤回應:', result);
+        throw new Error(`${errorMessage}${errorDetails}`);
       }
 
       // 成功
@@ -1780,11 +2129,17 @@ export default function OCRExpensePage() {
           ocrWebViewLink: '',
           ocrProcessedAt: '',
         });
+        setExpenseLines([]);
         setAttachments([]);
         setPreviewImage(null);
+        setNextRefNo(1);
         
         // 顯示成功訊息
-        alert(`報支項目已成功提交！\n\n審核編號: ${result.review_id}\n狀態: 待審核\n\n財務人員將進行檢核，審核通過後會同步到 NetSuite。`);
+        if (action === 'submit') {
+          alert(`已提交費用報告，請到「我的報支」頁面檢視狀態。`);
+        } else {
+          alert(`已儲存為草稿，請到「我的報支」頁面檢視。若您要提交費用報告，也請到該確認頁面提交。`);
+        }
         
         // 導航到「我的報支」頁面
         router.push('/dashboard/ocr-expense/my-expenses');
@@ -1806,19 +2161,36 @@ export default function OCRExpensePage() {
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <Receipt className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-bold">建立報支項目</h1>
+          <h1 className="text-3xl font-bold">
+            {loadingData ? '載入中...' : (isEditMode ? '編輯報支項目' : '建立報支項目')}
+          </h1>
         </div>
         <p className="text-muted-foreground">
-          填寫報支項目資訊，可選擇使用 OCR 技術自動識別收據（選填）
+          {isEditMode 
+            ? '編輯報支項目資訊，修改後點擊「儲存並關閉」以更新資料'
+            : '填寫報支項目資訊，可選擇使用 OCR 技術自動識別收據（選填）'}
         </p>
       </div>
 
+      {/* 載入中狀態 */}
+      {loadingData && (
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-primary mr-2" />
+              <span>載入報支資料中...</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Main Form Card */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>報支項目資訊</CardTitle>
-        </CardHeader>
-        <CardContent>
+      {!loadingData && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>報支項目資訊</CardTitle>
+          </CardHeader>
+          <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left Column - Form Fields */}
             <div className="space-y-1">
@@ -2198,6 +2570,7 @@ export default function OCRExpensePage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* OCR 識別結果已移至表身的 OCR明細欄位中，每個 expense line 都有自己的 OCR 資料 */}
 
@@ -2209,9 +2582,9 @@ export default function OCRExpensePage() {
             <div className="space-y-2">
               <Label className="text-sm font-semibold">檔案預覽</Label>
               <div
+                ref={previewRef}
                 className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
                 style={{ minHeight: '490px', height: '490px' }}
-                onWheel={handleWheel}
               >
                 {previewImage ? (
                   <div className="relative w-full h-full" style={{ minHeight: '600px', height: '600px' }}>
@@ -2433,10 +2806,11 @@ export default function OCRExpensePage() {
       </Card>
 
       {/* Expense Report Lines (表身) - 參考 NetSuite 標準 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="m-0">費用明細</CardTitle>
+      {!loadingData && (
+        <Card className="mb-6">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="m-0">費用明細</CardTitle>
             <div className="flex items-center gap-4">
               <div className="flex items-center space-x-2">
                 <Checkbox
@@ -2492,7 +2866,7 @@ export default function OCRExpensePage() {
                 <TableBody>
                   {expenseLines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={useMultiCurrency ? 17 : 15} className="text-center text-gray-500 py-8 text-sm px-1">
+                      <TableCell colSpan={useMultiCurrency ? 17 : 15} className="text-left text-gray-500 py-8 text-sm px-1 align-middle">
                         尚無費用明細，請點擊「+ 新增行」新增
                       </TableCell>
                     </TableRow>
@@ -3454,26 +3828,33 @@ export default function OCRExpensePage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Action Buttons - Aligned with description textarea */}
-      <div className="flex justify-end gap-2" style={{ paddingLeft: '24px' }}>
-        <Button variant="outline" onClick={() => window.history.back()}>
-          <X className="h-4 w-4 mr-2" />
-          取消
-        </Button>
-        <Button variant="outline">
-          <Plus className="h-4 w-4 mr-2" />
-          建立另一個
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          disabled={loading}
-          className="bg-green-600 hover:bg-green-700"
-        >
-          <Save className="h-4 w-4 mr-2" />
-          {loading ? '儲存中...' : '儲存並關閉'}
-        </Button>
-      </div>
+      {!loadingData && (
+        <div className="flex justify-end gap-2" style={{ paddingLeft: '24px' }}>
+          <Button variant="outline" onClick={() => window.history.back()}>
+            <X className="h-4 w-4 mr-2" />
+            取消
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={loading}
+            variant="outline"
+          >
+            <Save className="h-4 w-4 mr-2" />
+            {loading ? '儲存中...' : '儲存為草稿'}
+          </Button>
+          <Button
+            onClick={handleSubmitReport}
+            disabled={loading}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {loading ? '提交中...' : '提交報告'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
