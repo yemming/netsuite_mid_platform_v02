@@ -523,19 +523,17 @@ export default function ExpenseReviewsPage() {
       }
       
       // 背景更新資料庫中的失敗狀態
-      supabase
-        .from('expense_reviews')
-        .update({
-          netsuite_sync_status: 'failed',
-          netsuite_sync_error: errorMessage,
-        })
-        .eq('id', reviewId)
-        .then(() => {
-          // 更新成功
-        })
-        .catch((dbError) => {
-          console.error('更新資料庫同步狀態失敗:', dbError);
-        });
+      try {
+        await supabase
+          .from('expense_reviews')
+          .update({
+            netsuite_sync_status: 'failed',
+            netsuite_sync_error: errorMessage,
+          })
+          .eq('id', reviewId);
+      } catch (dbError) {
+        console.error('更新資料庫同步狀態失敗:', dbError);
+      }
     } finally {
       setSyncingIds(prev => {
         const newSet = new Set(prev);
@@ -883,7 +881,7 @@ export default function ExpenseReviewsPage() {
       const newStatus = reviewAction === 'approve' ? 'approved' : reviewAction === 'reject' ? 'rejected' : 'cancelled';
       
       // 如果審核通過，立即更新狀態為「與 NetSuite 同步中」
-      const netsuiteSyncStatus = reviewAction === 'approve' ? 'syncing' : review.netsuite_sync_status;
+      const netsuiteSyncStatus = reviewAction === 'approve' ? 'syncing' : selectedReview.netsuite_sync_status;
       
       // 更新列表中的該項目
       setReviews(prevReviews => {

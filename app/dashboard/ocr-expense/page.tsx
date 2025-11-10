@@ -3838,7 +3838,7 @@ export default function OCRExpensePage() {
             取消
           </Button>
           <Button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit('save')}
             disabled={loading}
             variant="outline"
           >
