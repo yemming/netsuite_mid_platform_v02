@@ -1,63 +1,19 @@
 export default function NetSuiteLogo({ className = '' }: { className?: string }) {
   return (
-    <div className={`flex items-center gap-3 ${className}`}>
-      {/* NetSuite Icon - Two intertwined S shapes (infinity symbol style) */}
-      <svg
-        width="42"
-        height="42"
-        viewBox="0 0 42 42"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        className="flex-shrink-0"
-      >
-        {/* Bottom S - Blue */}
-        <path
-          d="M8 32C8 32 14 26 14 21C14 16 8 10 8 10C8 10 2 16 2 21C2 26 8 32 8 32Z"
-          fill="#0073C5"
+    <div className={`flex items-center ${className}`}>
+      {/* Infinity Symbol Logo from NAN_Logo.svg */}
+      <div className="flex-shrink-0" style={{ width: '96px', height: '96px' }}>
+        <img
+          src="/NAN_Logo.svg"
+          alt="Netsuite AI Nexus Logo"
+          className="w-full h-full object-contain"
+          style={{ width: '96px', height: '96px' }}
         />
-        <path
-          d="M8 32C8 32 14 26 14 21C14 16 8 10 8 10"
-          stroke="#0073C5"
-          strokeWidth="1.5"
-          fill="none"
-        />
-        
-        {/* Top S - Gold */}
-        <path
-          d="M34 10C34 10 28 16 28 21C28 26 34 32 34 32C34 32 40 26 40 21C40 16 34 10 34 10Z"
-          fill="#FDB515"
-        />
-        <path
-          d="M34 10C34 10 28 16 28 21C28 26 34 32 34 32"
-          stroke="#FDB515"
-          strokeWidth="1.5"
-          fill="none"
-        />
-        
-        {/* Intertwined connection - creates infinity effect */}
-        <path
-          d="M21 8C21 8 26 13 26 21C26 29 21 34 21 34"
-          stroke="#0073C5"
-          strokeWidth="2"
-          fill="none"
-          strokeLinecap="round"
-        />
-        <path
-          d="M21 34C21 34 16 29 16 21C16 13 21 8 21 8"
-          stroke="#FDB515"
-          strokeWidth="2"
-          fill="none"
-          strokeLinecap="round"
-        />
-        
-        {/* More detailed S curves for intertwined effect */}
-        <ellipse cx="14" cy="21" rx="6" ry="5" fill="#0073C5" opacity="0.3"/>
-        <ellipse cx="28" cy="21" rx="6" ry="5" fill="#FDB515" opacity="0.3"/>
-      </svg>
+      </div>
       
       {/* NetSuite Text - Only show text, no Oracle */}
-      <div className="flex flex-col leading-none">
-        <span className="text-2xl font-semibold text-gray-800 tracking-tight">
+      <div className="flex flex-col leading-none" style={{ marginLeft: '-4px' }}>
+        <span className="text-2xl font-semibold text-gray-800 tracking-tight text-left">
           Netsuite AI Nexus
         </span>
       </div>
