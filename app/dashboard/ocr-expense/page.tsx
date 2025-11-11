@@ -86,6 +86,39 @@ export default function OCRExpensePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
+  // 格式化金額顯示（加上千分位，TWD 不顯示小數點）
+  const formatAmountDisplay = (value: string | number | null | undefined, currency: string = 'TWD'): string => {
+    if (!value && value !== 0) return '';
+    
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(numValue)) return '';
+    
+    // 判斷是否為 TWD（不顯示小數點）
+    const isTWD = currency === 'TWD' || currency === 'NTD' || currency === '新台幣';
+    
+    if (isTWD) {
+      // TWD：不顯示小數點，只顯示整數部分
+      const intValue = Math.floor(numValue);
+      return intValue.toLocaleString('zh-TW', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
+    } else {
+      // 其他幣別：顯示小數點
+      return numValue.toLocaleString('zh-TW', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+  };
+  
+  // 從格式化字串中解析數字（移除千分位符號）
+  const parseAmountValue = (formattedValue: string): string => {
+    if (!formattedValue) return '';
+    // 移除所有千分位符號（逗號）和空格
+    return formattedValue.replace(/,/g, '').trim();
+  };
+  
   // 編輯模式：從 URL 參數讀取 expense_review_id
   const expenseReviewId = searchParams.get('id');
   const [isEditMode, setIsEditMode] = useState(false);
@@ -205,6 +238,8 @@ export default function OCRExpensePage() {
   
   // Expense Report Lines (表身)
   const [expenseLines, setExpenseLines] = useState<ExpenseReportLine[]>([]);
+  // 追蹤正在編輯的金額欄位（用於格式化顯示）
+  const [editingAmountFields, setEditingAmountFields] = useState<Set<string>>(new Set());
   const [nextRefNo, setNextRefNo] = useState(1);
   const [useMultiCurrency, setUseMultiCurrency] = useState(false);
 
@@ -1030,10 +1065,14 @@ export default function OCRExpensePage() {
   };
 
   // 處理 OCR 結果（單一附件，填入 formData）
+  // 支援新格式：陣列格式 [ { output: {...}, success: true, ... } ]
   const processOCRResult = (ocrResult: any) => {
+    // 如果 ocrResult 是陣列格式（新格式），提取第一個元素
+    const result = Array.isArray(ocrResult) && ocrResult.length > 0 ? ocrResult[0] : ocrResult;
+    
     // 處理 output 對象中的發票數據
-    if (ocrResult.output && typeof ocrResult.output === 'object') {
-      const ocrData = ocrResult.output;
+    if (result.output && typeof result.output === 'object') {
+      const ocrData = result.output;
       
       // 填充 OCR 欄位
       handleInputChange('invoiceTitle', ocrData['發票標題'] || '');
@@ -1059,26 +1098,29 @@ export default function OCRExpensePage() {
     }
 
     // 處理頂層元數據欄位
-    handleInputChange('ocrSuccess', ocrResult.success ?? false);
+    handleInputChange('ocrSuccess', result.success ?? false);
     // 統一 confidence 格式：如果 > 1 表示是百分比（如 85），轉換為小數（0.85）
-    const confidence = ocrResult.confidence ?? 0;
+    const confidence = result.confidence ?? 0;
     const normalizedConfidence = confidence > 1 ? confidence / 100 : confidence;
     handleInputChange('ocrConfidence', normalizedConfidence);
-    handleInputChange('ocrDocumentType', ocrResult.documentType || '');
-    handleInputChange('ocrErrors', ocrResult.errors || '');
-    handleInputChange('ocrWarnings', ocrResult.warnings || '');
-    handleInputChange('ocrErrorCount', ocrResult.errorCount ?? 0);
-    handleInputChange('ocrWarningCount', ocrResult.warningCount ?? 0);
-    handleInputChange('ocrQualityGrade', ocrResult.qualityGrade || '');
-    handleInputChange('ocrFileName', ocrResult.fileName || '');
-    handleInputChange('ocrFileId', ocrResult.fileId || '');
-    handleInputChange('ocrWebViewLink', ocrResult.webViewLink || '');
-    handleInputChange('ocrProcessedAt', ocrResult.processedAt || '');
+    handleInputChange('ocrDocumentType', result.documentType || '');
+    handleInputChange('ocrErrors', result.errors || '');
+    handleInputChange('ocrWarnings', result.warnings || '');
+    handleInputChange('ocrErrorCount', result.errorCount ?? 0);
+    handleInputChange('ocrWarningCount', result.warningCount ?? 0);
+    handleInputChange('ocrQualityGrade', result.qualityGrade || '');
+    handleInputChange('ocrFileName', result.fileName || '');
+    handleInputChange('ocrFileId', result.fileId || '');
+    handleInputChange('ocrWebViewLink', result.webViewLink || '');
+    handleInputChange('ocrProcessedAt', result.processedAt || '');
   };
 
   // 將 OCR 結果轉換為 expense line 的 ocrData 格式
+  // 支援新格式：陣列格式 [ { output: {...}, success: true, ... } ]
   const convertOCRResultToLineData = (ocrResult: any): ExpenseReportLine['ocrData'] => {
-    const ocrData = ocrResult.output || {};
+    // 如果 ocrResult 是陣列格式（新格式），提取第一個元素
+    const result = Array.isArray(ocrResult) && ocrResult.length > 0 ? ocrResult[0] : ocrResult;
+    const ocrData = result.output || {};
     
     return {
       invoiceTitle: ocrData['發票標題'] || '',
@@ -1096,22 +1138,22 @@ export default function OCRExpensePage() {
       untaxedAmount: ocrData['未稅銷售額'] || '',
       taxAmount: ocrData['稅額'] || '',
       totalAmount: ocrData['總計金額'] || '',
-      ocrSuccess: ocrResult.success ?? false,
+      ocrSuccess: result.success ?? false,
       // 統一 confidence 格式：如果 > 1 表示是百分比（如 85），轉換為小數（0.85）
       ocrConfidence: (() => {
-        const confidence = ocrResult.confidence ?? 0;
+        const confidence = result.confidence ?? 0;
         return confidence > 1 ? confidence / 100 : confidence;
       })(),
-      ocrDocumentType: ocrResult.documentType || '',
-      ocrErrors: ocrResult.errors || '',
-      ocrWarnings: ocrResult.warnings || '',
-      ocrErrorCount: ocrResult.errorCount ?? 0,
-      ocrWarningCount: ocrResult.warningCount ?? 0,
-      ocrQualityGrade: ocrResult.qualityGrade || '',
-      ocrFileName: ocrResult.fileName || '',
-      ocrFileId: ocrResult.fileId || '',
-      ocrWebViewLink: ocrResult.webViewLink || '',
-      ocrProcessedAt: ocrResult.processedAt || '',
+      ocrDocumentType: result.documentType || '',
+      ocrErrors: result.errors || '',
+      ocrWarnings: result.warnings || '',
+      ocrErrorCount: result.errorCount ?? 0,
+      ocrWarningCount: result.warningCount ?? 0,
+      ocrQualityGrade: result.qualityGrade || '',
+      ocrFileName: result.fileName || '',
+      ocrFileId: result.fileId || '',
+      ocrWebViewLink: result.webViewLink || '',
+      ocrProcessedAt: result.processedAt || '',
       expenseType: ocrData['費用類型'] || ocrData['費用類別'] || undefined, // OCR 辨識的費用類型
     };
   };
@@ -1143,12 +1185,16 @@ export default function OCRExpensePage() {
       }
     }
     
-    const ocrData = convertOCRResultToLineData(ocrResult);
-    const ocrOutput = ocrResult.output || {};
+    // 如果 ocrResult 是陣列格式（新格式），提取第一個元素
+    const result = Array.isArray(ocrResult) && ocrResult.length > 0 ? ocrResult[0] : ocrResult;
+    const ocrData = convertOCRResultToLineData(result);
+    const ocrOutput = result.output || {};
     const uniqueId = ocrData.ocrFileId || `fileIndex_${fileIndex}_${Date.now()}_${Math.random()}`;
     
     // 從 OCR 結果取得費用類型，並匹配到 expense category
     const expenseTypeFromOCR = ocrOutput['費用類型'] || ocrOutput['費用類別'] || '';
+    // 取得費用描述（新格式中的欄位）
+    const expenseDescription = ocrOutput['費用描述'] || '';
     let matchedCategoryId = '';
     
     if (expenseTypeFromOCR && formOptions.expenseCategories.length > 0) {
@@ -1247,6 +1293,45 @@ export default function OCRExpensePage() {
       }
     }
     
+    // 優化：從 OCR 結果取得發票日期（開立時間），優先使用 OCR 日期而非打單日期
+    let expenseLineDate = formData.expenseDate; // 預設使用打單日期
+    const ocrInvoiceDate = ocrOutput['開立時間'] || ocrData.invoiceDate || '';
+    if (ocrInvoiceDate) {
+      try {
+        // 嘗試解析 OCR 日期（可能是 "2019-11-07" 或 "2019/11/07" 等格式）
+        let parsedDate: Date | null = null;
+        
+        // 處理常見的日期格式
+        if (ocrInvoiceDate.includes('-')) {
+          // ISO 格式：2019-11-07
+          parsedDate = new Date(ocrInvoiceDate);
+        } else if (ocrInvoiceDate.includes('/')) {
+          // 斜線格式：2019/11/07
+          const parts = ocrInvoiceDate.split('/');
+          if (parts.length === 3) {
+            parsedDate = new Date(`${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`);
+          }
+        } else {
+          // 嘗試直接解析
+          parsedDate = new Date(ocrInvoiceDate);
+        }
+        
+        // 驗證日期是否有效
+        if (parsedDate && !isNaN(parsedDate.getTime())) {
+          // 轉換為 YYYY-MM-DD 格式
+          const year = parsedDate.getFullYear();
+          const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+          const day = String(parsedDate.getDate()).padStart(2, '0');
+          expenseLineDate = `${year}-${month}-${day}`;
+          console.log(`[createExpenseLineFromOCR] 使用 OCR 發票日期: ${expenseLineDate} (原始值: ${ocrInvoiceDate})`);
+        } else {
+          console.warn(`[createExpenseLineFromOCR] OCR 發票日期格式無法解析: ${ocrInvoiceDate}，使用打單日期`);
+        }
+      } catch (error) {
+        console.warn(`[createExpenseLineFromOCR] 解析 OCR 發票日期時發生錯誤: ${error}，使用打單日期`);
+      }
+    }
+    
     // 使用函數式更新確保 refNo 的正確順序
     setExpenseLines(prev => {
       // 找到第一個 isProcessing 為 true 的行並替換它
@@ -1259,7 +1344,7 @@ export default function OCRExpensePage() {
         const newLine: ExpenseReportLine = {
           id: `line-${uniqueId}`,
           refNo: processingRefNo, // 使用正在處理行的參考編號，保持連續性
-          date: formData.expenseDate,
+          date: expenseLineDate, // 優先使用 OCR 發票日期，如果沒有則使用打單日期
           category: matchedCategoryId, // 自動填入 OCR 辨識的費用類別
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
@@ -1269,7 +1354,7 @@ export default function OCRExpensePage() {
           taxRate: matchedTaxRate, // 如果有稅額，自動填入稅率
           taxAmt: taxAmount, // OCR 辨識的稅額
           grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
-          memo: formData.description || '',
+          memo: expenseDescription || formData.description || '', // 優先使用 OCR 辨識的費用描述
           department: '', // 部門在表身每一行中選擇
           class: '', // 類別在表身每一行中選擇
           location: '', // 地點在表身每一行中選擇
@@ -1769,58 +1854,58 @@ export default function OCRExpensePage() {
                 cleanup();
                 return;
               }
-            try {
-              // 再次檢查是否已經處理過（防止在輪詢過程中同步響應已經處理）
-              if (processedJobIdsRef.current.has(jobId) || isResolved) {
-                cleanup();
-                return;
-              }
-              
-              const pollResponse = await fetch(`/api/ocr-callback?jobId=${jobId}`);
-              
-              if (pollResponse.status === 404) {
-                // 結果尚未準備好，繼續輪詢
-                return;
-              }
-
-              if (!pollResponse.ok) {
-                throw new Error('查詢 OCR 結果失敗');
-              }
-
-              const pollResult = await pollResponse.json();
-
-              if (pollResult.status === 'completed' && pollResult.data) {
-                // 再次檢查是否已經處理過（防止競態條件）
+              try {
+                // 再次檢查是否已經處理過（防止在輪詢過程中同步響應已經處理）
                 if (processedJobIdsRef.current.has(jobId) || isResolved) {
                   cleanup();
                   return;
                 }
                 
-                // 立即標記為已處理
-                processedJobIdsRef.current.add(jobId);
+                const pollResponse = await fetch(`/api/ocr-callback?jobId=${jobId}`);
                 
-                // 處理結果
-                let ocrResult: any = null;
-                if (Array.isArray(pollResult.data) && pollResult.data.length > 0) {
-                  ocrResult = pollResult.data[0];
-                } else if (pollResult.data && pollResult.data.output) {
-                  ocrResult = pollResult.data;
-                } else if (typeof pollResult.data === 'object' && pollResult.data !== null) {
-                  ocrResult = pollResult.data;
+                if (pollResponse.status === 404) {
+                  // 結果尚未準備好，繼續輪詢
+                  return;
                 }
 
-                if (ocrResult) {
-                  handleOCRResult(ocrResult);
+                if (!pollResponse.ok) {
+                  throw new Error('查詢 OCR 結果失敗');
                 }
-              } else if (pollResult.status === 'error') {
-                // 標記為已處理（即使是錯誤）
-                processedJobIdsRef.current.add(jobId);
-                handleError(pollResult.error || '未知錯誤');
+
+                const pollResult = await pollResponse.json();
+
+                if (pollResult.status === 'completed' && pollResult.data) {
+                  // 再次檢查是否已經處理過（防止競態條件）
+                  if (processedJobIdsRef.current.has(jobId) || isResolved) {
+                    cleanup();
+                    return;
+                  }
+                  
+                  // 立即標記為已處理
+                  processedJobIdsRef.current.add(jobId);
+                  
+                  // 處理結果
+                  let ocrResult: any = null;
+                  if (Array.isArray(pollResult.data) && pollResult.data.length > 0) {
+                    ocrResult = pollResult.data[0];
+                  } else if (pollResult.data && pollResult.data.output) {
+                    ocrResult = pollResult.data;
+                  } else if (typeof pollResult.data === 'object' && pollResult.data !== null) {
+                    ocrResult = pollResult.data;
+                  }
+
+                  if (ocrResult) {
+                    handleOCRResult(ocrResult);
+                  }
+                } else if (pollResult.status === 'error') {
+                  // 標記為已處理（即使是錯誤）
+                  processedJobIdsRef.current.add(jobId);
+                  handleError(pollResult.error || '未知錯誤');
+                }
+              } catch (error) {
+                console.error(`輪詢附件 ${attachmentNumber} OCR 結果錯誤:`, error);
+                // 繼續輪詢，不中斷
               }
-            } catch (error) {
-              console.error(`輪詢附件 ${attachmentNumber} OCR 結果錯誤:`, error);
-              // 繼續輪詢，不中斷
-            }
             }, 2000);
 
             // 設置超時（5 分鐘後停止輪詢）
@@ -2150,63 +2235,69 @@ export default function OCRExpensePage() {
                      (line.ocrData.ocrFileId && file.name.includes(line.ocrData.ocrFileId));
             });
 
-            if (fileIndex >= 0 && attachments[fileIndex] && base64Size < maxBase64Size) {
+            // 優化：優先嘗試上傳，只有在檔案存在且大小合理時才上傳
+            if (fileIndex >= 0 && attachments[fileIndex]) {
               const file = attachments[fileIndex];
-              const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-              const fileExt = file.name.split('.').pop() || (line.ocrData.attachmentFileType?.includes('pdf') ? 'pdf' : 'jpg');
-              const storageFileName = `${user.id}/${timestamp}_${Date.now()}_${index + 1}.${fileExt}`;
-              documentFilePath = storageFileName;
+              
+              // 檢查檔案大小（限制為 2MB，避免上傳過大檔案）
+              const maxFileSize = 2 * 1024 * 1024; // 2MB
+              if (file.size > maxFileSize) {
+                console.warn(`Line ${index + 1} 檔案太大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，跳過上傳`);
+                // 檔案太大，不傳送 Base64（避免請求過大）
+                documentFileName = fileName;
+              } else {
+                // 檔案大小合理，嘗試上傳
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const fileExt = file.name.split('.').pop() || (line.ocrData.attachmentFileType?.includes('pdf') ? 'pdf' : 'jpg');
+                const storageFileName = `${user.id}/${timestamp}_${Date.now()}_${index + 1}.${fileExt}`;
+                documentFilePath = storageFileName;
 
-              try {
-                // 上傳到 Supabase Storage（設定 10 秒超時）
-                const uploadPromise = supabase.storage
-                  .from('expense-receipts')
-                  .upload(storageFileName, file, {
-                    cacheControl: '3600',
-                    upsert: false,
-                  });
-
-                const timeoutPromise = new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('上傳超時')), 10000)
-                );
-
-                const { data: uploadData, error: uploadError } = await Promise.race([
-                  uploadPromise,
-                  timeoutPromise,
-                ]) as any;
-
-                if (uploadError) {
-                  console.warn(`Line ${index + 1} Storage 上傳失敗，使用 Base64 備用方案:`, uploadError);
-                  // 如果上傳失敗，使用 Base64 備用方案
-                  if (imageData.startsWith('data:')) {
-                    attachmentBase64 = imageData.split(',')[1];
-                  } else {
-                    attachmentBase64 = imageData;
-                  }
-                } else {
-                  // 取得公開 URL
-                  const { data: urlData } = supabase.storage
+                try {
+                  // 優化：減少超時時間到 5 秒，提升響應速度
+                  // 上傳到 Supabase Storage（設定 5 秒超時）
+                  const uploadPromise = supabase.storage
                     .from('expense-receipts')
-                    .getPublicUrl(storageFileName);
-                  
-                  attachmentUrl = urlData.publicUrl;
-                }
-              } catch (storageError: any) {
-                console.warn(`Line ${index + 1} Storage 上傳錯誤，使用 Base64 備用方案:`, storageError);
-                // 如果 Storage 不可用或超時，使用 Base64 備用方案
-                if (imageData.startsWith('data:')) {
-                  attachmentBase64 = imageData.split(',')[1];
-                } else {
-                  attachmentBase64 = imageData;
+                    .upload(storageFileName, file, {
+                      cacheControl: '3600',
+                      upsert: false,
+                    });
+
+                  const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('上傳超時')), 5000)
+                  );
+
+                  const { data: uploadData, error: uploadError } = await Promise.race([
+                    uploadPromise,
+                    timeoutPromise,
+                  ]) as any;
+
+                  if (uploadError) {
+                    console.warn(`Line ${index + 1} Storage 上傳失敗，跳過附件保存:`, uploadError);
+                    // 優化：上傳失敗時，不傳送 Base64（避免請求過大）
+                    // 只保存檔案名稱，讓用戶稍後可以重新上傳
+                    documentFileName = fileName;
+                    // 不設置 attachmentBase64，減少請求大小
+                  } else {
+                    // 取得公開 URL
+                    const { data: urlData } = supabase.storage
+                      .from('expense-receipts')
+                      .getPublicUrl(storageFileName);
+                    
+                    attachmentUrl = urlData.publicUrl;
+                  }
+                } catch (storageError: any) {
+                  console.warn(`Line ${index + 1} Storage 上傳錯誤，跳過附件保存:`, storageError);
+                  // 優化：上傳錯誤時，不傳送 Base64（避免請求過大）
+                  // 只保存檔案名稱
+                  documentFileName = fileName;
+                  // 不設置 attachmentBase64，減少請求大小
                 }
               }
             } else {
-              // 如果找不到對應的檔案或檔案太大，直接使用 Base64 數據
-              if (imageData.startsWith('data:')) {
-                attachmentBase64 = imageData.split(',')[1];
-              } else {
-                attachmentBase64 = imageData;
-              }
+              // 優化：如果找不到對應的檔案，不傳送 Base64（避免請求過大）
+              // 只保存檔案名稱
+              documentFileName = fileName;
+              // 不設置 attachmentBase64，減少請求大小
             }
           }
 
@@ -2578,11 +2669,10 @@ export default function OCRExpensePage() {
                   </Select>
                   <Input
                     id="receiptAmount"
-                    type="number"
-                    step="0.01"
-                    value={formData.receiptAmount}
-                    placeholder="0.00"
-                    className="flex-1 bg-gray-100 dark:bg-gray-800 cursor-not-allowed"
+                    type="text"
+                    value={formatAmountDisplay(formData.receiptAmount, formData.receiptCurrency || 'TWD')}
+                    placeholder="0"
+                    className="flex-1 bg-gray-100 dark:bg-gray-800 cursor-not-allowed text-right font-bold"
                     required
                     readOnly={true}
                     title="費用報告總金額會自動加總所有行的總金額"
@@ -2608,15 +2698,39 @@ export default function OCRExpensePage() {
 
             {/* Right Column - Preview */}
             <div className="space-y-4 flex flex-col">
-              {/* Attachments */}
-              <div className="space-y-2 flex flex-col">
+              {/* Attachments - 已移至檔案預覽區域左側 */}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      )}
+
+      {/* OCR 識別結果已移至表身的 OCR明細欄位中，每個 expense line 都有自己的 OCR 資料 */}
+
+      {/* File Upload and Preview - Side by Side Layout */}
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <div className="space-y-4">
+            {/* 標題行 */}
+            <div className="flex items-center gap-4">
+              <div className="w-1/3">
                 <Label className="text-sm font-semibold">附件（選填）</Label>
-                <div
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col overflow-hidden"
-                  style={{ height: '310px' }}
-                >
+              </div>
+              <div className="w-2/3">
+                <Label className="text-sm font-semibold">檔案預覽</Label>
+              </div>
+            </div>
+            
+            {/* 內容區域 */}
+            <div className="flex gap-4">
+              {/* 左側：上傳區域 (1/3 寬度) */}
+              <div className="w-1/3 space-y-2 flex flex-col">
+              <div
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col overflow-hidden"
+                style={{ height: '310px' }}
+              >
                   <input
                     type="file"
                     id="file-upload"
@@ -2625,12 +2739,12 @@ export default function OCRExpensePage() {
                     multiple
                     className="hidden"
                   />
-                  <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-4 flex-shrink-0">
+                  <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center gap-2 flex-shrink-0">
                     {/* Decorative Icon - Leaves with Paperclip */}
-                    <div className="flex-shrink-0 ml-2">
+                    <div className="flex-shrink-0">
                       <svg
-                        width="120"
-                        height="120"
+                        width="80"
+                        height="80"
                         viewBox="0 0 64 64"
                         fill="none"
                         xmlns="http://www.w3.org/2000/svg"
@@ -2741,14 +2855,14 @@ export default function OCRExpensePage() {
                     </div>
                     
                     {/* Text Content */}
-                    <div className="flex-1 text-left">
-                      <p className="text-lg text-gray-600 dark:text-gray-400 mb-1 font-medium">
+                    <div className="flex-1 text-center">
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 font-medium">
                         將發票圖片拖曳到此處或點擊上傳
                       </p>
-                      <p className="text-lg text-gray-500 dark:text-gray-500">
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
                         支援PDF或圖片格式上傳，可上傳多個附件。
                       </p>
-                      <p className="text-lg text-gray-500 dark:text-gray-500 mt-1">
+                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                         單據請以單張掃描，勿上傳多張收據在一個圖片中，以免影響辨識效果。
                       </p>
                     </div>
@@ -2821,21 +2935,11 @@ export default function OCRExpensePage() {
                   )}
                 </div>
               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      )}
-
-      {/* OCR 識別結果已移至表身的 OCR明細欄位中，每個 expense line 都有自己的 OCR 資料 */}
-
-      {/* File Preview and OCR - Full Width Horizontal Section */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            {/* File Preview */}
-            <div className="space-y-2">
-              <Label className="text-sm font-semibold">檔案預覽</Label>
+            
+            {/* 右側：檔案預覽區域 (2/3 寬度) */}
+            <div className="w-2/3 space-y-4">
+              {/* File Preview */}
+              <div className="space-y-2">
               <div
                 ref={previewRef}
                 className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
@@ -2961,10 +3065,10 @@ export default function OCRExpensePage() {
                   </div>
                 )}
               </div>
-            </div>
-            
-            {/* AI OCR Button */}
-            <Button
+              </div>
+              
+              {/* AI OCR Button */}
+              <Button
               onClick={handleAIOCR}
               disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
               className="w-full text-white"
@@ -2995,9 +3099,9 @@ export default function OCRExpensePage() {
               )}
             </Button>
             
-            {/* OCR 處理中的載入提示 */}
-            {(ocrProcessing || multiOcrTasks.size > 0) && (
-              <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              {/* OCR 處理中的載入提示 */}
+              {(ocrProcessing || multiOcrTasks.size > 0) && (
+                <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -3056,6 +3160,8 @@ export default function OCRExpensePage() {
                 )}
               </div>
             )}
+            </div>
+          </div>
           </div>
         </CardContent>
       </Card>
@@ -3770,16 +3876,32 @@ export default function OCRExpensePage() {
                               <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                             ) : (
                               <Input
-                                type="number"
-                                step="0.01"
-                                value={line.foreignAmount}
+                                type="text"
+                                value={(() => {
+                                  const fieldKey = `foreignAmount-${index}`;
+                                  const isEditing = editingAmountFields.has(fieldKey);
+                                  if (isEditing || !line.foreignAmount || parseFloat(line.foreignAmount) === 0) {
+                                    return line.foreignAmount || '';
+                                  }
+                                  // 外幣金額使用外幣幣別格式化
+                                  const currency = line.currency || formData.receiptCurrency || 'TWD';
+                                  const actualCurrency = formOptions.currencies.find(c => c.symbol === currency || c.name === currency)?.symbol || currency;
+                                  return formatAmountDisplay(line.foreignAmount, actualCurrency);
+                                })()}
                                 onChange={(e) => {
+                                  // 只允許輸入數字和小數點
+                                  const inputValue = e.target.value.replace(/[^\d.]/g, '');
+                                  const parts = inputValue.split('.');
+                                  const cleanedValue = parts.length > 2 
+                                    ? parts[0] + '.' + parts.slice(1).join('')
+                                    : inputValue;
+                                  
                                   const newLines = [...expenseLines];
-                                  newLines[index].foreignAmount = e.target.value;
+                                  newLines[index].foreignAmount = cleanedValue;
                                   
                                   // 如果使用多幣別，自動計算金額和總金額
                                   if (useMultiCurrency) {
-                                    const foreignAmount = parseFloat(e.target.value) || 0;
+                                    const foreignAmount = parseFloat(cleanedValue) || 0;
                                     const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
                                     const calculatedAmount = foreignAmount * exchangeRate;
                                     const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
@@ -3792,8 +3914,36 @@ export default function OCRExpensePage() {
                                   
                                   setExpenseLines(newLines);
                                 }}
-                                className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                placeholder="0.00"
+                                onFocus={(e) => {
+                                  updatePreviewForLine(line);
+                                  const fieldKey = `foreignAmount-${index}`;
+                                  setEditingAmountFields(prev => new Set(prev).add(fieldKey));
+                                  e.target.value = line.foreignAmount || '';
+                                }}
+                                onBlur={(e) => {
+                                  const fieldKey = `foreignAmount-${index}`;
+                                  setEditingAmountFields(prev => {
+                                    const newSet = new Set(prev);
+                                    newSet.delete(fieldKey);
+                                    return newSet;
+                                  });
+                                  const cleanedValue = parseAmountValue(e.target.value);
+                                  if (cleanedValue !== line.foreignAmount) {
+                                    const newLines = [...expenseLines];
+                                    newLines[index].foreignAmount = cleanedValue;
+                                    if (useMultiCurrency) {
+                                      const foreignAmount = parseFloat(cleanedValue) || 0;
+                                      const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                      const calculatedAmount = foreignAmount * exchangeRate;
+                                      const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
+                                      newLines[index].amount = calculatedAmount.toFixed(2);
+                                      newLines[index].grossAmt = (calculatedAmount + taxAmt).toFixed(2);
+                                    }
+                                    setExpenseLines(newLines);
+                                  }
+                                }}
+                                className="h-7 text-sm text-right"
+                                placeholder="0"
                               />
                             )}
                           </TableCell>
@@ -3856,7 +4006,7 @@ export default function OCRExpensePage() {
                                   
                                   setExpenseLines(newLines);
                                 }}
-                                className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                className="h-7 text-sm text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 placeholder="1.00"
                               />
                             )}
@@ -3867,28 +4017,71 @@ export default function OCRExpensePage() {
                             <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           ) : (
                             <Input
-                              type="number"
-                              step="0.01"
+                              type="text"
                               data-field="amount"
-                              value={line.amount && parseFloat(line.amount) !== 0 ? line.amount : ''}
+                              value={(() => {
+                                const fieldKey = `amount-${index}`;
+                                const isEditing = editingAmountFields.has(fieldKey);
+                                if (isEditing || !line.amount || parseFloat(line.amount) === 0) {
+                                  return line.amount || '';
+                                }
+                                // 取得幣別（從 line.currency 或 formData.receiptCurrency）
+                                const currency = line.currency || formData.receiptCurrency || 'TWD';
+                                // 如果是符號（如 'TWD'），需要轉換為實際幣別
+                                const actualCurrency = formOptions.currencies.find(c => c.symbol === currency || c.name === currency)?.symbol || currency;
+                                return formatAmountDisplay(line.amount, actualCurrency);
+                              })()}
                               readOnly={useMultiCurrency} // 使用多幣別時，金額欄位為唯讀（由外幣金額 × 匯率自動計算）
-                            onChange={(e) => {
-                              // 如果使用多幣別，不允許手動編輯金額
-                              if (useMultiCurrency) {
-                                return;
-                              }
-                              
-                              const newLines = [...expenseLines];
-                              newLines[index].amount = e.target.value;
-                              // 自動計算 Gross Amt
-                              const amount = parseFloat(e.target.value) || 0;
-                              const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
-                              newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
-                              setExpenseLines(newLines);
-                            }}
-                            onFocus={() => updatePreviewForLine(line)}
-                            className={`h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${useMultiCurrency ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''}`}
-                            placeholder="0.00"
+                              onChange={(e) => {
+                                // 如果使用多幣別，不允許手動編輯金額
+                                if (useMultiCurrency) {
+                                  return;
+                                }
+                                
+                                // 只允許輸入數字和小數點
+                                const inputValue = e.target.value.replace(/[^\d.]/g, '');
+                                // 確保只有一個小數點
+                                const parts = inputValue.split('.');
+                                const cleanedValue = parts.length > 2 
+                                  ? parts[0] + '.' + parts.slice(1).join('')
+                                  : inputValue;
+                                
+                                const newLines = [...expenseLines];
+                                newLines[index].amount = cleanedValue;
+                                // 自動計算 Gross Amt
+                                const amount = parseFloat(cleanedValue) || 0;
+                                const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
+                                newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
+                                setExpenseLines(newLines);
+                              }}
+                              onFocus={(e) => {
+                                updatePreviewForLine(line);
+                                const fieldKey = `amount-${index}`;
+                                setEditingAmountFields(prev => new Set(prev).add(fieldKey));
+                                // 顯示純數字以便編輯
+                                const rawValue = line.amount || '';
+                                e.target.value = rawValue;
+                              }}
+                              onBlur={(e) => {
+                                const fieldKey = `amount-${index}`;
+                                setEditingAmountFields(prev => {
+                                  const newSet = new Set(prev);
+                                  newSet.delete(fieldKey);
+                                  return newSet;
+                                });
+                                // 確保值正確保存（移除千分位符號）
+                                const cleanedValue = parseAmountValue(e.target.value);
+                                if (cleanedValue !== line.amount) {
+                                  const newLines = [...expenseLines];
+                                  newLines[index].amount = cleanedValue;
+                                  const amount = parseFloat(cleanedValue) || 0;
+                                  const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
+                                  newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
+                                  setExpenseLines(newLines);
+                                }
+                              }}
+                              className={`h-7 text-sm text-right ${useMultiCurrency ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''}`}
+                              placeholder="0"
                             />
                           )}
                         </TableCell>
@@ -3969,34 +4162,22 @@ export default function OCRExpensePage() {
                           {line.isProcessing ? (
                             <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           ) : (
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={line.taxRate}
-                            onChange={(e) => {
-                              const newLines = [...expenseLines];
-                              newLines[index].taxRate = e.target.value;
-                              // 自動計算稅額
-                              // 如果使用多幣別，需要先確保金額是從外幣金額 × 匯率計算出來的
-                              let amount = parseFloat(newLines[index].amount) || 0;
-                              if (useMultiCurrency) {
-                                // 重新計算金額（確保是最新的）
-                                const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
-                                const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
-                                amount = foreignAmount * exchangeRate;
-                                newLines[index].amount = amount.toFixed(2);
-                              }
-                              const rate = parseFloat(e.target.value) || 0;
-                              newLines[index].taxAmt = (amount * rate / 100).toFixed(2);
-                              // 重新計算 Gross Amt
-                              const taxAmt = parseFloat(newLines[index].taxAmt) || 0;
-                              newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
-                              setExpenseLines(newLines);
-                            }}
-                            onFocus={() => updatePreviewForLine(line)}
-                            className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            placeholder="0.0%"
-                          />
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.taxRate}
+                                readOnly
+                                className="h-7 text-sm pr-6 text-right bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="0.0"
+                                title="稅率由稅碼自動設定，無法手動修改"
+                              />
+                              {line.taxRate && (
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-500 dark:text-gray-400 pointer-events-none">
+                                  %
+                                </span>
+                              )}
+                            </div>
                           )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
@@ -4004,30 +4185,71 @@ export default function OCRExpensePage() {
                             <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           ) : (
                             <Input
-                              type="number"
-                              step="0.01"
-                              value={line.taxAmt}
-                            onChange={(e) => {
-                              const newLines = [...expenseLines];
-                              newLines[index].taxAmt = e.target.value;
-                              // 重新計算 Gross Amt
-                              // 如果使用多幣別，需要先確保金額是從外幣金額 × 匯率計算出來的
-                              let amount = parseFloat(newLines[index].amount) || 0;
-                              if (useMultiCurrency) {
-                                // 重新計算金額（確保是最新的）
-                                const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
-                                const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
-                                amount = foreignAmount * exchangeRate;
-                                newLines[index].amount = amount.toFixed(2);
-                              }
-                              const taxAmt = parseFloat(e.target.value) || 0;
-                              newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
-                              setExpenseLines(newLines);
-                            }}
-                            onFocus={() => updatePreviewForLine(line)}
-                            className="h-7 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            placeholder="0.00"
-                          />
+                              type="text"
+                              value={(() => {
+                                const fieldKey = `taxAmt-${index}`;
+                                const isEditing = editingAmountFields.has(fieldKey);
+                                if (isEditing || !line.taxAmt || parseFloat(line.taxAmt) === 0) {
+                                  return line.taxAmt || '';
+                                }
+                                const currency = line.currency || formData.receiptCurrency || 'TWD';
+                                const actualCurrency = formOptions.currencies.find(c => c.symbol === currency || c.name === currency)?.symbol || currency;
+                                return formatAmountDisplay(line.taxAmt, actualCurrency);
+                              })()}
+                              onChange={(e) => {
+                                // 只允許輸入數字和小數點
+                                const inputValue = e.target.value.replace(/[^\d.]/g, '');
+                                const parts = inputValue.split('.');
+                                const cleanedValue = parts.length > 2 
+                                  ? parts[0] + '.' + parts.slice(1).join('')
+                                  : inputValue;
+                                
+                                const newLines = [...expenseLines];
+                                newLines[index].taxAmt = cleanedValue;
+                                // 重新計算 Gross Amt
+                                let amount = parseFloat(newLines[index].amount) || 0;
+                                if (useMultiCurrency) {
+                                  const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
+                                  const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                  amount = foreignAmount * exchangeRate;
+                                  newLines[index].amount = amount.toFixed(2);
+                                }
+                                const taxAmt = parseFloat(cleanedValue) || 0;
+                                newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
+                                setExpenseLines(newLines);
+                              }}
+                              onFocus={(e) => {
+                                updatePreviewForLine(line);
+                                const fieldKey = `taxAmt-${index}`;
+                                setEditingAmountFields(prev => new Set(prev).add(fieldKey));
+                                e.target.value = line.taxAmt || '';
+                              }}
+                              onBlur={(e) => {
+                                const fieldKey = `taxAmt-${index}`;
+                                setEditingAmountFields(prev => {
+                                  const newSet = new Set(prev);
+                                  newSet.delete(fieldKey);
+                                  return newSet;
+                                });
+                                const cleanedValue = parseAmountValue(e.target.value);
+                                if (cleanedValue !== line.taxAmt) {
+                                  const newLines = [...expenseLines];
+                                  newLines[index].taxAmt = cleanedValue;
+                                  let amount = parseFloat(newLines[index].amount) || 0;
+                                  if (useMultiCurrency) {
+                                    const foreignAmount = parseFloat(newLines[index].foreignAmount || '0') || 0;
+                                    const exchangeRate = parseFloat(newLines[index].exchangeRate || '1.00') || 1.0;
+                                    amount = foreignAmount * exchangeRate;
+                                    newLines[index].amount = amount.toFixed(2);
+                                  }
+                                  const taxAmt = parseFloat(cleanedValue) || 0;
+                                  newLines[index].grossAmt = (amount + taxAmt).toFixed(2);
+                                  setExpenseLines(newLines);
+                                }
+                              }}
+                              className="h-7 text-sm text-right"
+                              placeholder="0"
+                            />
                           )}
                         </TableCell>
                         <TableCell className="text-sm px-1">
@@ -4035,12 +4257,16 @@ export default function OCRExpensePage() {
                             <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           ) : (
                             <Input
-                              type="number"
-                              step="0.01"
-                              value={line.grossAmt && parseFloat(line.grossAmt) !== 0 ? line.grossAmt : ''}
+                              type="text"
+                              value={(() => {
+                                if (!line.grossAmt || parseFloat(line.grossAmt) === 0) return '';
+                                const currency = line.currency || formData.receiptCurrency || 'TWD';
+                                const actualCurrency = formOptions.currencies.find(c => c.symbol === currency || c.name === currency)?.symbol || currency;
+                                return formatAmountDisplay(line.grossAmt, actualCurrency);
+                              })()}
                               readOnly
-                              className="h-7 text-sm bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              placeholder="0.00"
+                              className="h-7 text-sm text-right bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                              placeholder="0"
                             />
                           )}
                         </TableCell>
