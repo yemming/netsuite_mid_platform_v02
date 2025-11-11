@@ -601,6 +601,28 @@ export async function POST(request: Request) {
                throw new Error('無法從 NetSuite 回應中取得記錄 ID');
              }
 
+             // 查詢已建立的記錄以取得 tranId（NetSuite 建立回應通常不包含 tranId）
+             try {
+               const createdRecord = await netsuite.getRecord('expenseReport', netsuiteInternalId.toString());
+               if (createdRecord && createdRecord.tranId) {
+                 netsuiteTranId = createdRecord.tranId;
+                 console.log(`[Sync Expense] 從查詢記錄取得 tranId: ${netsuiteTranId}`);
+               } else if (createdRecord && createdRecord.tranid) {
+                 // 某些 NetSuite API 可能使用小寫 tranid
+                 netsuiteTranId = createdRecord.tranid;
+                 console.log(`[Sync Expense] 從查詢記錄取得 tranid: ${netsuiteTranId}`);
+               } else {
+                 console.warn(`[Sync Expense] 查詢記錄後仍無法取得 tranId，記錄內容:`, JSON.stringify(createdRecord).substring(0, 200));
+               }
+             } catch (queryError: any) {
+               // 查詢失敗不影響主要流程，但記錄警告
+               console.warn(`[Sync Expense] 查詢已建立的記錄失敗，無法取得 tranId:`, queryError.message);
+               // 如果回應中有 tranId，使用回應中的
+               if (netsuiteResponse.tranId) {
+                 netsuiteTranId = netsuiteResponse.tranId;
+               }
+             }
+
              // 生成 NetSuite 網址（用於直接連結到 NetSuite UI）
              // ⚠️ 正確格式：/app/accounting/transactions/exprept.nl?id=...（不是 /app/common/transaction/transaction.nl）
              const netsuiteAccountId = process.env.NETSUITE_ACCOUNT_ID || '';

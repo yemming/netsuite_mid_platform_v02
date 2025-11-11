@@ -123,6 +123,37 @@ export async function POST(request: Request) {
     // 狀態：draft（草稿）或 pending（已提交審核中）
     const status = reviewStatus === 'pending' ? 'pending' : 'draft';
     
+    // 只有在提交（pending）時才生成費用報告編號，草稿狀態不生成
+    let expenseReportNumber: string | null = null;
+    if (status === 'pending') {
+      // 生成費用報告編號：EXP-YYYYMMDD-XXXXX
+      // 解析日期字串（格式：YYYY-MM-DD）
+      const [year, month, day] = expenseDate.split('-');
+      if (!year || !month || !day) {
+        return NextResponse.json(
+          { error: '報支日期格式錯誤，應為 YYYY-MM-DD' },
+          { status: 400 }
+        );
+      }
+      const dateStr = `${year}${month}${day}`; // YYYYMMDD
+      
+      // 查詢當天已存在的報告數量（用於生成序號）
+      // 只計算已提交（pending 或 approved）的報告，不包括草稿
+      const dateStart = `${year}-${month}-${day}`;
+      const nextDay = String(parseInt(day) + 1).padStart(2, '0');
+      const dateEnd = `${year}-${month}-${nextDay}`;
+      
+      const { count: todayCount } = await supabase
+        .from('expense_reviews')
+        .select('*', { count: 'exact', head: true })
+        .gte('expense_date', dateStart)
+        .lt('expense_date', dateEnd)
+        .not('expense_report_number', 'is', null); // 只計算已有編號的報告（已提交的）
+      
+      const sequenceNumber = (todayCount || 0) + 1;
+      expenseReportNumber = `EXP-${dateStr}-${String(sequenceNumber).padStart(5, '0')}`;
+    }
+    
     const { data: reviewData, error: insertHeaderError } = await supabase
       .from('expense_reviews')
       .insert({
@@ -135,6 +166,7 @@ export async function POST(request: Request) {
         use_multi_currency: useMultiCurrency || false, // 使用多幣別
         review_status: status, // draft 或 pending
         netsuite_sync_status: 'pending',
+        expense_report_number: expenseReportNumber, // 只有提交時才有編號，草稿為 null
         created_by: user.id,
         created_by_name: createdByName,
       })

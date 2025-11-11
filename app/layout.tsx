@@ -10,8 +10,12 @@ export const metadata: Metadata = {
   title: 'NetSuite AI Nexus',
   description: 'NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration',
   icons: {
-    icon: '/icon.svg',
-    apple: '/apple-icon.svg',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [
+      { url: '/apple-icon.svg', type: 'image/svg+xml' },
+    ],
   },
   manifest: '/manifest.json',
   // 移除 appleWebApp.capable 以避免棄用警告

@@ -691,13 +691,53 @@ export async function PATCH(
       );
     }
 
-    // 更新狀態為 pending
+    // 取得報支日期以生成編號
+    const { data: reviewData } = await supabase
+      .from('expense_reviews')
+      .select('expense_date, expense_report_number')
+      .eq('id', expenseReviewId)
+      .single();
+
+    // 如果還沒有編號，在提交時生成費用報告編號
+    let expenseReportNumber: string | null = reviewData?.expense_report_number || null;
+    if (!expenseReportNumber && reviewData?.expense_date) {
+      // 生成費用報告編號：EXP-YYYYMMDD-XXXXX
+      const expenseDate = reviewData.expense_date;
+      const [year, month, day] = expenseDate.split('-');
+      if (year && month && day) {
+        const dateStr = `${year}${month}${day}`; // YYYYMMDD
+        
+        // 查詢當天已存在的報告數量（用於生成序號）
+        // 只計算已提交（pending 或 approved）的報告，不包括草稿
+        const dateStart = `${year}-${month}-${day}`;
+        const nextDay = String(parseInt(day) + 1).padStart(2, '0');
+        const dateEnd = `${year}-${month}-${nextDay}`;
+        
+        const { count: todayCount } = await supabase
+          .from('expense_reviews')
+          .select('*', { count: 'exact', head: true })
+          .gte('expense_date', dateStart)
+          .lt('expense_date', dateEnd)
+          .not('expense_report_number', 'is', null); // 只計算已有編號的報告（已提交的）
+        
+        const sequenceNumber = (todayCount || 0) + 1;
+        expenseReportNumber = `EXP-${dateStr}-${String(sequenceNumber).padStart(5, '0')}`;
+      }
+    }
+
+    // 更新狀態為 pending，並設定編號（如果有的話）
+    const updateData: any = {
+      review_status: 'pending',
+      updated_at: new Date().toISOString(),
+    };
+    
+    if (expenseReportNumber) {
+      updateData.expense_report_number = expenseReportNumber;
+    }
+
     const { error: updateError } = await supabase
       .from('expense_reviews')
-      .update({
-        review_status: 'pending',
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq('id', expenseReviewId);
 
     if (updateError) {

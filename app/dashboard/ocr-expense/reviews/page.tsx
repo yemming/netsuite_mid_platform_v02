@@ -27,9 +27,10 @@ interface ExpenseReview {
   subsidiary_name: string | null;
   description: string | null;
   review_status: string;
+  expense_report_number: string | null; // 費用報告編號
   netsuite_sync_status: string | null; // NetSuite 同步狀態
   netsuite_internal_id: number | null; // NetSuite Internal ID
-  netsuite_tran_id: string | null; // NetSuite 交易編號
+  netsuite_tran_id: string | null; // NetSuite 交易編號（NetSuite 報告編號）
   netsuite_sync_error: string | null; // 同步錯誤訊息
   netsuite_url: string | null; // NetSuite 網址（用於直接連結）
   created_by_name: string | null;
@@ -279,6 +280,7 @@ export default function ExpenseReviewsPage() {
           subsidiary_name,
           description,
           review_status,
+          expense_report_number,
           netsuite_sync_status,
           netsuite_internal_id,
           netsuite_tran_id,
@@ -658,18 +660,36 @@ export default function ExpenseReviewsPage() {
         expense_lines: (lines || []).map((line: any) => ({
           id: line.id || `line-${Date.now()}-${Math.random()}`,
           line_number: line.line_number || 0,
+          // 可編輯欄位
           date: line.date || '',
+          category_id: line.category_id || null,
           category_name: line.category_name || null,
+          currency_id: line.currency_id || null,
           currency: line.currency || 'TWD',
+          foreign_amount: line.foreign_amount || null,
+          exchange_rate: line.exchange_rate || 1.0,
           amount: line.amount ? (typeof line.amount === 'number' ? line.amount : parseFloat(String(line.amount)) || 0) : 0,
+          tax_code: line.tax_code || null,
+          tax_rate: line.tax_rate || null,
+          tax_amt: line.tax_amt || null,
           gross_amt: line.gross_amt ? (typeof line.gross_amt === 'number' ? line.gross_amt : parseFloat(String(line.gross_amt)) || 0) : 0,
           memo: line.memo || null,
+          department_id: line.department_id || null,
           department_name: line.department_name || null,
+          class_id: line.class_id || null,
           class_name: line.class_name || null,
+          location_id: line.location_id || null,
           location_name: line.location_name || null,
+          customer_id: line.customer_id || null,
+          customer_name: line.customer_name || null,
+          project_task_id: line.project_task_id || null,
+          project_task_name: line.project_task_name || null,
+          billable: line.billable || false,
+          // OCR 資料（只顯示，不編輯）
           invoice_title: line.invoice_title || null,
           invoice_number: line.invoice_number || null,
           invoice_date: line.invoice_date || null,
+          format_code: line.format_code || null,
           seller_name: line.seller_name || null,
           buyer_name: line.buyer_name || null,
           total_amount: line.total_amount ? (typeof line.total_amount === 'number' ? line.total_amount : parseFloat(String(line.total_amount)) || null) : null,
@@ -771,122 +791,259 @@ export default function ExpenseReviewsPage() {
         throw new Error('找不到原始報支資料');
       }
 
-      // 準備更新資料（只包含有變更的欄位）
-      const updateData: any = {};
-
-      // 基本欄位
-      if (editingData.expense_date !== originalFullData.expense_date) {
-        updateData.expense_date = editingData.expense_date;
-      }
-      if (editingData.receipt_amount !== originalFullData.receipt_amount) {
-        updateData.receipt_amount = parseFloat(editingData.receipt_amount?.toString() || '0');
-      }
-      if ((editingData.description || '') !== (originalFullData.description || '')) {
-        updateData.description = editingData.description || null;
-      }
-      if (editingData.receipt_missing !== originalFullData.receipt_missing) {
-        updateData.receipt_missing = editingData.receipt_missing || false;
-      }
-
-      // ID 欄位
       const currentData = editingData as any;
       const originalData = originalFullData as any;
 
-      if (currentData.employee_id && currentData.employee_id !== originalData.employee_id) {
-        updateData.employee_id = currentData.employee_id;
+      // 準備表頭更新資料
+      const headerUpdateData: any = {};
+
+      // 基本欄位
+      if (editingData.expense_date !== originalFullData.expense_date) {
+        headerUpdateData.expense_date = editingData.expense_date;
       }
-      if (currentData.expense_category_id && currentData.expense_category_id !== originalData.expense_category_id) {
-        updateData.expense_category_id = currentData.expense_category_id;
+      if (editingData.receipt_amount !== originalFullData.receipt_amount) {
+        headerUpdateData.receipt_amount = parseFloat(editingData.receipt_amount?.toString() || '0');
+      }
+      if ((editingData.description || '') !== (originalFullData.description || '')) {
+        headerUpdateData.description = editingData.description || null;
+      }
+      if (editingData.receipt_missing !== originalFullData.receipt_missing) {
+        headerUpdateData.receipt_missing = editingData.receipt_missing || false;
+      }
+
+      // ID 欄位
+      if (currentData.employee_id && currentData.employee_id !== originalData.employee_id) {
+        headerUpdateData.employee_id = currentData.employee_id;
       }
       if (currentData.subsidiary_id && currentData.subsidiary_id !== originalData.subsidiary_id) {
-        updateData.subsidiary_id = currentData.subsidiary_id;
+        headerUpdateData.subsidiary_id = currentData.subsidiary_id;
       }
-      if (currentData.currency_id && currentData.currency_id !== originalData.currency_id) {
-        updateData.currency_id = currentData.currency_id;
-      }
-      // 處理可選欄位（null 值比較）
-      const currentDeptId = currentData.department_id || null;
-      const originalDeptId = originalData.department_id || null;
-      if (currentDeptId !== originalDeptId) {
-        updateData.department_id = currentDeptId;
-      }
+
+      // 檢查是否有 lines 變更
+      const hasLinesChanges = currentData.expense_lines && currentData.expense_lines.length > 0;
       
-      const currentLocId = currentData.location_id || null;
-      const originalLocId = originalData.location_id || null;
-      if (currentLocId !== originalLocId) {
-        updateData.location_id = currentLocId;
-      }
-      
-      const currentClassId = currentData.class_id || null;
-      const originalClassId = originalData.class_id || null;
-      if (currentClassId !== originalClassId) {
-        updateData.class_id = currentClassId;
-      }
+      // 如果有 lines 變更，使用 PUT /api/expense-reports/[id] API（會更新表頭和所有 lines）
+      if (hasLinesChanges) {
+        // 準備 lines 資料（轉換成 API 需要的格式）
+        const lines = currentData.expense_lines.map((line: any, index: number) => ({
+          refNo: line.line_number || index + 1,
+          date: line.date || editingData.expense_date || originalFullData.expense_date,
+          category: line.category_id || '',
+          currency: line.currency_id || line.currency || 'TWD',
+          foreignAmount: line.foreign_amount?.toString() || '',
+          exchangeRate: line.exchange_rate?.toString() || '1.0',
+          amount: line.amount?.toString() || '0',
+          taxCode: line.tax_code || '',
+          taxRate: line.tax_rate?.toString() || '',
+          taxAmt: line.tax_amt?.toString() || '',
+          grossAmt: line.gross_amt?.toString() || '0',
+          memo: line.memo || '',
+          department: line.department_id || '',
+          class: line.class_id || '',
+          location: line.location_id || '',
+          customer: line.customer_id || '',
+          projectTask: line.project_task_id || '',
+          billable: line.billable || false,
+          // 保留 OCR 資料和附件（不變更）
+          ocrData: {
+            invoiceTitle: line.invoice_title || '',
+            invoicePeriod: line.invoice_period || '',
+            invoiceNumber: line.invoice_number || '',
+            invoiceDate: line.invoice_date || '',
+            randomCode: line.random_code || '',
+            formatCode: line.format_code || '',
+            sellerName: line.seller_name || '',
+            sellerTaxId: line.seller_tax_id || '',
+            sellerAddress: line.seller_address || '',
+            buyerName: line.buyer_name || '',
+            buyerTaxId: line.buyer_tax_id || '',
+            buyerAddress: line.buyer_address || '',
+            untaxedAmount: line.untaxed_amount?.toString() || '',
+            taxAmount: line.tax_amount?.toString() || '',
+            totalAmount: line.total_amount?.toString() || '',
+            ocrSuccess: line.ocr_success || false,
+            ocrConfidence: line.ocr_confidence || 0,
+            ocrDocumentType: line.ocr_document_type || '',
+            ocrErrors: line.ocr_errors || '',
+            ocrWarnings: line.ocr_warnings || '',
+            ocrErrorCount: line.ocr_error_count || 0,
+            ocrWarningCount: line.ocr_warning_count || 0,
+            ocrQualityGrade: line.ocr_quality_grade || '',
+            ocrFileName: line.ocr_file_name || '',
+            ocrFileId: line.ocr_file_id || '',
+            ocrWebViewLink: line.ocr_web_view_link || '',
+            ocrProcessedAt: line.ocr_processed_at || '',
+          },
+          attachment_url: line.attachment_url || null,
+          attachment_base64: line.attachment_base64 || null,
+          document_file_name: line.document_file_name || null,
+          document_file_path: line.document_file_path || null,
+        }));
 
-      // 如果沒有變更，直接返回
-      if (Object.keys(updateData).length === 0) {
-        setIsEditing(false);
-        setSaving(false);
-        return;
-      }
+        // 準備表頭資料
+        const header = {
+          expenseDate: editingData.expense_date || originalFullData.expense_date,
+          employee: currentData.employee_id || originalData.employee_id,
+          subsidiary: currentData.subsidiary_id || originalData.subsidiary_id,
+          description: editingData.description || originalFullData.description || null,
+          useMultiCurrency: currentData.use_multi_currency || originalData.use_multi_currency || false,
+        };
 
-      // 呼叫更新 API
-      const response = await fetch('/api/update-expense-review', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          review_id: selectedReview.id,
-          ...updateData,
-        }),
-      });
+        // 使用 PUT API 更新（會更新表頭和所有 lines）
+        const response = await fetch(`/api/expense-reports/${selectedReview.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            header,
+            lines,
+            reviewStatus: selectedReview.review_status, // 保持原有狀態
+          }),
+        });
 
-      const result = await response.json();
+        const result = await response.json();
 
-      if (!response.ok) {
-        throw new Error(result.error || result.message || '更新失敗');
-      }
+        if (!response.ok) {
+          throw new Error(result.error || result.message || '更新失敗');
+        }
 
-      if (result.success) {
-        // 優化：直接使用 API 返回的更新資料，避免再次查詢
-        const updatedReview = result.data as ExpenseReview;
-        
-        // 更新當前選中的報支資料
-        setSelectedReview(updatedReview);
-        setEditingData(updatedReview as any);
-        
-        // 優化：只更新列表中的對應項目，而不是重新載入整個列表
-        setReviews(prevReviews => 
-          prevReviews.map(review => 
-            review.id === selectedReview.id ? {
-              ...review,
-              // 只更新列表顯示需要的欄位
-              expense_date: updatedReview.expense_date,
-              expense_category_name: updatedReview.expense_category_name,
-              employee_name: updatedReview.employee_name,
-              subsidiary_name: updatedReview.subsidiary_name,
-              location_name: updatedReview.location_name,
-              department_name: updatedReview.department_name,
-              class_name: updatedReview.class_name,
-              receipt_amount: updatedReview.receipt_amount,
-              receipt_currency: updatedReview.receipt_currency,
-              description: updatedReview.description,
-              receipt_missing: updatedReview.receipt_missing,
-              // 如果修改了關鍵欄位，同步狀態可能被重置
-              netsuite_sync_status: updatedReview.netsuite_sync_status,
-              netsuite_internal_id: updatedReview.netsuite_internal_id,
-              netsuite_tran_id: updatedReview.netsuite_tran_id,
-              netsuite_sync_error: updatedReview.netsuite_sync_error,
-              netsuite_url: updatedReview.netsuite_url,
-            } : review
-          )
-        );
-        
-        setIsEditing(false);
-        alert('報支資料已更新');
+        if (result.success) {
+          // 重新載入完整資料
+          const reloadResponse = await fetch(`/api/expense-reports/${selectedReview.id}`);
+          const reloadResult = await reloadResponse.json();
+
+          if (reloadResult.success) {
+            const { header: reloadedHeader, lines: reloadedLines } = reloadResult.data;
+            
+            // 重新組裝資料
+            const reloadedDetail: ExpenseReview = {
+              ...reloadedHeader,
+              expense_lines: reloadedLines.map((line: any) => ({
+                id: line.id,
+                line_number: line.line_number || 0,
+                date: line.date || '',
+                category_id: line.category_id || null,
+                category_name: line.category_name || null,
+                currency_id: line.currency_id || null,
+                currency: line.currency || 'TWD',
+                foreign_amount: line.foreign_amount || null,
+                exchange_rate: line.exchange_rate || 1.0,
+                amount: line.amount || 0,
+                tax_code: line.tax_code || null,
+                tax_rate: line.tax_rate || null,
+                tax_amt: line.tax_amt || null,
+                gross_amt: line.gross_amt || 0,
+                memo: line.memo || null,
+                department_id: line.department_id || null,
+                department_name: line.department_name || null,
+                class_id: line.class_id || null,
+                class_name: line.class_name || null,
+                location_id: line.location_id || null,
+                location_name: line.location_name || null,
+                customer_id: line.customer_id || null,
+                customer_name: line.customer_name || null,
+                project_task_id: line.project_task_id || null,
+                project_task_name: line.project_task_name || null,
+                billable: line.billable || false,
+                invoice_title: line.invoice_title || null,
+                invoice_number: line.invoice_number || null,
+                invoice_date: line.invoice_date || null,
+                format_code: line.format_code || null,
+                seller_name: line.seller_name || null,
+                buyer_name: line.buyer_name || null,
+                total_amount: line.total_amount || null,
+                ocr_success: line.ocr_success || false,
+                ocr_confidence: line.ocr_confidence || null,
+                ocr_quality_grade: line.ocr_quality_grade || null,
+                attachment_url: line.attachment_url || null,
+                attachment_base64: line.attachment_base64 || null,
+                document_file_path: line.document_file_path || null,
+                document_file_name: line.document_file_name || null,
+              })),
+            } as any;
+
+            setSelectedReview(reloadedDetail);
+            setEditingData(reloadedDetail as any);
+          }
+
+          // 更新列表
+          await loadReviews();
+          
+          setIsEditing(false);
+          alert('報支資料已更新');
+        } else {
+          throw new Error(result.error || '更新失敗');
+        }
       } else {
-        throw new Error(result.error || '更新失敗');
+        // 如果只有表頭變更，使用原來的 API
+        const updateData: any = { ...headerUpdateData };
+
+        // 如果沒有變更，直接返回
+        if (Object.keys(updateData).length === 0) {
+          setIsEditing(false);
+          setSaving(false);
+          return;
+        }
+
+        // 呼叫更新 API
+        const response = await fetch('/api/update-expense-review', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            review_id: selectedReview.id,
+            ...updateData,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || result.message || '更新失敗');
+        }
+
+        if (result.success) {
+          // 優化：直接使用 API 返回的更新資料，避免再次查詢
+          const updatedReview = result.data as ExpenseReview;
+          
+          // 更新當前選中的報支資料
+          setSelectedReview(updatedReview);
+          setEditingData(updatedReview as any);
+          
+          // 優化：只更新列表中的對應項目，而不是重新載入整個列表
+          setReviews(prevReviews => 
+            prevReviews.map(review => 
+              review.id === selectedReview.id ? {
+                ...review,
+                // 只更新列表顯示需要的欄位
+                expense_date: updatedReview.expense_date,
+                expense_category_name: updatedReview.expense_category_name,
+                employee_name: updatedReview.employee_name,
+                subsidiary_name: updatedReview.subsidiary_name,
+                location_name: updatedReview.location_name,
+                department_name: updatedReview.department_name,
+                class_name: updatedReview.class_name,
+                receipt_amount: updatedReview.receipt_amount,
+                receipt_currency: updatedReview.receipt_currency,
+                description: updatedReview.description,
+                receipt_missing: updatedReview.receipt_missing,
+                // 如果修改了關鍵欄位，同步狀態可能被重置
+                netsuite_sync_status: updatedReview.netsuite_sync_status,
+                netsuite_internal_id: updatedReview.netsuite_internal_id,
+                netsuite_tran_id: updatedReview.netsuite_tran_id,
+                netsuite_sync_error: updatedReview.netsuite_sync_error,
+                netsuite_url: updatedReview.netsuite_url,
+              } : review
+            )
+          );
+          
+          setIsEditing(false);
+          alert('報支資料已更新');
+        } else {
+          throw new Error(result.error || '更新失敗');
+        }
       }
     } catch (error: any) {
       console.error('保存報支資料錯誤:', error);
@@ -1192,6 +1349,8 @@ export default function ExpenseReviewsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">查看</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite 報告編號</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報支日期</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">員工</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">總金額</TableHead>
@@ -1214,6 +1373,24 @@ export default function ExpenseReviewsPage() {
                         <Eye className="h-4 w-4 mr-1" />
                         查看
                       </Button>
+                    </TableCell>
+                    <TableCell className="text-center font-mono text-sm">
+                      {review.expense_report_number || '-'}
+                    </TableCell>
+                    <TableCell className="text-center font-mono text-sm">
+                      {review.netsuite_tran_id && review.netsuite_url ? (
+                        <a
+                          href={review.netsuite_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                          title="點擊開啟 NetSuite 頁面（需要登入）"
+                        >
+                          {review.netsuite_tran_id}
+                        </a>
+                      ) : (
+                        review.netsuite_tran_id || '-'
+                      )}
                     </TableCell>
                     <TableCell className="text-center">{formatDate(review.expense_date)}</TableCell>
                     <TableCell className="text-center">{review.employee_name || '-'}</TableCell>
@@ -1256,15 +1433,7 @@ export default function ExpenseReviewsPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-2">
-                        {/* 編輯和刪除按鈕（財務審核的人永遠都可以使用） */}
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleEdit(review)}
-                        >
-                          <Edit className="h-4 w-4 mr-2" />
-                          編輯
-                        </Button>
+                        {/* 刪除按鈕（財務審核的人永遠都可以使用） */}
                         <Button
                           variant="destructive"
                           size="sm"
@@ -1558,84 +1727,608 @@ export default function ExpenseReviewsPage() {
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">
+                          {/* 日期 */}
                           <div>
-                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">日期</Label>
-                            <p className="mt-1">{formatDate(line.date)}</p>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">日期 *</Label>
+                            {isEditing ? (
+                              <Input
+                                type="date"
+                                value={line.date || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = { ...updatedLines[index], date: e.target.value };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                              />
+                            ) : (
+                              <p className="mt-1">{formatDate(line.date)}</p>
+                            )}
                           </div>
+                          
+                          {/* 費用類別 */}
                           <div>
-                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">費用類別</Label>
-                            <p className="mt-1">{line.category_name || '-'}</p>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">費用類別 *</Label>
+                            {isEditing ? (
+                              <Select
+                                value={line.category_id || ''}
+                                onValueChange={(value) => {
+                                  const category = formOptions.expenseCategories.find(c => c.id === value);
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    category_id: value,
+                                    category_name: category?.name || null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="請選擇費用類別" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {formOptions.expenseCategories.map((cat) => (
+                                    <SelectItem key={cat.id} value={cat.id}>
+                                      {cat.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="mt-1">{line.category_name || '-'}</p>
+                            )}
                           </div>
+                          
+                          {/* 幣別 */}
                           <div>
-                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">金額</Label>
-                            <p className="mt-1">{formatAmount(line.amount, line.currency)}</p>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">幣別 *</Label>
+                            {isEditing ? (
+                              <Select
+                                value={line.currency_id || line.currency || ''}
+                                onValueChange={(value) => {
+                                  const currency = formOptions.currencies.find(c => c.id === value || c.symbol === value);
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    currency_id: currency?.id || value,
+                                    currency: currency?.symbol || value,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="請選擇幣別" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {formOptions.currencies.map((curr) => (
+                                    <SelectItem key={curr.id} value={curr.id}>
+                                      {curr.symbol} - {curr.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="mt-1">{line.currency || 'TWD'}</p>
+                            )}
                           </div>
-                          <div>
-                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">總金額</Label>
-                            <p className="mt-1 font-medium">{formatAmount(line.gross_amt, line.currency)}</p>
-                          </div>
-                          {line.department_name && (
+                          
+                          {/* 外幣金額 */}
+                          {isEditing && (
                             <div>
-                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">部門</Label>
-                              <p className="mt-1">{line.department_name}</p>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">外幣金額</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.foreign_amount || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    foreign_amount: e.target.value ? parseFloat(e.target.value) : null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                placeholder="選填"
+                              />
                             </div>
                           )}
-                          {line.class_name && (
+                          
+                          {/* 匯率 */}
+                          {isEditing && (
                             <div>
-                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">類別</Label>
-                              <p className="mt-1">{line.class_name}</p>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">匯率</Label>
+                              <Input
+                                type="number"
+                                step="0.000001"
+                                value={line.exchange_rate || 1.0}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    exchange_rate: e.target.value ? parseFloat(e.target.value) : 1.0,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                              />
                             </div>
                           )}
-                          {line.location_name && (
+                          
+                          {/* 金額 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">金額 *</Label>
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.amount || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    amount: parseFloat(e.target.value) || 0,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                              />
+                            ) : (
+                              <p className="mt-1">{formatAmount(line.amount, line.currency)}</p>
+                            )}
+                          </div>
+                          
+                          {/* 稅碼 */}
+                          {isEditing && (
                             <div>
-                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">地點</Label>
-                              <p className="mt-1">{line.location_name}</p>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">稅碼</Label>
+                              <Input
+                                type="text"
+                                value={line.tax_code || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = { ...updatedLines[index], tax_code: e.target.value || null };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                placeholder="選填"
+                              />
                             </div>
                           )}
-                          {line.memo && (
-                            <div className="col-span-2">
-                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">備註</Label>
-                              <p className="mt-1">{line.memo}</p>
+                          
+                          {/* 稅率 */}
+                          {isEditing && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">稅率 (%)</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.tax_rate || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    tax_rate: e.target.value ? parseFloat(e.target.value) : null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                placeholder="選填"
+                              />
                             </div>
                           )}
+                          
+                          {/* 稅額 */}
+                          {isEditing && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">稅額</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.tax_amt || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    tax_amt: e.target.value ? parseFloat(e.target.value) : null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                placeholder="選填"
+                              />
+                            </div>
+                          )}
+                          
+                          {/* 總金額 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">總金額 *</Label>
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={line.gross_amt || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    gross_amt: parseFloat(e.target.value) || 0,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                              />
+                            ) : (
+                              <p className="mt-1 font-medium">{formatAmount(line.gross_amt, line.currency)}</p>
+                            )}
+                          </div>
+                          
+                          {/* 外幣金額（非編輯模式顯示） */}
+                          {!isEditing && line.foreign_amount && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">外幣金額</Label>
+                              <p className="mt-1">{formatAmount(line.foreign_amount, line.currency)}</p>
+                            </div>
+                          )}
+                          
+                          {/* 匯率（非編輯模式顯示） */}
+                          {!isEditing && line.exchange_rate && line.exchange_rate !== 1.0 && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">匯率</Label>
+                              <p className="mt-1">{line.exchange_rate}</p>
+                            </div>
+                          )}
+                          
+                          {/* 稅碼（非編輯模式顯示） */}
+                          {!isEditing && line.tax_code && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">稅碼</Label>
+                              <p className="mt-1">{line.tax_code}</p>
+                            </div>
+                          )}
+                          
+                          {/* 稅率（非編輯模式顯示） */}
+                          {!isEditing && line.tax_rate && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">稅率 (%)</Label>
+                              <p className="mt-1">{line.tax_rate}%</p>
+                            </div>
+                          )}
+                          
+                          {/* 稅額（非編輯模式顯示） */}
+                          {!isEditing && line.tax_amt && (
+                            <div>
+                              <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">稅額</Label>
+                              <p className="mt-1">{formatAmount(line.tax_amt, line.currency)}</p>
+                            </div>
+                          )}
+                          
+                          {/* 部門 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">部門</Label>
+                            {isEditing ? (
+                              <Select
+                                value={line.department_id || '__none__'}
+                                onValueChange={(value) => {
+                                  const department = formOptions.departments.find(d => d.id === value);
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    department_id: value === '__none__' ? null : value,
+                                    department_name: department?.name || null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="請選擇部門（選填）" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">無</SelectItem>
+                                  {formOptions.departments.map((dept) => (
+                                    <SelectItem key={dept.id} value={dept.id}>
+                                      {dept.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="mt-1">{line.department_name || '-'}</p>
+                            )}
+                          </div>
+                          
+                          {/* 類別 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">類別</Label>
+                            {isEditing ? (
+                              <Select
+                                value={line.class_id || '__none__'}
+                                onValueChange={(value) => {
+                                  const classItem = formOptions.classes.find(c => c.id === value);
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    class_id: value === '__none__' ? null : value,
+                                    class_name: classItem?.name || null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="請選擇類別（選填）" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">無</SelectItem>
+                                  {formOptions.classes.map((cls) => (
+                                    <SelectItem key={cls.id} value={cls.id}>
+                                      {cls.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="mt-1">{line.class_name || '-'}</p>
+                            )}
+                          </div>
+                          
+                          {/* 地點 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">地點</Label>
+                            {isEditing ? (
+                              <Select
+                                value={line.location_id || '__none__'}
+                                onValueChange={(value) => {
+                                  const location = formOptions.locations.find(l => l.id === value);
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    location_id: value === '__none__' ? null : value,
+                                    location_name: location?.name || null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="請選擇地點（選填）" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">無</SelectItem>
+                                  {formOptions.locations.map((loc) => (
+                                    <SelectItem key={loc.id} value={loc.id}>
+                                      {loc.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="mt-1">{line.location_name || '-'}</p>
+                            )}
+                          </div>
+                          
+                          {/* 客戶 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">客戶</Label>
+                            {isEditing ? (
+                              <Input
+                                type="text"
+                                value={line.customer_name || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    customer_name: e.target.value || null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                placeholder="選填"
+                              />
+                            ) : (
+                              <p className="mt-1">{line.customer_name || '-'}</p>
+                            )}
+                          </div>
+                          
+                          {/* 專案任務 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">專案任務</Label>
+                            {isEditing ? (
+                              <Input
+                                type="text"
+                                value={line.project_task_name || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = {
+                                    ...updatedLines[index],
+                                    project_task_name: e.target.value || null,
+                                  };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                placeholder="選填"
+                              />
+                            ) : (
+                              <p className="mt-1">{line.project_task_name || '-'}</p>
+                            )}
+                          </div>
+                          
+                          {/* 可計費 */}
+                          <div>
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">可計費</Label>
+                            {isEditing ? (
+                              <div className="mt-1 flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={line.billable || false}
+                                  onChange={(e) => {
+                                    const updatedLines = [...(editingData as any).expense_lines];
+                                    updatedLines[index] = {
+                                      ...updatedLines[index],
+                                      billable: e.target.checked,
+                                    };
+                                    setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                  }}
+                                  className="h-4 w-4"
+                                />
+                                <span className="text-sm">是</span>
+                              </div>
+                            ) : (
+                              <p className="mt-1">{line.billable ? '是' : '否'}</p>
+                            )}
+                          </div>
+                          
+                          {/* 備註 */}
+                          <div className="col-span-2">
+                            <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">備註</Label>
+                            {isEditing ? (
+                              <Textarea
+                                value={line.memo || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...(editingData as any).expense_lines];
+                                  updatedLines[index] = { ...updatedLines[index], memo: e.target.value || null };
+                                  setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                }}
+                                className="mt-1"
+                                rows={3}
+                                placeholder="選填"
+                              />
+                            ) : (
+                              <p className="mt-1">{line.memo || '-'}</p>
+                            )}
+                          </div>
                         </div>
 
                         {/* OCR 發票資訊 */}
-                        {(line.invoice_number || line.invoice_title) && (
+                        {(line.invoice_number || line.invoice_title || isEditing) && (
                           <div className="border-t pt-4 mt-4">
                             <h5 className="text-sm font-semibold mb-3">發票資訊</h5>
                             <div className="grid grid-cols-2 gap-4">
-                              {line.invoice_number && (
-                                <div>
-                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票號碼</Label>
-                                  <p className="mt-1">{line.invoice_number}</p>
-                                </div>
-                              )}
-                              {line.invoice_date && (
-                                <div>
-                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票日期</Label>
-                                  <p className="mt-1">{formatDate(line.invoice_date)}</p>
-                                </div>
-                              )}
-                              {line.seller_name && (
-                                <div>
-                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">賣方名稱</Label>
-                                  <p className="mt-1">{line.seller_name}</p>
-                                </div>
-                              )}
-                              {line.buyer_name && (
-                                <div>
-                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">買方名稱</Label>
-                                  <p className="mt-1">{line.buyer_name}</p>
-                                </div>
-                              )}
-                              {line.total_amount && (
-                                <div>
-                                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">總計金額</Label>
-                                  <p className="mt-1 font-medium">{formatAmount(line.total_amount, line.currency)}</p>
-                                </div>
-                              )}
-                              {(line.ocr_confidence !== null && line.ocr_confidence !== undefined) || line.ocr_quality_grade ? (
+                              {/* 發票號碼 */}
+                              <div>
+                                <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票號碼</Label>
+                                {isEditing ? (
+                                  <Input
+                                    type="text"
+                                    value={line.invoice_number || ''}
+                                    onChange={(e) => {
+                                      const updatedLines = [...(editingData as any).expense_lines];
+                                      updatedLines[index] = { ...updatedLines[index], invoice_number: e.target.value || null };
+                                      setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                    }}
+                                    className="mt-1"
+                                    placeholder="選填"
+                                  />
+                                ) : (
+                                  <p className="mt-1">{line.invoice_number || '-'}</p>
+                                )}
+                              </div>
+                              
+                              {/* 發票日期 */}
+                              <div>
+                                <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票日期</Label>
+                                {isEditing ? (
+                                  <Input
+                                    type="date"
+                                    value={line.invoice_date || ''}
+                                    onChange={(e) => {
+                                      const updatedLines = [...(editingData as any).expense_lines];
+                                      updatedLines[index] = { ...updatedLines[index], invoice_date: e.target.value || null };
+                                      setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                    }}
+                                    className="mt-1"
+                                  />
+                                ) : (
+                                  <p className="mt-1">{line.invoice_date ? formatDate(line.invoice_date) : '-'}</p>
+                                )}
+                              </div>
+                              
+                              {/* 發票格式 */}
+                              <div>
+                                <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">發票格式</Label>
+                                {isEditing ? (
+                                  <Input
+                                    type="text"
+                                    value={line.format_code || ''}
+                                    onChange={(e) => {
+                                      const updatedLines = [...(editingData as any).expense_lines];
+                                      updatedLines[index] = { ...updatedLines[index], format_code: e.target.value || null };
+                                      setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                    }}
+                                    className="mt-1"
+                                    placeholder="選填（例如：21、25）"
+                                  />
+                                ) : (
+                                  <p className="mt-1">{line.format_code || '-'}</p>
+                                )}
+                              </div>
+                              
+                              {/* 賣方名稱 */}
+                              <div>
+                                <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">賣方名稱</Label>
+                                {isEditing ? (
+                                  <Input
+                                    type="text"
+                                    value={line.seller_name || ''}
+                                    onChange={(e) => {
+                                      const updatedLines = [...(editingData as any).expense_lines];
+                                      updatedLines[index] = { ...updatedLines[index], seller_name: e.target.value || null };
+                                      setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                    }}
+                                    className="mt-1"
+                                    placeholder="選填"
+                                  />
+                                ) : (
+                                  <p className="mt-1">{line.seller_name || '-'}</p>
+                                )}
+                              </div>
+                              
+                              {/* 買方名稱 */}
+                              <div>
+                                <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">買方名稱</Label>
+                                {isEditing ? (
+                                  <Input
+                                    type="text"
+                                    value={line.buyer_name || ''}
+                                    onChange={(e) => {
+                                      const updatedLines = [...(editingData as any).expense_lines];
+                                      updatedLines[index] = { ...updatedLines[index], buyer_name: e.target.value || null };
+                                      setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                    }}
+                                    className="mt-1"
+                                    placeholder="選填"
+                                  />
+                                ) : (
+                                  <p className="mt-1">{line.buyer_name || '-'}</p>
+                                )}
+                              </div>
+                              
+                              {/* 總計金額 */}
+                              <div>
+                                <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">總計金額</Label>
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={line.total_amount || ''}
+                                    onChange={(e) => {
+                                      const updatedLines = [...(editingData as any).expense_lines];
+                                      updatedLines[index] = {
+                                        ...updatedLines[index],
+                                        total_amount: e.target.value ? parseFloat(e.target.value) : null,
+                                      };
+                                      setEditingData({ ...editingData, expense_lines: updatedLines } as any);
+                                    }}
+                                    className="mt-1"
+                                    placeholder="選填"
+                                  />
+                                ) : (
+                                  <p className="mt-1 font-medium">
+                                    {line.total_amount ? formatAmount(line.total_amount, line.currency) : '-'}
+                                  </p>
+                                )}
+                              </div>
+                              
+                              {/* OCR 信心度 / 等級（只讀） */}
+                              {((line.ocr_confidence !== null && line.ocr_confidence !== undefined) || line.ocr_quality_grade) && (
                                 <div>
                                   <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">OCR 信心度 / 等級</Label>
                                   <p className="mt-1">
@@ -1656,7 +2349,7 @@ export default function ExpenseReviewsPage() {
                                     )}
                                   </p>
                                 </div>
-                              ) : null}
+                              )}
                             </div>
                           </div>
                         )}
@@ -1839,9 +2532,52 @@ export default function ExpenseReviewsPage() {
             </div>
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>
-              關閉
-            </Button>
+            {isEditing ? (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsEditing(false);
+                    setEditingData(selectedReview as any); // 重置為原始資料
+                  }}
+                  disabled={saving}
+                >
+                  取消
+                </Button>
+                <Button 
+                  onClick={handleSaveEdit}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      保存中...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      保存
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsDetailDialogOpen(false)}
+                >
+                  關閉
+                </Button>
+                <Button 
+                  variant="default"
+                  onClick={() => setIsEditing(true)}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  編輯
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

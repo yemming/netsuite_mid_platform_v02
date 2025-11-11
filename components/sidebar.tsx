@@ -199,62 +199,7 @@ export default function Sidebar() {
           {/* Top Section - User & Workspace - Sticky to match header */}
           <div className="sticky top-[6px] z-50 bg-white dark:bg-[#28363F]">
             <div className="flex items-center gap-2 px-6 h-[38px] border-b border-gray-200 dark:border-[#3a4f5d]">
-            <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
-              {/* NetSuite Logo Icon */}
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 42 42"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                className="flex-shrink-0"
-              >
-                {/* Bottom S - Blue */}
-                <path
-                  d="M8 32C8 32 14 26 14 21C14 16 8 10 8 10C8 10 2 16 2 21C2 26 8 32 8 32Z"
-                  fill="#0073C5"
-                />
-                <path
-                  d="M8 32C8 32 14 26 14 21C14 16 8 10 8 10"
-                  stroke="#0073C5"
-                  strokeWidth="1.5"
-                  fill="none"
-                />
-                
-                {/* Top S - Gold */}
-                <path
-                  d="M34 10C34 10 28 16 28 21C28 26 34 32 34 32C34 32 40 26 40 21C40 16 34 10 34 10Z"
-                  fill="#FDB515"
-                />
-                <path
-                  d="M34 10C34 10 28 16 28 21C28 26 34 32 34 32"
-                  stroke="#FDB515"
-                  strokeWidth="1.5"
-                  fill="none"
-                />
-                
-                {/* Intertwined connection - creates infinity effect */}
-                <path
-                  d="M21 8C21 8 26 13 26 21C26 29 21 34 21 34"
-                  stroke="#0073C5"
-                  strokeWidth="2"
-                  fill="none"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M21 34C21 34 16 29 16 21C16 13 21 8 21 8"
-                  stroke="#FDB515"
-                  strokeWidth="2"
-                  fill="none"
-                  strokeLinecap="round"
-                />
-                
-                {/* More detailed S curves for intertwined effect */}
-                <ellipse cx="14" cy="21" rx="6" ry="5" fill="#0073C5" opacity="0.3"/>
-                <ellipse cx="28" cy="21" rx="6" ry="5" fill="#FDB515" opacity="0.3"/>
-              </svg>
-            </div>
-            <span className="text-sm font-medium text-gray-900 dark:text-white truncate flex-1">
+            <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1 pl-[14px]">
               NetSuite AI Nexus
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">

@@ -28,6 +28,9 @@ interface ExpenseReviewListItem {
   subsidiary_name: string | null;
   description: string | null;
   review_status: string;
+  expense_report_number: string | null; // 費用報告編號
+  netsuite_tran_id: string | null; // NetSuite 報告編號
+  netsuite_url: string | null; // NetSuite 網址
   created_at: string;
   receipt_amount: number;
   receipt_currency: string;
@@ -275,6 +278,9 @@ export default function MyExpensesPage() {
           subsidiary_name,
           description,
           review_status,
+          expense_report_number,
+          netsuite_tran_id,
+          netsuite_url,
           created_at,
           expense_lines (
             gross_amt,
@@ -311,6 +317,9 @@ export default function MyExpensesPage() {
           subsidiary_name: review.subsidiary_name,
           description: review.description,
           review_status: review.review_status,
+          expense_report_number: review.expense_report_number || null, // 費用報告編號
+          netsuite_tran_id: review.netsuite_tran_id || null, // NetSuite 報告編號
+          netsuite_url: review.netsuite_url || null, // NetSuite 網址
           created_at: review.created_at,
           receipt_amount: totalAmount,
           receipt_currency: currency,
@@ -868,6 +877,8 @@ export default function MyExpensesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">查看</TableHead>
+                  <TableHead className="bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
+                  <TableHead className="bg-gray-100 dark:bg-gray-800">NetSuite 報告編號</TableHead>
                   <TableHead className="bg-gray-100 dark:bg-gray-800">報支日期</TableHead>
                   <TableHead className="bg-gray-100 dark:bg-gray-800">員工</TableHead>
                   <TableHead className="bg-gray-100 dark:bg-gray-800">總金額</TableHead>
@@ -888,6 +899,24 @@ export default function MyExpensesPage() {
                         <Eye className="h-4 w-4 mr-2" />
                         查看
                       </Button>
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {review.expense_report_number || '-'}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {review.netsuite_tran_id && review.netsuite_url ? (
+                        <a
+                          href={review.netsuite_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                          title="點擊開啟 NetSuite 頁面（需要登入）"
+                        >
+                          {review.netsuite_tran_id}
+                        </a>
+                      ) : (
+                        review.netsuite_tran_id || '-'
+                      )}
                     </TableCell>
                     <TableCell>{formatDate(review.expense_date)}</TableCell>
                     <TableCell>{review.employee_name || '-'}</TableCell>
