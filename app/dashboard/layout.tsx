@@ -25,47 +25,32 @@ export default function DashboardLayout({
           supabase = createClient()
         } catch (clientError: any) {
           console.error('無法初始化 Supabase 客戶端:', clientError)
-          alert('應用程式設定錯誤，請聯繫管理員')
+          router.push('/')
           setLoading(false)
           return
         }
         
-        // 並行檢查 session 和 user，減少等待時間
-        const [sessionResult, userResult] = await Promise.all([
-          supabase.auth.getSession(),
-          supabase.auth.getUser()
-        ])
-        
-        const { data: { session }, error: sessionError } = sessionResult
-        const { data: { user }, error: userError } = userResult
+        // 優化：只使用 getUser()，它已經包含了 session 檢查
+        // 避免重複的 API 調用，減少等待時間
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
         
         if (userError) {
           console.error('Auth error:', userError)
-          // 不要顯示 alert，直接重定向
           router.push('/')
           setLoading(false)
           return
         }
         
         if (!user) {
-          console.warn('No user found')
           router.push('/')
           setLoading(false)
           return
         }
         
-        // 檢查郵件是否已驗證（可選，視需求決定是否要求驗證）
-        // if (user.email && !user.email_confirmed_at) {
-        //   alert('請先驗證您的電子郵件地址')
-        //   router.push('/')
-        //   return
-        // }
-        
         setUser(user)
         setLoading(false)
       } catch (err: any) {
         console.error('Check user error:', err)
-        // 不要顯示 alert，直接重定向
         router.push('/')
         setLoading(false)
       }
@@ -99,7 +84,10 @@ export default function DashboardLayout({
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-xl text-foreground">載入中...</div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-gray-300 border-t-[#28363F] rounded-full animate-spin" />
+          <div className="text-sm text-gray-600 dark:text-gray-400">載入中...</div>
+        </div>
       </div>
     )
   }

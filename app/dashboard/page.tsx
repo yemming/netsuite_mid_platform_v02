@@ -35,6 +35,8 @@ export default function Dashboard() {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setLoading(false)
+      } else {
+        setLoading(false)
       }
     }
     checkUser()
@@ -56,6 +58,7 @@ export default function Dashboard() {
           return
         }
 
+        // 優化：只使用 getUser()，避免重複調用
         const { data: { user }, error: userError } = await supabase.auth.getUser()
         
         if (userError) {
@@ -63,12 +66,6 @@ export default function Dashboard() {
         }
 
         if (user) {
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-          
-          if (sessionError) {
-            throw sessionError
-          }
-
           const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
           let domainName = ''
           try {
@@ -108,158 +105,152 @@ export default function Dashboard() {
     }
   }, [loading, supabase])
 
+  // 優化：合併所有連接檢查到一個 useEffect，減少重複渲染
   useEffect(() => {
-    const checkN8nWebhook = async () => {
-      setN8nStatus({
-        connected: false,
-        loading: true,
-        message: '檢查連線中...'
-      })
+    if (loading) return
 
-      try {
-        const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL
-        
-        if (!webhookUrl) {
+    const checkAllConnections = async () => {
+      // 並行執行所有連接檢查，提升性能
+      const [n8nResult, netsuiteResult] = await Promise.allSettled([
+        // N8n 連接檢查
+        (async () => {
           setN8nStatus({
             connected: false,
-            loading: false,
-            message: '環境變數未設定'
+            loading: true,
+            message: '檢查連線中...'
           })
-          return
-        }
 
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 10000)
-
-        let response: Response
-        try {
-          response = await fetch(webhookUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-            },
-            signal: controller.signal
-          })
-        } catch (getError: any) {
-          clearTimeout(timeoutId)
-          const controller2 = new AbortController()
-          const timeoutId2 = setTimeout(() => controller2.abort(), 10000)
-          
-          response = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              action: 'test_connection',
-              timestamp: new Date().toISOString(),
-              source: 'dashboard'
-            }),
-            signal: controller2.signal
-          })
-          
-          clearTimeout(timeoutId2)
-        }
-
-        clearTimeout(timeoutId)
-
-        if (response.ok) {
-          const responseText = await response.text()
-          
-          let domainName = ''
           try {
-            if (webhookUrl) {
-              const url = new URL(webhookUrl)
-              domainName = url.hostname
+            const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL
+            
+            if (!webhookUrl) {
+              return {
+                connected: false,
+                message: '環境變數未設定'
+              }
             }
-          } catch {
-            domainName = webhookUrl
-          }
 
-          setN8nStatus({
-            connected: true,
-            loading: false,
-            message: '連線成功',
-            companyName: domainName
-          })
-        } else {
-          setN8nStatus({
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 5000) // 減少超時時間到 5 秒
+
+            let response: Response
+            try {
+              response = await fetch(webhookUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+                signal: controller.signal
+              })
+            } catch {
+              clearTimeout(timeoutId)
+              const controller2 = new AbortController()
+              const timeoutId2 = setTimeout(() => controller2.abort(), 5000)
+              
+              response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'test_connection', timestamp: new Date().toISOString() }),
+                signal: controller2.signal
+              })
+              clearTimeout(timeoutId2)
+            }
+
+            clearTimeout(timeoutId)
+
+            if (response.ok) {
+              const url = new URL(webhookUrl)
+              return {
+                connected: true,
+                message: '連線成功',
+                companyName: url.hostname
+              }
+            } else {
+              return {
+                connected: false,
+                message: `連線失敗 (HTTP ${response.status})`
+              }
+            }
+          } catch (error: any) {
+            let errorMessage = '連線失敗'
+            if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+              errorMessage = '連線超時'
+            } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+              errorMessage = '網路錯誤或 CORS 問題'
+            }
+            return { connected: false, message: errorMessage }
+          }
+        })(),
+        // NetSuite 連接檢查
+        (async () => {
+          setNetsuiteStatus({
             connected: false,
-            loading: false,
-            message: `連線失敗 (HTTP ${response.status})`
+            loading: true,
+            message: '檢查連線中...'
           })
-        }
-      } catch (error: any) {
-        console.error('N8n webhook test error:', error)
-        
-        let errorMessage = '連線失敗'
-        
-        if (error.name === 'TimeoutError' || error.name === 'AbortError') {
-          errorMessage = '連線超時'
-        } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
-          errorMessage = '網路錯誤或 CORS 問題'
-        } else if (error.message) {
-          errorMessage = `連線失敗: ${error.message}`
-        }
-        
+
+          try {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 5000) // 減少超時時間到 5 秒
+
+            const response = await fetch('/api/netsuite/test', {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal
+            })
+
+            clearTimeout(timeoutId)
+            const result = await response.json()
+
+            if (result.success) {
+              return {
+                connected: true,
+                message: result.message || '連線成功',
+                companyName: result.companyName
+              }
+            } else {
+              return {
+                connected: false,
+                message: result.message || '連線失敗'
+              }
+            }
+          } catch (error: any) {
+            return {
+              connected: false,
+              message: error.message || '連線失敗'
+            }
+          }
+        })()
+      ])
+
+      // 更新 N8n 狀態
+      if (n8nResult.status === 'fulfilled') {
+        setN8nStatus({
+          ...n8nResult.value,
+          loading: false
+        })
+      } else {
         setN8nStatus({
           connected: false,
           loading: false,
-          message: errorMessage
+          message: '檢查失敗'
         })
       }
-    }
 
-    if (!loading) {
-      checkN8nWebhook()
-    }
-  }, [loading])
-
-  useEffect(() => {
-    const checkNetSuiteConnection = async () => {
-      setNetsuiteStatus({
-        connected: false,
-        loading: true,
-        message: '檢查連線中...'
-      })
-
-      try {
-        const response = await fetch('/api/netsuite/test', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+      // 更新 NetSuite 狀態
+      if (netsuiteResult.status === 'fulfilled') {
+        setNetsuiteStatus({
+          ...netsuiteResult.value,
+          loading: false
         })
-
-        const result = await response.json()
-
-        if (result.success) {
-          setNetsuiteStatus({
-            connected: true,
-            loading: false,
-            message: result.message || '連線成功',
-            companyName: result.companyName
-          })
-        } else {
-          setNetsuiteStatus({
-            connected: false,
-            loading: false,
-            message: result.message || '連線失敗'
-          })
-        }
-      } catch (error: any) {
-        console.error('NetSuite connection test error:', error)
+      } else {
         setNetsuiteStatus({
           connected: false,
           loading: false,
-          message: error.message || '連線失敗'
+          message: '檢查失敗'
         })
       }
     }
 
-    if (!loading) {
-      checkNetSuiteConnection()
-    }
+    checkAllConnections()
   }, [loading])
 
   // Calculate connection stats

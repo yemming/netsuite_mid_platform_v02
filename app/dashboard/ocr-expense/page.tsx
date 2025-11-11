@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 
 // Expense Report Line 型別定義（參考 NetSuite 標準欄位）
 interface ExpenseReportLine {
@@ -72,6 +72,7 @@ interface ExpenseReportLine {
     attachmentImageData?: string; // 附件圖片的 base64 數據（用於在 OCR 明細中顯示）
     attachmentFileType?: string; // 附件檔案類型（用於判斷是圖片還是 PDF）
     attachmentUrl?: string; // 附件 URL（Supabase Storage URL）
+    documentFilePath?: string; // 檔案路徑（Supabase Storage 路徑，優先使用）
   };
   customer: string; // 客戶
   projectTask: string; // 專案任務
@@ -330,6 +331,49 @@ export default function OCRExpensePage() {
             ...newLines[lineIndex].ocrData,
             [field]: value,
           },
+        };
+      }
+      return newLines;
+    });
+  };
+
+  // 當 OCR Dialog 關閉時，同步金額、稅額、總金額回費用明細行
+  const handleOcrDialogClose = (lineIndex: number) => {
+    setExpenseLines(prev => {
+      const newLines = [...prev];
+      if (newLines[lineIndex] && newLines[lineIndex].ocrData) {
+        const ocrData = newLines[lineIndex].ocrData;
+        const untaxedAmount = (ocrData.untaxedAmount || '').trim();
+        const taxAmount = (ocrData.taxAmount || '').trim();
+        const totalAmount = (ocrData.totalAmount || '').trim();
+        
+        // 移除千分位逗號並轉換為數字
+        const parseAmount = (value: string): number => {
+          if (!value) return 0;
+          return parseFloat(value.replace(/,/g, '')) || 0;
+        };
+        
+        const untaxed = parseAmount(untaxedAmount);
+        const tax = parseAmount(taxAmount);
+        const total = parseAmount(totalAmount);
+        
+        // 計算金額：優先使用未稅金額，如果沒有則用總金額減去稅額
+        let amount = '';
+        if (untaxed > 0) {
+          amount = untaxedAmount; // 保留原始格式（包含逗號）
+        } else if (total > 0 && tax > 0) {
+          const calculatedAmount = total - tax;
+          amount = calculatedAmount > 0 ? calculatedAmount.toString() : '';
+        } else if (total > 0) {
+          amount = totalAmount; // 保留原始格式（包含逗號）
+        }
+        
+        // 更新 expense line 的金額、稅額、總金額
+        newLines[lineIndex] = {
+          ...newLines[lineIndex],
+          amount: amount,
+          taxAmt: taxAmount,
+          grossAmt: totalAmount || amount, // 如果沒有總金額，使用金額作為總金額
         };
       }
       return newLines;
@@ -1158,6 +1202,52 @@ export default function OCRExpensePage() {
     };
   };
 
+  // 上傳檔案到 Storage（非同步，不阻塞 UI）
+  const uploadFileToStorage = async (file: File, fileIndex: number, userId: string): Promise<string | null> => {
+    try {
+      // 檢查檔案大小（限制為 5MB，避免上傳過大檔案）
+      const maxFileSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxFileSize) {
+        console.warn(`檔案太大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，跳過上傳`);
+        return null;
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileExt = file.name.split('.').pop() || (file.type?.includes('pdf') ? 'pdf' : 'jpg');
+      const storageFileName = `${userId}/${timestamp}_${Date.now()}_${fileIndex + 1}.${fileExt}`;
+
+      const supabase = createClient();
+      
+      // 上傳到 Supabase Storage（設定 30 秒超時，比之前的 5 秒更寬鬆）
+      const uploadPromise = supabase.storage
+        .from('expense-receipts')
+        .upload(storageFileName, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('上傳超時')), 30000) // 30 秒超時
+      );
+
+      const { data: uploadData, error: uploadError } = await Promise.race([
+        uploadPromise,
+        timeoutPromise,
+      ]) as any;
+
+      if (uploadError) {
+        console.warn(`Storage 上傳失敗:`, uploadError);
+        return null;
+      }
+
+      console.log(`檔案上傳成功: ${storageFileName}`);
+      return storageFileName;
+    } catch (error: any) {
+      console.warn(`Storage 上傳錯誤:`, error);
+      return null;
+    }
+  };
+
   // 建立 expense line 並填入 OCR 結果
   const createExpenseLineFromOCR = (ocrResult: any, fileIndex: number) => {
     // 檢查這個 fileIndex 是否已經建立過 expense line
@@ -1184,12 +1274,48 @@ export default function OCRExpensePage() {
         attachmentFileType = previewFileTypes[fileIndexInPreview] || file.type;
       }
     }
-    
+
     // 如果 ocrResult 是陣列格式（新格式），提取第一個元素
     const result = Array.isArray(ocrResult) && ocrResult.length > 0 ? ocrResult[0] : ocrResult;
     const ocrData = convertOCRResultToLineData(result);
     const ocrOutput = result.output || {};
     const uniqueId = ocrData.ocrFileId || `fileIndex_${fileIndex}_${Date.now()}_${Math.random()}`;
+    
+    // 立即上傳檔案到 Storage（非同步，不阻塞 UI）
+    // 注意：在建立 expense line 之後再更新 documentFilePath
+    if (file) {
+      // 取得當前使用者 ID
+      const supabase = createClient();
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          uploadFileToStorage(file, fileIndex, user.id).then((filePath) => {
+            if (filePath) {
+              // 上傳成功，更新對應的 expense line 的 document_file_path
+              // 使用 uniqueId 和 fileIndex 來匹配
+              setExpenseLines(prev => prev.map(line => {
+                const lineId = line.id || '';
+                const lineOcrFileId = line.ocrData?.ocrFileId || '';
+                
+                // 匹配條件：id 包含 uniqueId，或 ocrFileId 相同，或 id 包含 fileIndex
+                if (lineId.includes(uniqueId) || 
+                    lineOcrFileId === uniqueId ||
+                    lineId.includes(`fileIndex_${fileIndex}`) ||
+                    (line.ocrData && !line.ocrData.documentFilePath && lineOcrFileId && uniqueId.includes(lineOcrFileId))) {
+                  return {
+                    ...line,
+                    ocrData: {
+                      ...line.ocrData,
+                      documentFilePath: filePath, // 儲存檔案路徑
+                    },
+                  };
+                }
+                return line;
+              }));
+            }
+          });
+        }
+      });
+    }
     
     // 從 OCR 結果取得費用類型，並匹配到 expense category
     const expenseTypeFromOCR = ocrOutput['費用類型'] || ocrOutput['費用類別'] || '';
@@ -1341,6 +1467,13 @@ export default function OCRExpensePage() {
         // 取得正在處理行的參考編號（保持原來的編號）
         const processingRefNo = prev[processingIndex].refNo;
         
+        // 檢查 OCR 是否成功，如果失敗則不填入金額（避免帶入上一筆的資料）
+        const ocrSuccess = ocrData.ocrSuccess !== false; // 預設為 true，只有明確為 false 時才視為失敗
+        const ocrTotalAmount = ocrOutput['總計金額'] || '';
+        // 如果 OCR 失敗或沒有總計金額，則設為空字串，不帶入 formData.receiptAmount
+        const lineAmount = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
+        const lineGrossAmt = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
+        
         const newLine: ExpenseReportLine = {
           id: `line-${uniqueId}`,
           refNo: processingRefNo, // 使用正在處理行的參考編號，保持連續性
@@ -1349,11 +1482,11 @@ export default function OCRExpensePage() {
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
           exchangeRate: '1.00',
-          amount: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          amount: lineAmount,
           taxCode: matchedTaxCode, // 如果有稅額，自動填入「5%營業稅」
           taxRate: matchedTaxRate, // 如果有稅額，自動填入稅率
           taxAmt: taxAmount, // OCR 辨識的稅額
-          grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          grossAmt: lineGrossAmt,
           memo: expenseDescription || formData.description || '', // 優先使用 OCR 辨識的費用描述
           department: '', // 部門在表身每一行中選擇
           class: '', // 類別在表身每一行中選擇
@@ -1389,6 +1522,13 @@ export default function OCRExpensePage() {
       // 如果沒有找到正在處理的行，使用 nextRefNo 創建新行
       // 這種情況不應該發生，但為了安全起見還是處理
       setNextRefNo(prevRefNo => {
+        // 檢查 OCR 是否成功，如果失敗則不填入金額（避免帶入上一筆的資料）
+        const ocrSuccess = ocrData.ocrSuccess !== false; // 預設為 true，只有明確為 false 時才視為失敗
+        const ocrTotalAmount = ocrOutput['總計金額'] || '';
+        // 如果 OCR 失敗或沒有總計金額，則設為空字串，不帶入 formData.receiptAmount
+        const lineAmount = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
+        const lineGrossAmt = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
+        
         const newLine: ExpenseReportLine = {
           id: `line-${uniqueId}`,
           refNo: prevRefNo,
@@ -1397,11 +1537,11 @@ export default function OCRExpensePage() {
           foreignAmount: '',
           currency: formData.receiptCurrency || 'TWD',
           exchangeRate: '1.00',
-          amount: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          amount: lineAmount,
           taxCode: matchedTaxCode, // 如果有稅額，自動填入「5%營業稅」
           taxRate: matchedTaxRate, // 如果有稅額，自動填入稅率
           taxAmt: taxAmount, // OCR 辨識的稅額
-          grossAmt: ocrOutput['總計金額'] || formData.receiptAmount || '',
+          grossAmt: lineGrossAmt,
           memo: formData.description || '',
           department: '', // 部門在表身每一行中選擇
           class: '', // 類別在表身每一行中選擇
@@ -2211,22 +2351,23 @@ export default function OCRExpensePage() {
           let documentFileName: string | null = null;
           let documentFilePath: string | null = null;
 
-          // 處理附件：優先使用現有的 attachment_url（編輯模式），否則處理新的附件
-          if (line.ocrData?.attachmentUrl) {
+          // 處理附件：優先使用已上傳的 documentFilePath（OCR 處理時已上傳），否則處理新的附件
+          if (line.ocrData?.documentFilePath) {
+            // 優先使用：OCR 處理時已經上傳的檔案路徑
+            documentFilePath = line.ocrData.documentFilePath;
+            documentFileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
+            console.log(`Line ${index + 1} 使用已上傳的檔案路徑: ${documentFilePath}`);
+          } else if (line.ocrData?.attachmentUrl) {
             // 編輯模式：如果已經有 attachment_url，直接使用
             attachmentUrl = line.ocrData.attachmentUrl;
             documentFileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
           } else if (line.ocrData?.attachmentImageData) {
-            // 新建模式或新增的附件：處理上傳
+            // 新建模式或新增的附件：如果還沒有上傳，嘗試上傳
             const imageData = line.ocrData.attachmentImageData;
             
             // 如果有 ocrFileName，使用它作為檔案名稱
             const fileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
             documentFileName = fileName;
-
-            // 檢查 Base64 大小（如果超過 500KB，直接使用 Base64，不上傳）
-            const base64Size = imageData.length * 0.75; // Base64 大約是原始大小的 1.33 倍
-            const maxBase64Size = 500 * 1024; // 500KB
 
             // 嘗試從 attachments 陣列中找到對應的檔案
             const fileIndex = attachments.findIndex((file, idx) => {
@@ -2235,26 +2376,24 @@ export default function OCRExpensePage() {
                      (line.ocrData.ocrFileId && file.name.includes(line.ocrData.ocrFileId));
             });
 
-            // 優化：優先嘗試上傳，只有在檔案存在且大小合理時才上傳
+            // 如果找到檔案，嘗試上傳（作為備用方案）
             if (fileIndex >= 0 && attachments[fileIndex]) {
               const file = attachments[fileIndex];
               
-              // 檢查檔案大小（限制為 2MB，避免上傳過大檔案）
-              const maxFileSize = 2 * 1024 * 1024; // 2MB
+              // 檢查檔案大小（限制為 5MB，避免上傳過大檔案）
+              const maxFileSize = 5 * 1024 * 1024; // 5MB
               if (file.size > maxFileSize) {
                 console.warn(`Line ${index + 1} 檔案太大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，跳過上傳`);
-                // 檔案太大，不傳送 Base64（避免請求過大）
                 documentFileName = fileName;
               } else {
-                // 檔案大小合理，嘗試上傳
+                // 檔案大小合理，嘗試上傳（備用方案）
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                 const fileExt = file.name.split('.').pop() || (line.ocrData.attachmentFileType?.includes('pdf') ? 'pdf' : 'jpg');
                 const storageFileName = `${user.id}/${timestamp}_${Date.now()}_${index + 1}.${fileExt}`;
                 documentFilePath = storageFileName;
 
                 try {
-                  // 優化：減少超時時間到 5 秒，提升響應速度
-                  // 上傳到 Supabase Storage（設定 5 秒超時）
+                  // 上傳到 Supabase Storage（設定 30 秒超時）
                   const uploadPromise = supabase.storage
                     .from('expense-receipts')
                     .upload(storageFileName, file, {
@@ -2263,7 +2402,7 @@ export default function OCRExpensePage() {
                     });
 
                   const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('上傳超時')), 5000)
+                    setTimeout(() => reject(new Error('上傳超時')), 30000) // 30 秒超時
                   );
 
                   const { data: uploadData, error: uploadError } = await Promise.race([
@@ -2272,32 +2411,21 @@ export default function OCRExpensePage() {
                   ]) as any;
 
                   if (uploadError) {
-                    console.warn(`Line ${index + 1} Storage 上傳失敗，跳過附件保存:`, uploadError);
-                    // 優化：上傳失敗時，不傳送 Base64（避免請求過大）
-                    // 只保存檔案名稱，讓用戶稍後可以重新上傳
+                    console.warn(`Line ${index + 1} Storage 上傳失敗（備用方案）:`, uploadError);
                     documentFileName = fileName;
-                    // 不設置 attachmentBase64，減少請求大小
+                    documentFilePath = null; // 上傳失敗，清除路徑
                   } else {
-                    // 取得公開 URL
-                    const { data: urlData } = supabase.storage
-                      .from('expense-receipts')
-                      .getPublicUrl(storageFileName);
-                    
-                    attachmentUrl = urlData.publicUrl;
+                    console.log(`Line ${index + 1} Storage 上傳成功（備用方案）: ${storageFileName}`);
                   }
                 } catch (storageError: any) {
-                  console.warn(`Line ${index + 1} Storage 上傳錯誤，跳過附件保存:`, storageError);
-                  // 優化：上傳錯誤時，不傳送 Base64（避免請求過大）
-                  // 只保存檔案名稱
+                  console.warn(`Line ${index + 1} Storage 上傳錯誤（備用方案）:`, storageError);
                   documentFileName = fileName;
-                  // 不設置 attachmentBase64，減少請求大小
+                  documentFilePath = null; // 上傳失敗，清除路徑
                 }
               }
             } else {
-              // 優化：如果找不到對應的檔案，不傳送 Base64（避免請求過大）
-              // 只保存檔案名稱
+              // 如果找不到對應的檔案，只保存檔案名稱
               documentFileName = fileName;
-              // 不設置 attachmentBase64，減少請求大小
             }
           }
 
@@ -2935,9 +3063,9 @@ export default function OCRExpensePage() {
               </div>
             
             {/* 右側：檔案預覽區域 (2/3 寬度) */}
-            <div className="w-2/3 space-y-4">
+            <div className="w-2/3 flex flex-col gap-4">
               {/* File Preview */}
-              <div className="space-y-2">
+              <div className="space-y-2 flex-shrink-0">
               <div
                 ref={previewRef}
                 className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
@@ -3069,7 +3197,7 @@ export default function OCRExpensePage() {
               <Button
               onClick={handleAIOCR}
               disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
-              className="w-full text-white"
+              className="w-full text-white flex-shrink-0"
               style={{ backgroundColor: '#1a5490' }}
               onMouseEnter={(e) => {
                 if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
@@ -3099,7 +3227,7 @@ export default function OCRExpensePage() {
             
               {/* OCR 處理中的載入提示 */}
               {(ocrProcessing || multiOcrTasks.size > 0) && (
-                <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="mt-0 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg w-full flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -3460,7 +3588,12 @@ export default function OCRExpensePage() {
                               <span>正在辨識中...</span>
                             </div>
                           ) : (
-                            <Dialog>
+                            <Dialog onOpenChange={(open) => {
+                            // 當 Dialog 關閉時（open === false），同步金額回費用明細行
+                            if (!open) {
+                              handleOcrDialogClose(index);
+                            }
+                          }}>
                               <DialogTrigger asChild>
                                 <Button
                                   variant="outline"
@@ -3471,8 +3604,8 @@ export default function OCRExpensePage() {
                                       ? (line.ocrData.ocrSuccess === false
                                           // OCR 失敗（success: false），顯示桃紅色
                                           ? 'rounded-full bg-pink-500 hover:bg-pink-600 border-pink-500 text-white dark:bg-pink-500 dark:hover:bg-pink-600 dark:border-pink-500 dark:text-white'
-                                          // OCR 成功（success: true），顯示橘色
-                                          : 'rounded-full bg-orange-500 hover:bg-orange-600 border-orange-500 text-white dark:bg-orange-500 dark:hover:bg-orange-600 dark:border-orange-500 dark:text-white')
+                                          // OCR 成功（success: true），顯示綠色
+                                          : 'rounded-full bg-green-500 hover:bg-green-600 border-green-500 text-white dark:bg-green-500 dark:hover:bg-green-600 dark:border-green-500 dark:text-white')
                                       // 沒有 OCR 資料，顯示灰色
                                       : 'rounded-full bg-white hover:bg-gray-50 border-gray-300 text-gray-900 dark:bg-transparent dark:hover:bg-gray-800/50 dark:border-white dark:text-white'
                                   }`}
@@ -3483,12 +3616,12 @@ export default function OCRExpensePage() {
                                   {(() => {
                                     // 如果有 OCR 資料，根據 ocrSuccess 判斷成功或失敗
                                     if (line.ocrData.ocrFileName || line.ocrData.invoiceNumber) {
-                                      // OCR 失敗（success: false），顯示「OCR 失敗」
+                                      // OCR 失敗（success: false），顯示「OCR不良」
                                       if (line.ocrData.ocrSuccess === false) {
                                         return (
                                           <div className="flex items-center gap-1.5">
                                             <Eye className="h-3 w-3 text-white" />
-                                            <span className="text-white font-medium">OCR 失敗</span>
+                                            <span className="text-white font-medium">OCR不良</span>
                                           </div>
                                         );
                                       }
@@ -3812,6 +3945,11 @@ export default function OCRExpensePage() {
                                     </div>
                                   </div>
                                 </div>
+                                <DialogFooter>
+                                  <DialogClose asChild>
+                                    <Button variant="outline">關閉</Button>
+                                  </DialogClose>
+                                </DialogFooter>
                             </DialogContent>
                           </Dialog>
                           )}

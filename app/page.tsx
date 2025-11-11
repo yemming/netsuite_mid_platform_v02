@@ -36,26 +36,25 @@ export default function Home() {
     
     const checkUser = async () => {
       try {
-        // 並行檢查 session 和 user，減少等待時間
-        const [sessionResult, userResult] = await Promise.all([
-          supabase.auth.getSession(),
-          supabase.auth.getUser()
-        ])
-        
-        const { data: { session: sessionData }, error: sessionError } = sessionResult
-        const { data: { user }, error } = userResult
+        // 優化：只使用 getUser()，它已經包含了 session 檢查
+        // 避免重複的 API 調用
+        const { data: { user }, error } = await supabase.auth.getUser()
         
         if (error) {
-          console.error('檢查用戶時發生錯誤:', error)
-          // 如果只是 session 過期，不要阻擋
-          if (error.message?.includes('JWT')) {
+          // 如果只是 session 過期或 JWT 錯誤，靜默處理
+          if (error.message?.includes('JWT') || error.message?.includes('session')) {
             return
           }
+          console.error('檢查用戶時發生錯誤:', error)
+          return
         }
-        if (user && sessionData) {
+        
+        // 如果有用戶，直接跳轉
+        if (user) {
           router.push('/dashboard')
         }
       } catch (err: any) {
+        // 靜默處理錯誤，避免阻塞用戶體驗
         console.error('檢查用戶失敗:', err)
       }
     }
@@ -128,198 +127,20 @@ export default function Home() {
     <div className="min-h-screen flex items-start justify-center relative overflow-hidden pt-16 pb-8" style={{
       backgroundColor: '#f5f7fa'
     }}>
-      {/* Abstract Organic Shapes Background */}
-      <div className="absolute inset-0 overflow-hidden">
-        <svg 
-          width="100%" 
-          height="100%" 
-          viewBox="0 0 1200 800" 
-          preserveAspectRatio="xMidYMid slice"
-          style={{ position: 'absolute', top: 0, left: 0 }}
-        >
-          <defs>
-            {/* Gradients for organic shapes */}
-            <linearGradient id="mintGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#a8e6cf" stopOpacity="0.6"/>
-              <stop offset="100%" stopColor="#88d8c0" stopOpacity="0.4"/>
-            </linearGradient>
-            <linearGradient id="coralGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#ff9a8b" stopOpacity="0.7"/>
-              <stop offset="100%" stopColor="#ff6b6b" stopOpacity="0.5"/>
-            </linearGradient>
-            <linearGradient id="pinkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#fbc2eb" stopOpacity="0.6"/>
-              <stop offset="100%" stopColor="#f8a5c2" stopOpacity="0.4"/>
-            </linearGradient>
-            <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#c8a8e9" stopOpacity="0.7"/>
-              <stop offset="100%" stopColor="#a78bfa" stopOpacity="0.5"/>
-            </linearGradient>
-            <linearGradient id="coralGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#ff8a80" stopOpacity="0.6"/>
-              <stop offset="100%" stopColor="#ff6b6b" stopOpacity="0.4"/>
-            </linearGradient>
-            
-            {/* Texture pattern for purple shape */}
-            <pattern id="texturePattern" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-              <circle cx="20" cy="20" r="1.5" fill="#a78bfa" opacity="0.3"/>
-              <circle cx="10" cy="10" r="1" fill="#c8a8e9" opacity="0.2"/>
-              <circle cx="30" cy="30" r="1" fill="#c8a8e9" opacity="0.2"/>
-              <path d="M10,20 Q20,10 30,20 T50,20" stroke="#a78bfa" strokeWidth="0.5" fill="none" opacity="0.2"/>
-              <path d="M20,10 Q20,20 20,30 T20,50" stroke="#c8a8e9" strokeWidth="0.5" fill="none" opacity="0.2"/>
-            </pattern>
-            
-            {/* Blur filters */}
-            <filter id="blur20">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="20"/>
-            </filter>
-            <filter id="blur25">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="25"/>
-            </filter>
-            <filter id="blur22">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="22"/>
-            </filter>
-            <filter id="blur18">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="18"/>
-            </filter>
-            <filter id="blur15">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="15"/>
-            </filter>
-          </defs>
-          
-          {/* Large mint/teal shape - top right */}
-          <ellipse 
-            cx="900" 
-            cy="150" 
-            rx="280" 
-            ry="200" 
-            fill="url(#mintGrad)" 
-            transform="rotate(-25 900 150)"
-            filter="url(#blur20)"
-          />
-          <ellipse 
-            cx="920" 
-            cy="170" 
-            rx="250" 
-            ry="180" 
-            fill="url(#mintGrad)" 
-            transform="rotate(-20 920 170)"
-            opacity="0.8"
-          />
-          
-          {/* Coral/red shape - middle right */}
-          <ellipse 
-            cx="950" 
-            cy="350" 
-            rx="300" 
-            ry="220" 
-            fill="url(#coralGrad)" 
-            transform="rotate(35 950 350)"
-            filter="url(#blur25)"
-          />
-          <ellipse 
-            cx="970" 
-            cy="370" 
-            rx="270" 
-            ry="200" 
-            fill="url(#coralGrad)" 
-            transform="rotate(30 970 370)"
-            opacity="0.85"
-          />
-          
-          {/* Pink shape - middle left */}
-          <ellipse 
-            cx="200" 
-            cy="450" 
-            rx="320" 
-            ry="240" 
-            fill="url(#pinkGrad)" 
-            transform="rotate(-40 200 450)"
-            filter="url(#blur22)"
-          />
-          <ellipse 
-            cx="220" 
-            cy="470" 
-            rx="290" 
-            ry="220" 
-            fill="url(#pinkGrad)" 
-            transform="rotate(-35 220 470)"
-            opacity="0.8"
-          />
-          
-          {/* Second coral shape - bottom right */}
-          <ellipse 
-            cx="850" 
-            cy="650" 
-            rx="280" 
-            ry="200" 
-            fill="url(#coralGrad2)" 
-            transform="rotate(50 850 650)"
-            filter="url(#blur20)"
-          />
-          <ellipse 
-            cx="870" 
-            cy="670" 
-            rx="250" 
-            ry="180" 
-            fill="url(#coralGrad2)" 
-            transform="rotate(45 870 670)"
-            opacity="0.75"
-          />
-          
-          {/* Purple shape with texture - bottom */}
-          <ellipse 
-            cx="500" 
-            cy="700" 
-            rx="350" 
-            ry="250" 
-            fill="url(#purpleGrad)" 
-            transform="rotate(-15 500 700)"
-            filter="url(#blur18)"
-          />
-          <ellipse 
-            cx="520" 
-            cy="720" 
-            rx="320" 
-            ry="230" 
-            fill="url(#purpleGrad)" 
-            transform="rotate(-10 520 720)"
-            opacity="0.9"
-          />
-          {/* Texture overlay for purple shape */}
-          <ellipse 
-            cx="520" 
-            cy="720" 
-            rx="300" 
-            ry="210" 
-            fill="url(#texturePattern)" 
-            transform="rotate(-10 520 720)"
-            opacity="0.4"
-          />
-          
-          {/* Additional smaller overlapping shapes for depth */}
-          <ellipse 
-            cx="750" 
-            cy="250" 
-            rx="180" 
-            ry="140" 
-            fill="url(#mintGrad)" 
-            transform="rotate(15 750 250)"
-            opacity="0.5"
-            filter="url(#blur15)"
-          />
-          <ellipse 
-            cx="300" 
-            cy="300" 
-            rx="200" 
-            ry="150" 
-            fill="url(#pinkGrad)" 
-            transform="rotate(-25 300 300)"
-            opacity="0.4"
-            filter="url(#blur18)"
-          />
-        </svg>
-      </div>
+      {/* 優化：使用 CSS 漸變背景替代複雜的 SVG，提升渲染性能 */}
+      <div 
+        className="absolute inset-0 overflow-hidden"
+        style={{
+          background: `
+            radial-gradient(circle at 75% 20%, rgba(168, 230, 207, 0.3) 0%, transparent 50%),
+            radial-gradient(circle at 80% 45%, rgba(255, 154, 139, 0.25) 0%, transparent 50%),
+            radial-gradient(circle at 20% 60%, rgba(251, 194, 235, 0.25) 0%, transparent 50%),
+            radial-gradient(circle at 70% 80%, rgba(255, 138, 128, 0.2) 0%, transparent 50%),
+            radial-gradient(circle at 40% 90%, rgba(200, 168, 233, 0.2) 0%, transparent 50%),
+            linear-gradient(135deg, #f5f7fa 0%, #e8ecf0 100%)
+          `,
+        }}
+      />
 
       {/* Login Card - NetSuite Style Clean White Card */}
       <div className="bg-white shadow-xl w-full max-w-md mx-4 border border-gray-200 relative z-10" style={{

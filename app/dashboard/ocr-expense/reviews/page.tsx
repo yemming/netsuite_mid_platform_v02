@@ -551,8 +551,9 @@ export default function ExpenseReviewsPage() {
   const extractFilePath = useCallback((url: string): string | null => {
     try {
       // URL 格式：https://xxx.supabase.co/storage/v1/object/public/expense-receipts/{path}
-      // 或：https://xxx.supabase.co/storage/v1/object/sign/expense-receipts/{path}
-      const match = url.match(/\/expense-receipts\/(.+)$/);
+      // 或：https://xxx.supabase.co/storage/v1/object/sign/expense-receipts/{path}?token=...
+      // 處理完整 URL（可能包含查詢參數，例如 Signed URL 的 token）
+      const match = url.match(/\/expense-receipts\/(.+?)(?:\?|$)/);
       if (match && match[1]) {
         // 解碼 URL（處理特殊字元）
         return decodeURIComponent(match[1]);
@@ -564,16 +565,26 @@ export default function ExpenseReviewsPage() {
   }, []);
 
   // 取得 Signed URL（用於 Private bucket）
-  const getSignedUrl = useCallback(async (url: string): Promise<string | null> => {
-    const filePath = extractFilePath(url);
-    if (!filePath) {
-      console.warn('無法從 URL 提取檔案路徑:', url);
-      return null;
+  const getSignedUrl = useCallback(async (urlOrPath: string): Promise<string | null> => {
+    // 如果已經有快取的 Signed URL，直接返回
+    if (signedUrls[urlOrPath]) {
+      return signedUrls[urlOrPath];
     }
 
-    // 如果已經有快取的 Signed URL，直接返回
-    if (signedUrls[url]) {
-      return signedUrls[url];
+    // 判斷是完整 URL 還是路徑
+    let filePath: string | null = null;
+    
+    // 如果是完整 URL（包含 http:// 或 https://），提取路徑
+    if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
+      filePath = extractFilePath(urlOrPath);
+    } else {
+      // 如果已經是路徑格式（例如：user_id/timestamp_filename.ext），直接使用
+      filePath = urlOrPath;
+    }
+
+    if (!filePath) {
+      console.warn('無法從 URL 或路徑提取檔案路徑:', urlOrPath);
+      return null;
     }
 
     try {
@@ -588,7 +599,7 @@ export default function ExpenseReviewsPage() {
 
       if (data?.signedUrl) {
         // 快取 Signed URL
-        setSignedUrls(prev => ({ ...prev, [url]: data.signedUrl }));
+        setSignedUrls(prev => ({ ...prev, [urlOrPath]: data.signedUrl }));
         return data.signedUrl;
       }
 
@@ -667,6 +678,8 @@ export default function ExpenseReviewsPage() {
           ocr_quality_grade: line.ocr_quality_grade || null,
           attachment_url: line.attachment_url || null,
           attachment_base64: line.attachment_base64 || null,
+          document_file_path: line.document_file_path || null,
+          document_file_name: line.document_file_name || null,
         })),
       } as any;
 
@@ -675,10 +688,16 @@ export default function ExpenseReviewsPage() {
 
       // 為所有有附件的 lines 取得 Signed URL
       for (const line of (detail as any).expense_lines || []) {
-        if (line.attachment_url) {
-          const signedUrl = await getSignedUrl(line.attachment_url);
+        // 優先使用 document_file_path（檔案路徑），如果沒有則使用 attachment_url（可能是舊資料的 URL）
+        const filePath = line.document_file_path || line.attachment_url;
+        if (filePath) {
+          console.log(`[Reviews] 為明細 #${line.line_number} 取得 Signed URL:`, filePath);
+          const signedUrl = await getSignedUrl(filePath);
           if (signedUrl) {
-            setSignedUrls(prev => ({ ...prev, [line.attachment_url!]: signedUrl }));
+            console.log(`[Reviews] 成功取得 Signed URL 用於:`, filePath);
+            setSignedUrls(prev => ({ ...prev, [filePath]: signedUrl }));
+          } else {
+            console.warn(`[Reviews] 無法取得 Signed URL 用於:`, filePath);
           }
         }
       }
@@ -1643,14 +1662,14 @@ export default function ExpenseReviewsPage() {
                         )}
 
                         {/* 附件預覽 */}
-                        {(line.attachment_url || line.attachment_base64) && (
+                        {(line.document_file_path || line.attachment_url || line.attachment_base64) && (
                           <div className="border-t pt-4 mt-4">
                             <h5 className="text-sm font-semibold mb-3">附件</h5>
                             <div className="flex justify-center">
-                              {line.attachment_url ? (
+                              {(line.document_file_path || line.attachment_url) ? (
                                 <AttachmentPreview
-                                  attachmentUrl={line.attachment_url}
-                                  signedUrl={signedUrls[line.attachment_url]}
+                                  attachmentUrl={line.document_file_path || line.attachment_url || ''}
+                                  signedUrl={signedUrls[line.document_file_path || line.attachment_url || '']}
                                   base64Fallback={line.attachment_base64}
                                   onGetSignedUrl={getSignedUrl}
                                 />
