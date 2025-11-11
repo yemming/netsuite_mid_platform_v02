@@ -2169,7 +2169,7 @@ export default function OCRExpensePage() {
   const handleSubmit = async (action: 'save' | 'submit' = 'save') => {
     // 驗證表頭必填欄位
     if (!formData.expenseDate || !formData.subsidiary || !formData.employee) {
-      alert('請填寫所有必填欄位（報支日期、員工、公司別）');
+      alert('請填寫所有必填欄位（費用報告日期、員工、公司別）');
       return;
     }
 
@@ -2508,7 +2508,7 @@ export default function OCRExpensePage() {
         <div className="flex items-center gap-3 mb-2">
           <Receipt className="h-8 w-8 text-primary" />
           <h1 className="text-3xl font-bold">
-            {loadingData ? '載入中...' : (isEditMode ? '編輯報支項目' : '建立報支項目')}
+            {loadingData ? '載入中...' : (isEditMode ? '編輯費用報告項目' : '建立費用報告項目')}
           </h1>
         </div>
         <p className="text-muted-foreground">
@@ -2534,16 +2534,16 @@ export default function OCRExpensePage() {
       {!loadingData && (
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>報支項目資訊</CardTitle>
+            <CardTitle>費用報告資訊</CardTitle>
           </CardHeader>
           <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left Column - Form Fields */}
-            <div className="space-y-1">
+            <div className="space-y-2 flex flex-col">
               {/* Expense Date */}
               <div className="space-y-1">
                 <Label htmlFor="expenseDate" className="text-sm font-semibold">
-                  報支日期 <span className="text-red-500">*</span>
+                  日期 <span className="text-red-500">*</span>
                 </Label>
                 <div className="relative">
                   <Input
@@ -2638,11 +2638,29 @@ export default function OCRExpensePage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Right Column - Preview */}
+            <div className="space-y-2 flex flex-col">
+              {/* Description */}
+              <div className="space-y-1">
+                <Label htmlFor="description" className="text-sm font-semibold">
+                  費用報告描述
+                </Label>
+                <Textarea
+                  id="description"
+                  value={formData.description}
+                  onChange={(e) => handleInputChange('description', e.target.value)}
+                  rows={5}
+                  placeholder="輸入費用報告項目描述..."
+                  className="min-h-[90px]"
+                />
+              </div>
 
               {/* Receipt Amount */}
-              <div className="space-y-1">
+              <div className="space-y-1 mt-auto">
                 <Label htmlFor="receiptAmount" className="text-sm font-semibold">
-                  費用報告總金額 <span className="text-red-500">*</span>
+                  總金額 <span className="text-red-500">*</span>
                 </Label>
                 <div className="flex gap-2">
                   <Select
@@ -2679,26 +2697,6 @@ export default function OCRExpensePage() {
                   />
                 </div>
               </div>
-
-              {/* Description */}
-              <div className="space-y-1">
-                <Label htmlFor="description" className="text-sm font-semibold">
-                  描述
-                </Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
-                  rows={2}
-                  placeholder="輸入報支項目描述..."
-                  className="min-h-[40px]"
-                />
-              </div>
-            </div>
-
-            {/* Right Column - Preview */}
-            <div className="space-y-4 flex flex-col">
-              {/* Attachments - 已移至檔案預覽區域左側 */}
             </div>
           </div>
         </CardContent>
@@ -2943,10 +2941,10 @@ export default function OCRExpensePage() {
               <div
                 ref={previewRef}
                 className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
-                style={{ minHeight: '368px', height: '368px' }}
+                style={{ minHeight: '262px', height: '262px' }}
               >
                 {previewImage ? (
-                  <div className="relative w-full h-full" style={{ minHeight: '450px', height: '450px' }}>
+                  <div className="relative w-full h-full" style={{ minHeight: '321px', height: '321px' }}>
                     {/* 檢查當前檔案類型 */}
                     {(() => {
                       const currentFileType = previewFileTypes[previewImageIndex] || '';
@@ -3018,7 +3016,7 @@ export default function OCRExpensePage() {
                               <iframe
                                 src={previewImage}
                                 className="w-full h-full border-0"
-                                style={{ minHeight: '450px', height: '450px' }}
+                                style={{ minHeight: '321px', height: '321px' }}
                                 title="PDF 預覽"
                               />
                             </div>
@@ -3030,8 +3028,8 @@ export default function OCRExpensePage() {
                               onMouseUp={handleMouseUp}
                               onMouseLeave={handleMouseUp}
                               style={{
-                                minHeight: '300px',
-                                height: '300px',
+                                minHeight: '214px',
+                                height: '214px',
                               }}
                             >
                               <img
@@ -3059,7 +3057,7 @@ export default function OCRExpensePage() {
                     })()}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full gap-3" style={{ minHeight: '368px', height: '450px' }}>
+                  <div className="flex flex-col items-center justify-center h-full gap-3" style={{ minHeight: '262px', height: '321px' }}>
                     <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
                     <p className="text-gray-400 dark:text-gray-500 text-center text-sm">檔案預覽</p>
                   </div>
