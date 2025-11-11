@@ -804,6 +804,9 @@ export default function ExpenseReviewsPage() {
       if (editingData.receipt_amount !== originalFullData.receipt_amount) {
         headerUpdateData.receipt_amount = parseFloat(editingData.receipt_amount?.toString() || '0');
       }
+      if ((editingData as any).receipt_currency && (editingData as any).receipt_currency !== originalFullData.receipt_currency) {
+        headerUpdateData.receipt_currency = (editingData as any).receipt_currency;
+      }
       if ((editingData.description || '') !== (originalFullData.description || '')) {
         headerUpdateData.description = editingData.description || null;
       }
@@ -971,6 +974,7 @@ export default function ExpenseReviewsPage() {
           await loadReviews();
           
           setIsEditing(false);
+          setIsDetailDialogOpen(false);
           alert('報支資料已更新');
         } else {
           throw new Error(result.error || '更新失敗');
@@ -1040,6 +1044,7 @@ export default function ExpenseReviewsPage() {
           );
           
           setIsEditing(false);
+          setIsDetailDialogOpen(false);
           alert('報支資料已更新');
         } else {
           throw new Error(result.error || '更新失敗');
@@ -1348,32 +1353,21 @@ export default function ExpenseReviewsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">查看</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite 報告編號</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報支日期</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">員工</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">總金額</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">OCR 狀態</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報告狀態</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">建立時間</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite#</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報告日期</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">建立日期</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">員工</TableHead>
+                  <TableHead className="text-right bg-gray-100 dark:bg-gray-800">總金額</TableHead>
                   <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite 同步</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">操作</TableHead>
+                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">明細</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {reviews.map((review) => (
                   <TableRow key={review.id}>
-                    <TableCell className="text-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewDetails(review)}
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        查看
-                      </Button>
-                    </TableCell>
+                    <TableCell className="text-center">{getStatusBadge(review.review_status)}</TableCell>
                     <TableCell className="text-center font-mono text-sm">
                       {review.expense_report_number || '-'}
                     </TableCell>
@@ -1393,78 +1387,23 @@ export default function ExpenseReviewsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-center">{formatDate(review.expense_date)}</TableCell>
+                    <TableCell className="text-center">{formatDate(review.created_at)}</TableCell>
                     <TableCell className="text-center">{review.employee_name || '-'}</TableCell>
-                    <TableCell className="text-center font-medium">
+                    <TableCell className="text-right font-medium">
                       {formatAmount(review.receipt_amount, review.receipt_currency)}
                     </TableCell>
-                    <TableCell className="text-center">
-                      {(() => {
-                        // 判斷是否有執行過 OCR（檢查是否有 OCR 相關資料）
-                        const hasOcrData = review.ocr_file_name || review.ocr_file_id || review.ocr_processed_at;
-                        
-                        if (!hasOcrData) {
-                          // 沒有 OCR 資料，顯示「無OCR」
-                          return (
-                            <Badge className="bg-gray-400 text-white">
-                              無OCR
-                            </Badge>
-                          );
-                        } else if (review.ocr_success) {
-                          // OCR 成功（只顯示狀態，不顯示百分比和等級）
-                          return (
-                            <Badge className="bg-green-500 text-white">
-                              OCR 成功
-                            </Badge>
-                          );
-                        } else {
-                          // OCR 失敗
-                          return (
-                            <Badge className="bg-red-500 text-white">
-                              OCR 失敗
-                            </Badge>
-                          );
-                        }
-                      })()}
-                    </TableCell>
-                    <TableCell className="text-center">{getStatusBadge(review.review_status)}</TableCell>
-                    <TableCell className="text-center">{formatDate(review.created_at)}</TableCell>
                     <TableCell className="text-center">
                       {getNetSuiteSyncBadge(review.netsuite_sync_status, review.review_status)}
                     </TableCell>
                     <TableCell className="text-center">
-                      <div className="flex justify-center gap-2">
-                        {/* 刪除按鈕（財務審核的人永遠都可以使用） */}
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDelete(review)}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          刪除
-                        </Button>
-                        {/* 核准和拒絕按鈕（只有 pending 狀態顯示） */}
-                        {review.review_status === 'pending' && (
-                          <>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              className="bg-green-600 hover:bg-green-700"
-                              onClick={() => handleReview(review, 'approve')}
-                            >
-                              <CheckCircle2 className="h-4 w-4 mr-1" />
-                              核准
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => handleReview(review, 'reject')}
-                              className="bg-orange-500 hover:bg-orange-600 text-white"
-                            >
-                              <XCircle className="h-4 w-4 mr-1" />
-                              拒絕
-                            </Button>
-                          </>
-                        )}
-                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleViewDetails(review)}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        明細
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -2576,6 +2515,20 @@ export default function ExpenseReviewsPage() {
                   <Edit className="h-4 w-4 mr-2" />
                   編輯
                 </Button>
+                {selectedReview && (
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      if (selectedReview) {
+                        handleDelete(selectedReview);
+                        setIsDetailDialogOpen(false);
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    刪除
+                  </Button>
+                )}
               </>
             )}
           </DialogFooter>

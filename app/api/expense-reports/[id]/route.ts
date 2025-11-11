@@ -516,13 +516,53 @@ export async function PUT(
       );
     }
 
+    // 5. 計算總金額（加總所有 lines 的 gross_amt）
+    const receiptAmount = linesToInsert.reduce((sum, line) => {
+      return sum + (line.gross_amt || 0);
+    }, 0);
+
+    // 取得主要幣別（使用第一筆 line 的 currency）
+    const receiptCurrency = linesToInsert.length > 0 ? (linesToInsert[0].currency || 'TWD') : 'TWD';
+
+    // 6. 更新表頭的 receipt_amount 和 receipt_currency
+    const { error: updateAmountError } = await supabase
+      .from('expense_reviews')
+      .update({
+        receipt_amount: receiptAmount,
+        receipt_currency: receiptCurrency,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', expenseReviewId);
+
+    if (updateAmountError) {
+      console.error('更新表頭金額錯誤:', updateAmountError);
+      return NextResponse.json(
+        { 
+          error: '更新表頭金額失敗',
+          message: updateAmountError.message || '未知錯誤',
+        },
+        { status: 500 }
+      );
+    }
+
+    // 7. 重新取得更新後的表頭資料
+    const { data: updatedHeader, error: headerError } = await supabase
+      .from('expense_reviews')
+      .select('*')
+      .eq('id', expenseReviewId)
+      .single();
+
+    if (headerError) {
+      console.error('取得更新後表頭錯誤:', headerError);
+    }
+
     return NextResponse.json({
       success: true,
       message: '報支項目已成功更新',
       expense_review_id: expenseReviewId,
       lines_count: linesData?.length || 0,
       data: {
-        header: existingReview,
+        header: updatedHeader || existingReview,
         lines: linesData,
       },
     });
