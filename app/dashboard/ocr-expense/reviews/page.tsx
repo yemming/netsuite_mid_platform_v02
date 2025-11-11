@@ -1353,15 +1353,15 @@ export default function ExpenseReviewsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報告狀態</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite#</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">報告日期</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">建立日期</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">員工</TableHead>
-                  <TableHead className="text-right bg-gray-100 dark:bg-gray-800">總金額</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">NetSuite 同步</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">明細</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">報告狀態</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">NetSuite#</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">報告日期</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">員工</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">總金額</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">NetSuite 同步</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">明細</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">審核</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1387,7 +1387,6 @@ export default function ExpenseReviewsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-center">{formatDate(review.expense_date)}</TableCell>
-                    <TableCell className="text-center">{formatDate(review.created_at)}</TableCell>
                     <TableCell className="text-center">{review.employee_name || '-'}</TableCell>
                     <TableCell className="text-right font-medium">
                       {formatAmount(review.receipt_amount, review.receipt_currency)}
@@ -1404,6 +1403,29 @@ export default function ExpenseReviewsPage() {
                         <Eye className="h-4 w-4 mr-1" />
                         明細
                       </Button>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {review.review_status === 'pending' && (
+                        <div className="flex justify-center gap-2">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => handleReview(review, 'approve')}
+                          >
+                            <CheckCircle2 className="h-4 w-4 mr-1" />
+                            核准
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleReview(review, 'reject')}
+                            className="bg-orange-500 hover:bg-orange-600 text-white"
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            拒絕
+                          </Button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

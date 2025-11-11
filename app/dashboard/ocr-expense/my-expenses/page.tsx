@@ -876,34 +876,24 @@ export default function MyExpensesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">查看</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">NetSuite 報告編號</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">報支日期</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">員工</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">總金額</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">報告狀態</TableHead>
-                  <TableHead className="bg-gray-100 dark:bg-gray-800">建立時間</TableHead>
-                  <TableHead className="text-center bg-gray-100 dark:bg-gray-800">操作</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">報告狀態</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">費用報告編號</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">Netsuite#</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">報告日期</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">員工</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">總金額</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">查看</TableHead>
+                  <TableHead className="text-center font-bold bg-gray-100 dark:bg-gray-800">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {reviews.map((review) => (
                   <TableRow key={review.id}>
-                    <TableCell className="text-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewDetails(review)}
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        查看
-                      </Button>
-                    </TableCell>
+                    <TableCell>{getStatusBadge(review.review_status)}</TableCell>
                     <TableCell className="font-mono text-sm">
                       {review.expense_report_number || '-'}
                     </TableCell>
-                    <TableCell className="font-mono text-sm">
+                    <TableCell className="text-center font-mono text-sm">
                       {review.netsuite_tran_id && review.netsuite_url ? (
                         <a
                           href={review.netsuite_url}
@@ -920,13 +910,21 @@ export default function MyExpensesPage() {
                     </TableCell>
                     <TableCell>{formatDate(review.expense_date)}</TableCell>
                     <TableCell>{review.employee_name || '-'}</TableCell>
-                    <TableCell className="font-medium">
+                    <TableCell className="text-right font-medium">
                       {formatAmount(review.receipt_amount || 0, review.receipt_currency || 'TWD')}
                     </TableCell>
-                    <TableCell>{getStatusBadge(review.review_status)}</TableCell>
-                    <TableCell>{formatDate(review.created_at)}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
+                    <TableCell className="text-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleViewDetails(review)}
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        查看
+                      </Button>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex gap-2 justify-center">
                         {/* 只有 draft 狀態可以編輯和刪除 */}
                         {review.review_status === 'draft' && (
                           <>
