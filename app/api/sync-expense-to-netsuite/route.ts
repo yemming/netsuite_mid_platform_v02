@@ -485,7 +485,7 @@ export async function POST(request: Request) {
       const lineData = lineNetSuiteData[i];
 
       // 驗證必填欄位
-      if (!lineData.categoryId || !lineData.currencyId || !line.gross_amt) {
+      if (!lineData.categoryId || !lineData.currencyId || !line.amount) {
         await supabase
           .from('expense_reviews')
           .update({
@@ -504,7 +504,7 @@ export async function POST(request: Request) {
       const item: any = {
         expensedate: line.date || review.expense_date,
         category: { id: String(lineData.categoryId) },
-        amount: parseFloat(String(line.gross_amt)),
+        amount: parseFloat(String(line.amount)), // 使用未稅金額，不是總金額
         currency: { id: String(lineData.currencyId) },
       };
 

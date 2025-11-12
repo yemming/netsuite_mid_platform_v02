@@ -1469,9 +1469,10 @@ export default function OCRExpensePage() {
         
         // 檢查 OCR 是否成功，如果失敗則不填入金額（避免帶入上一筆的資料）
         const ocrSuccess = ocrData.ocrSuccess !== false; // 預設為 true，只有明確為 false 時才視為失敗
+        const ocrUntaxedAmount = ocrOutput['未稅銷售額'] || '';
         const ocrTotalAmount = ocrOutput['總計金額'] || '';
-        // 如果 OCR 失敗或沒有總計金額，則設為空字串，不帶入 formData.receiptAmount
-        const lineAmount = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
+        // 金額應使用未稅銷售額，總金額作為 grossAmt
+        const lineAmount = (ocrSuccess && ocrUntaxedAmount) ? ocrUntaxedAmount : '';
         const lineGrossAmt = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
         
         const newLine: ExpenseReportLine = {
@@ -1524,9 +1525,10 @@ export default function OCRExpensePage() {
       setNextRefNo(prevRefNo => {
         // 檢查 OCR 是否成功，如果失敗則不填入金額（避免帶入上一筆的資料）
         const ocrSuccess = ocrData.ocrSuccess !== false; // 預設為 true，只有明確為 false 時才視為失敗
+        const ocrUntaxedAmount = ocrOutput['未稅銷售額'] || '';
         const ocrTotalAmount = ocrOutput['總計金額'] || '';
-        // 如果 OCR 失敗或沒有總計金額，則設為空字串，不帶入 formData.receiptAmount
-        const lineAmount = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
+        // 金額應使用未稅銷售額，總金額作為 grossAmt
+        const lineAmount = (ocrSuccess && ocrUntaxedAmount) ? ocrUntaxedAmount : '';
         const lineGrossAmt = (ocrSuccess && ocrTotalAmount) ? ocrTotalAmount : '';
         
         const newLine: ExpenseReportLine = {

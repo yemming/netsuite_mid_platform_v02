@@ -282,7 +282,23 @@ export default function Sidebar() {
           {/* Top Section - User & Workspace - Sticky to match header */}
           <div className="sticky top-[6px] z-50 bg-white dark:bg-[#28363F]">
             <div className="flex items-center gap-2 px-6 h-[38px] border-b border-gray-200 dark:border-[#3a4f5d]">
-            <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1 pl-[14px]">
+            <div className="flex-shrink-0" style={{ width: '30px', height: '30px' }}>
+              {/* 亮色模式：綠色 logo */}
+              <img
+                src="/OC_Logo_Green.png"
+                alt="NetSuite交易模擬系統 Logo"
+                className="w-full h-full object-contain dark:hidden"
+                style={{ width: '30px', height: '30px' }}
+              />
+              {/* 暗色模式：紅色 logo */}
+              <img
+                src="/OC_Logo_Red.png"
+                alt="NetSuite交易模擬系統 Logo"
+                className="w-full h-full object-contain hidden dark:block"
+                style={{ width: '30px', height: '30px' }}
+              />
+            </div>
+            <span className="text-base font-bold text-gray-900 dark:text-white truncate flex-1">
               NetSuite交易模擬系統
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">
