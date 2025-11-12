@@ -295,7 +295,7 @@ export default function Sidebar() {
                 src="/OC_Logo_Red.png"
                 alt="NetSuite交易模擬系統 Logo"
                 className="w-full h-full object-contain hidden dark:block"
-                style={{ width: '45px', height: '45px', marginTop: '-8px' }}
+                style={{ width: '48px', height: '48px', marginTop: '-8px' }}
               />
             </div>
             <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1" style={{ marginLeft: '-3px' }}>
