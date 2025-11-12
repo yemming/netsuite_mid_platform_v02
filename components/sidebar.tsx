@@ -30,7 +30,12 @@ import {
   Package,
   Truck,
   ShoppingBag,
-  Factory
+  Factory,
+  BarChart3,
+  LineChart,
+  Table,
+  Move,
+  Box
 } from 'lucide-react'
 
 interface MenuItem {
@@ -89,6 +94,31 @@ const privatePages: MenuItem[] = [
         name: 'POS資料檢視',
         href: '/dashboard/pos',
         icon: Search,
+      },
+      {
+        name: 'Tremor展示',
+        href: '/dashboard/pos/tremor',
+        icon: BarChart3,
+      },
+      {
+        name: 'Recharts 展示',
+        href: '/dashboard/pos/recharts',
+        icon: LineChart,
+      },
+      {
+        name: 'TanStack Table展示',
+        href: '/dashboard/pos/tanstack-table',
+        icon: Table,
+      },
+      {
+        name: '核心拖拽引擎 - dnd-kit',
+        href: '/dashboard/pos/dnd-kit',
+        icon: Move,
+      },
+      {
+        name: '狀態管理 - Zustand',
+        href: '/dashboard/pos/zustand',
+        icon: Box,
       },
     ],
   },
