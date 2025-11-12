@@ -259,16 +259,50 @@ export default function MyExpensesPage() {
   const supabase = createClient();
 
   // 載入我的報支列表（只載入表頭，不載入 lines 和圖檔）
-  const loadReviews = async () => {
+  const loadReviews = async (retryCount = 0) => {
     setLoading(true);
     try {
-      // 取得當前使用者
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      // 優化：先檢查 session，如果失敗再嘗試刷新
+      let user = null;
+      let userError = null;
+      
+      // 先嘗試取得 session（更輕量）
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        // Session 不存在，嘗試取得 user（可能會觸發刷新）
+        const userResult = await supabase.auth.getUser();
+        user = userResult.data?.user;
+        userError = userResult.error;
+      } else {
+        // Session 存在，直接取得 user（使用快取的 session）
+        const userResult = await supabase.auth.getUser();
+        user = userResult.data?.user;
+        userError = userResult.error;
+      }
+      
+      // 如果還是沒有 user，且錯誤是 JWT 相關，嘗試刷新一次
+      if ((!user || userError) && retryCount === 0) {
+        try {
+          const { data: { session: newSession } } = await supabase.auth.refreshSession();
+          if (newSession) {
+            // 刷新成功，重試一次
+            return loadReviews(1);
+          }
+        } catch (refreshError) {
+          // 刷新失敗，繼續處理
+          console.warn('Session 刷新失敗:', refreshError);
+        }
+      }
+      
       if (userError || !user) {
-        throw new Error('無法取得使用者資訊，請重新登入');
+        // 認證失敗，導向登入頁面
+        console.error('認證失敗:', userError);
+        router.push('/');
+        return;
       }
 
-      // 只查詢表頭必要欄位，並只查詢 expense_lines 的總金額和幣別（不查其他欄位和圖檔）
+      // 查詢表頭資料（不包含 receipt_amount，因為資料庫中沒有這個欄位）
       let query = supabase
         .from('expense_reviews')
         .select(`
@@ -281,11 +315,7 @@ export default function MyExpensesPage() {
           expense_report_number,
           netsuite_tran_id,
           netsuite_url,
-          created_at,
-          expense_lines (
-            gross_amt,
-            currency
-          )
+          created_at
         `)
         .eq('created_by', user.id) // 只顯示當前使用者的報支
         .order('created_at', { ascending: false });
@@ -297,19 +327,46 @@ export default function MyExpensesPage() {
 
       const { data, error } = await query;
 
-      if (error) throw error;
+      if (error) {
+        console.error('查詢報支列表錯誤:', error);
+        throw error;
+      }
       
-      // 處理資料：計算總金額並格式化
+      // 優化：批次查詢所有 reviews 的總金額（使用聚合查詢）
+      const reviewIds = (data || []).map((r: any) => r.id);
+      
+      if (reviewIds.length === 0) {
+        setReviews([]);
+        return;
+      }
+      
+      // 使用 RPC 或批次查詢取得每個 review 的總金額和幣別
+      // 為了效能，我們使用一個查詢取得所有需要的資料
+      const { data: linesData, error: linesError } = await supabase
+        .from('expense_lines')
+        .select('expense_review_id, gross_amt, currency')
+        .in('expense_review_id', reviewIds);
+      
+      if (linesError) {
+        console.error('查詢 expense_lines 錯誤:', linesError);
+        // 即使查詢 lines 失敗，也顯示表頭資料（金額設為 0）
+      }
+      
+      // 計算每個 review 的總金額和幣別
+      const amountMap = new Map<string, { amount: number; currency: string }>();
+      
+      (linesData || []).forEach((line: any) => {
+        const reviewId = line.expense_review_id;
+        const current = amountMap.get(reviewId) || { amount: 0, currency: 'TWD' };
+        amountMap.set(reviewId, {
+          amount: current.amount + (parseFloat(line.gross_amt) || 0),
+          currency: line.currency || current.currency || 'TWD',
+        });
+      });
+      
+      // 組裝最終資料
       const processedData = (data || []).map((review: any) => {
-        // 從 expense_lines 計算總金額
-        const totalAmount = review.expense_lines?.reduce((sum: number, line: any) => {
-          return sum + (parseFloat(line.gross_amt) || 0);
-        }, 0) || 0;
-        
-        // 取得第一個 line 的幣別（如果有的話）
-        const firstLine = review.expense_lines?.[0];
-        const currency = firstLine?.currency || 'TWD';
-        
+        const amountInfo = amountMap.get(review.id) || { amount: 0, currency: 'TWD' };
         return {
           id: review.id,
           expense_date: review.expense_date,
@@ -317,19 +374,24 @@ export default function MyExpensesPage() {
           subsidiary_name: review.subsidiary_name,
           description: review.description,
           review_status: review.review_status,
-          expense_report_number: review.expense_report_number || null, // 費用報告編號
-          netsuite_tran_id: review.netsuite_tran_id || null, // NetSuite 報告編號
-          netsuite_url: review.netsuite_url || null, // NetSuite 網址
+          expense_report_number: review.expense_report_number || null,
+          netsuite_tran_id: review.netsuite_tran_id || null,
+          netsuite_url: review.netsuite_url || null,
           created_at: review.created_at,
-          receipt_amount: totalAmount,
-          receipt_currency: currency,
+          receipt_amount: amountInfo.amount,
+          receipt_currency: amountInfo.currency,
         };
       });
       
       setReviews(processedData);
     } catch (error: any) {
       console.error('載入報支列表錯誤:', error);
-      alert(`載入失敗: ${error.message}`);
+      // 改善錯誤處理：不顯示 alert，而是設置空列表並記錄錯誤
+      setReviews([]);
+      // 如果是認證錯誤，導向登入頁面
+      if (error.message?.includes('認證') || error.message?.includes('登入') || error.status === 401 || error.message?.includes('session')) {
+        router.push('/');
+      }
     } finally {
       setLoading(false);
     }
