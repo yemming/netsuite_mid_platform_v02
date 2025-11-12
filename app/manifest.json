@@ -1,6 +1,6 @@
 {
-  "name": "NetSuite AI Nexus",
-  "short_name": "NetSuite AI",
+  "name": "NetSuite交易模擬系統",
+  "short_name": "NetSuite交易模擬",
   "description": "NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration",
   "start_url": "/",
   "display": "standalone",

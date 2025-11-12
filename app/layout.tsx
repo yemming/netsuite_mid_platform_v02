@@ -7,7 +7,7 @@ import ColorfulHeaderBar from '@/components/colorful-header-bar'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'NetSuite AI Nexus',
+  title: 'NetSuite交易模擬系統',
   description: 'NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration',
   icons: {
     icon: [
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   // 如果需要 PWA 功能，可以在 manifest.json 中設定
   appleWebApp: {
     statusBarStyle: 'default',
-    title: 'NetSuite AI Nexus',
+    title: 'NetSuite交易模擬系統',
   },
 }
 

@@ -24,7 +24,13 @@ import {
   Receipt,
   Cog,
   Store,
-  ClipboardCheck
+  ClipboardCheck,
+  Users,
+  UserCheck,
+  Package,
+  Truck,
+  ShoppingBag,
+  Factory
 } from 'lucide-react'
 
 interface MenuItem {
@@ -40,6 +46,16 @@ const mainNavigation: MenuItem[] = [
     name: '儀表板',
     href: '/dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    name: '資料同步狀態',
+    href: '/dashboard/ocr-expense/sync-status',
+    icon: Database,
+  },
+  {
+    name: 'SuiteQL 查詢',
+    href: '/dashboard/query',
+    icon: Terminal,
   },
 ]
 
@@ -63,15 +79,82 @@ const privatePages: MenuItem[] = [
         href: '/dashboard/ocr-expense/reviews',
         icon: ClipboardCheck,
       },
+    ],
+  },
+  {
+    name: 'POS單據模擬',
+    icon: Store,
+    children: [
       {
-        name: '資料同步狀態',
-        href: '/dashboard/ocr-expense/sync-status',
-        icon: Database,
+        name: 'POS資料檢視',
+        href: '/dashboard/pos',
+        icon: Search,
       },
+    ],
+  },
+  {
+    name: 'HCM單據模擬',
+    icon: Users,
+    children: [
       {
-        name: 'SuiteQL 查詢',
-        href: '/dashboard/query',
-        icon: Terminal,
+        name: 'HCM資料檢視',
+        href: '/dashboard/hcm',
+        icon: Search,
+      },
+    ],
+  },
+  {
+    name: 'CRM單據模擬',
+    icon: UserCheck,
+    children: [
+      {
+        name: 'CRM資料檢視',
+        href: '/dashboard/crm',
+        icon: Search,
+      },
+    ],
+  },
+  {
+    name: 'WMS單據模擬',
+    icon: Package,
+    children: [
+      {
+        name: 'WMS資料檢視',
+        href: '/dashboard/wms',
+        icon: Search,
+      },
+    ],
+  },
+  {
+    name: 'SCM模擬',
+    icon: Truck,
+    children: [
+      {
+        name: 'SCM資料檢視',
+        href: '/dashboard/scm',
+        icon: Search,
+      },
+    ],
+  },
+  {
+    name: 'EC模擬',
+    icon: ShoppingBag,
+    children: [
+      {
+        name: 'EC資料檢視',
+        href: '/dashboard/ec',
+        icon: Search,
+      },
+    ],
+  },
+  {
+    name: 'MES模擬',
+    icon: Factory,
+    children: [
+      {
+        name: 'MES資料檢視',
+        href: '/dashboard/mes',
+        icon: Search,
       },
     ],
   },
@@ -200,7 +283,7 @@ export default function Sidebar() {
           <div className="sticky top-[6px] z-50 bg-white dark:bg-[#28363F]">
             <div className="flex items-center gap-2 px-6 h-[38px] border-b border-gray-200 dark:border-[#3a4f5d]">
             <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1 pl-[14px]">
-              NetSuite AI Nexus
+              NetSuite交易模擬系統
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button 
