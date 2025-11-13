@@ -35,7 +35,8 @@ import {
   LineChart,
   Table,
   Move,
-  Box
+  Box,
+  Wrench
 } from 'lucide-react'
 
 interface MenuItem {
@@ -94,31 +95,6 @@ const privatePages: MenuItem[] = [
         name: 'POS資料檢視',
         href: '/dashboard/pos',
         icon: Search,
-      },
-      {
-        name: 'Tremor展示',
-        href: '/dashboard/pos/tremor',
-        icon: BarChart3,
-      },
-      {
-        name: 'Recharts 展示',
-        href: '/dashboard/pos/recharts',
-        icon: LineChart,
-      },
-      {
-        name: 'TanStack Table展示',
-        href: '/dashboard/pos/tanstack-table',
-        icon: Table,
-      },
-      {
-        name: '核心拖拽引擎 - dnd-kit',
-        href: '/dashboard/pos/dnd-kit',
-        icon: Move,
-      },
-      {
-        name: '狀態管理 - Zustand',
-        href: '/dashboard/pos/zustand',
-        icon: Box,
       },
     ],
   },
@@ -185,6 +161,42 @@ const privatePages: MenuItem[] = [
         name: 'MES資料檢視',
         href: '/dashboard/mes',
         icon: Search,
+      },
+    ],
+  },
+  {
+    name: 'Next.JS工具箱',
+    icon: Wrench,
+    children: [
+      {
+        name: '工具箱首頁',
+        href: '/dashboard/nextjs-toolbox',
+        icon: Wrench,
+      },
+      {
+        name: 'Tremor展示',
+        href: '/dashboard/nextjs-toolbox/tremor',
+        icon: BarChart3,
+      },
+      {
+        name: 'Recharts 展示',
+        href: '/dashboard/nextjs-toolbox/recharts',
+        icon: LineChart,
+      },
+      {
+        name: 'TanStack Table展示',
+        href: '/dashboard/nextjs-toolbox/tanstack-table',
+        icon: Table,
+      },
+      {
+        name: '核心拖拽引擎 - dnd-kit',
+        href: '/dashboard/nextjs-toolbox/dnd-kit',
+        icon: Move,
+      },
+      {
+        name: '狀態管理 - Zustand',
+        href: '/dashboard/nextjs-toolbox/zustand',
+        icon: Box,
       },
     ],
   },

@@ -81,12 +81,42 @@ export default function ProfilePage() {
     try {
       const supabase = createClient()
       
+      // 如果有選擇員工，查詢員工的 subsidiary_id
+      let subsidiaryId: string | null = null
+      if (selectedEmployeeId) {
+        const { data: employeeData, error: employeeError } = await supabase
+          .from('ns_entities_employees')
+          .select('subsidiary_id')
+          .eq('netsuite_internal_id', selectedEmployeeId)
+          .eq('is_inactive', false)
+          .maybeSingle()
+        
+        if (employeeError) {
+          console.error('查詢員工資料錯誤:', employeeError)
+        } else if (employeeData?.subsidiary_id) {
+          // 查詢對應的 subsidiary UUID（ns_entities_employees.subsidiary_id 是 NetSuite internal ID）
+          const { data: subsidiaryData, error: subsidiaryError } = await supabase
+            .from('ns_subsidiaries')
+            .select('id')
+            .eq('netsuite_internal_id', employeeData.subsidiary_id)
+            .eq('is_active', true)
+            .maybeSingle()
+          
+          if (subsidiaryError) {
+            console.error('查詢公司別資料錯誤:', subsidiaryError)
+          } else if (subsidiaryData) {
+            subsidiaryId = subsidiaryData.id
+          }
+        }
+      }
+      
       // 使用 upsert 來更新或插入 user_profiles
       const { error } = await supabase
         .from('user_profiles')
         .upsert({
           id: user.id,
           netsuite_employee_id: selectedEmployeeId,
+          subsidiary_id: subsidiaryId,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'id'

@@ -191,11 +191,31 @@ export async function POST(request: Request) {
       queries.push(
         supabase
           .from('ns_expense_categories')
-          .select('netsuite_internal_id')
+          .select('netsuite_internal_id, is_inactive, subsidiary_id')
           .eq('id', firstLineCategoryId)
+          .eq('is_inactive', false) // 只查詢啟用的 category
           .maybeSingle()
           .then(({ data: category }) => {
-            expenseCategoryId = category?.netsuite_internal_id || null;
+            // 驗證 category 是否屬於當前的 subsidiary
+            // 如果 subsidiary_id 為 null，表示適用於所有 subsidiary
+            // 如果 subsidiary_id 有值，必須與當前的 subsidiaryId 匹配
+            // 注意：NetSuite 的 expensecategory.subsidiary 是多值欄位，可能包含多個公司別
+            // 但我們的資料庫只存了一個值，所以如果 subsidiary_id 不匹配，我們仍然允許使用
+            // （因為 NetSuite 中可能實際支援多個公司別）
+            if (category && !category.is_inactive) {
+              if (category.subsidiary_id === null || category.subsidiary_id === subsidiaryId) {
+                expenseCategoryId = category.netsuite_internal_id;
+              } else {
+                // 即使 subsidiary_id 不匹配，也允許使用（因為 NetSuite 可能支援多個公司別）
+                // 只在開發環境記錄警告
+                if (process.env.NODE_ENV === 'development') {
+                  console.warn(`[Sync Expense] Category ${firstLineCategoryId} (NS ID: ${category.netsuite_internal_id}) 的資料庫 subsidiary_id (${category.subsidiary_id}) 與當前 subsidiary (${subsidiaryId}) 不匹配，但 NetSuite 中可能支援多個公司別，繼續使用`);
+                }
+                expenseCategoryId = category.netsuite_internal_id;
+              }
+            } else {
+              expenseCategoryId = null;
+            }
           })
       );
     }
@@ -382,6 +402,7 @@ export async function POST(request: Request) {
     // Expense Items（費用明細）
     // ⚠️ 重要：現在需要從 expense_lines 建立多個 expense items
     // 每個 expense_line 對應一個 NetSuite expense item
+    // 注意：此時 queries 已經在第 258 行等待完成，subsidiaryId 已經被設定
     
     // 先查詢所有 expense_lines 需要的 NetSuite IDs（並行查詢）
     const lineQueries: PromiseLike<any>[] = [];
@@ -409,11 +430,31 @@ export async function POST(request: Request) {
         lineQueries.push(
           supabase
             .from('ns_expense_categories')
-            .select('netsuite_internal_id')
+            .select('netsuite_internal_id, is_inactive, subsidiary_id')
             .eq('id', line.category_id)
+            .eq('is_inactive', false) // 只查詢啟用的 category
             .maybeSingle()
             .then(({ data: category }) => {
-              lineNetSuiteData[i].categoryId = category?.netsuite_internal_id || null;
+              // 驗證 category 是否屬於當前的 subsidiary
+              // 如果 subsidiary_id 為 null，表示適用於所有 subsidiary
+              // 如果 subsidiary_id 有值，必須與當前的 subsidiaryId 匹配
+              // 注意：NetSuite 的 expensecategory.subsidiary 是多值欄位，可能包含多個公司別
+              // 但我們的資料庫只存了一個值，所以如果 subsidiary_id 不匹配，我們仍然允許使用
+              // （因為 NetSuite 中可能實際支援多個公司別）
+              if (category && !category.is_inactive) {
+                if (category.subsidiary_id === null || category.subsidiary_id === subsidiaryId) {
+                  lineNetSuiteData[i].categoryId = category.netsuite_internal_id;
+                } else {
+                  // 即使 subsidiary_id 不匹配，也允許使用（因為 NetSuite 可能支援多個公司別）
+                  // 只在開發環境記錄警告
+                  if (process.env.NODE_ENV === 'development') {
+                    console.warn(`[Sync Expense] Category ${line.category_id} (NS ID: ${category.netsuite_internal_id}) 的資料庫 subsidiary_id (${category.subsidiary_id}) 與當前 subsidiary (${subsidiaryId}) 不匹配，但 NetSuite 中可能支援多個公司別，繼續使用`);
+                  }
+                  lineNetSuiteData[i].categoryId = category.netsuite_internal_id;
+                }
+              } else {
+                lineNetSuiteData[i].categoryId = null;
+              }
             })
         );
       }
@@ -486,17 +527,48 @@ export async function POST(request: Request) {
 
       // 驗證必填欄位
       if (!lineData.categoryId || !lineData.currencyId || !line.amount) {
+        const missingFields: string[] = [];
+        let errorMessage = '';
+        
+        if (!lineData.categoryId) {
+          if (line.category_id) {
+            errorMessage = `第 ${i + 1} 筆明細的費用類別 (ID: ${line.category_id}) 找不到對應的 NetSuite ID 或該類別不屬於當前的公司別。請確認該費用類別已啟用且屬於當前公司別。`;
+          } else {
+            missingFields.push('category');
+          }
+        }
+        if (!lineData.currencyId) {
+          missingFields.push('currency');
+        }
+        if (!line.amount) {
+          missingFields.push('amount');
+        }
+        
+        if (!errorMessage && missingFields.length > 0) {
+          errorMessage = `第 ${i + 1} 筆明細缺少必填欄位：${missingFields.join(', ')}`;
+        }
+
+        // 建立部分 payload 用於除錯（即使驗證失敗也保存）
+        const partialPayload = {
+          ...expenseReportPayload,
+          expense: expenseItems, // 已建立的 items
+          _validation_error: true,
+          _failed_at_line: i + 1,
+          _line_data: lineNetSuiteData[i],
+        };
+
         await supabase
           .from('expense_reviews')
           .update({
             netsuite_sync_status: 'failed',
-            netsuite_sync_error: `第 ${i + 1} 筆明細缺少必填欄位：category, currency 或 amount`,
+            netsuite_sync_error: errorMessage,
             netsuite_sync_retry_count: (review.netsuite_sync_retry_count || 0) + 1,
+            netsuite_request_payload: partialPayload,
           })
           .eq('id', review_id);
 
         return NextResponse.json(
-          { error: `第 ${i + 1} 筆明細缺少必填欄位：category, currency 或 amount` },
+          { error: errorMessage },
           { status: 400 }
         );
       }

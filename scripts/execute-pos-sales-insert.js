@@ -20,3 +20,8 @@ batches.forEach((batch, index) => {
 console.log(`\n已生成 ${batches.length} 個批次檔案。`);
 console.log('請使用 Supabase MCP 的 execute_sql 工具來執行這些批次。');
 
+
+
+
+
+

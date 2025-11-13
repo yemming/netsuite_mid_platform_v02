@@ -212,6 +212,26 @@ export default function OCRExpensePage() {
   const processedJobIdsRef = useRef<Set<string>>(new Set());
   // 追蹤已經建立 expense line 的 fileIndex，避免重複建立
   const createdExpenseLineFileIndexesRef = useRef<Set<number>>(new Set());
+  // 使用 ref 存儲最新的 formOptions，方便在異步回調中使用
+  const formOptionsRef = useRef<{
+    employees: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    expenseCategories: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    subsidiaries: Array<{ id: string; name: string; netsuite_internal_id: number; country: string | null }>;
+    locations: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    departments: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    classes: Array<{ id: string; name: string; netsuite_internal_id: number }>;
+    currencies: Array<{ id: string; name: string; symbol: string; netsuite_internal_id: number }>;
+    taxCodes: Array<{ id: string; name: string; rate: number | null; description: string | null; country: string | null; netsuite_internal_id: number }>;
+  }>({
+    employees: [],
+    expenseCategories: [],
+    subsidiaries: [],
+    locations: [],
+    departments: [],
+    classes: [],
+    currencies: [],
+    taxCodes: [],
+  });
   // 表單選項資料（一次載入所有）
   const [formOptions, setFormOptions] = useState<{
     employees: Array<{ id: string; name: string; netsuite_internal_id: number }>;
@@ -704,10 +724,10 @@ export default function OCRExpensePage() {
           return;
         }
         
-        // 取得使用者的員工 mapping
+        // 取得使用者的員工 mapping（包含 subsidiary_id）
         const { data: userProfile } = await supabase
           .from('user_profiles')
-          .select('netsuite_employee_id')
+          .select('netsuite_employee_id, subsidiary_id')
           .eq('id', user.id)
           .maybeSingle();
         
@@ -719,7 +739,7 @@ export default function OCRExpensePage() {
           const subsidiaries = result.data.subsidiaries || [];
           const taxCodes = result.data.taxCodes || [];
           
-          setFormOptions({
+          const newFormOptions = {
             employees: result.data.employees || [],
             expenseCategories: result.data.expenseCategories || [],
             subsidiaries: subsidiaries,
@@ -728,7 +748,10 @@ export default function OCRExpensePage() {
             classes: result.data.classes || [],
             currencies: result.data.currencies || [],
             taxCodes: taxCodes,
-          });
+          };
+          // 同時更新 state 和 ref
+          setFormOptions(newFormOptions);
+          formOptionsRef.current = newFormOptions;
           
           // 如果有警告，顯示在 console
           if (result.warnings && result.warnings.length > 0) {
@@ -738,52 +761,82 @@ export default function OCRExpensePage() {
           // 如果有 mapping 的員工，自動填入員工和公司別（僅在非編輯模式時執行）
           // 編輯模式時不執行，避免覆蓋已載入的資料
           if (!expenseReviewId && userProfile?.netsuite_employee_id) {
-            // 查詢員工資料
-            const { data: employeeData } = await supabase
-              .from('ns_entities_employees')
-              .select('id, netsuite_internal_id, subsidiary_id, department_id')
-              .eq('netsuite_internal_id', userProfile.netsuite_employee_id)
-              .eq('is_inactive', false)
-              .single();
+            // 找到對應的員工 ID（使用 formOptions 中的 id）
+            const matchedEmployee = result.data.employees?.find(
+              (emp: any) => emp.netsuite_internal_id === userProfile.netsuite_employee_id
+            );
             
-            if (employeeData) {
-              // 找到對應的員工 ID（使用 formOptions 中的 id）
-              const matchedEmployee = result.data.employees?.find(
-                (emp: any) => emp.netsuite_internal_id === employeeData.netsuite_internal_id
+            if (matchedEmployee) {
+              setFormData(prev => ({
+                ...prev,
+                employee: matchedEmployee.id,
+              }));
+            }
+            
+            // 如果有保存的 subsidiary_id，直接使用（優先於從員工查詢）
+            if (userProfile.subsidiary_id) {
+              const matchedSubsidiary = subsidiaries.find(
+                (sub: any) => sub.id === userProfile.subsidiary_id
               );
               
-              if (matchedEmployee) {
+              if (matchedSubsidiary) {
                 setFormData(prev => ({
                   ...prev,
-                  employee: matchedEmployee.id,
+                  subsidiary: matchedSubsidiary.id,
                 }));
-              }
-              
-              // 如果有 subsidiary_id，自動填入公司別
-              if (employeeData.subsidiary_id) {
-                const matchedSubsidiary = subsidiaries.find(
-                  (sub: any) => sub.netsuite_internal_id === employeeData.subsidiary_id
-                );
                 
-                if (matchedSubsidiary) {
-                  setFormData(prev => ({
-                    ...prev,
-                    subsidiary: matchedSubsidiary.id,
-                  }));
+                // 根據 subsidiary 的 country 篩選稅碼
+                const country = matchedSubsidiary.country;
+                if (country) {
+                  const filtered = taxCodes.filter((tc: any) => tc.country === country);
+                  setFilteredTaxCodes(filtered);
+                } else {
+                  setFilteredTaxCodes(taxCodes);
+                }
+              }
+            } else if (matchedEmployee) {
+              // 如果 user_profiles 中沒有 subsidiary_id，從員工資料查詢（向後兼容）
+              const { data: employeeData } = await supabase
+                .from('ns_entities_employees')
+                .select('subsidiary_id')
+                .eq('netsuite_internal_id', userProfile.netsuite_employee_id)
+                .eq('is_inactive', false)
+                .maybeSingle();
+              
+              if (employeeData?.subsidiary_id) {
+                // 查詢對應的 subsidiary UUID
+                const { data: subsidiaryData } = await supabase
+                  .from('ns_subsidiaries')
+                  .select('id')
+                  .eq('netsuite_internal_id', employeeData.subsidiary_id)
+                  .eq('is_active', true)
+                  .maybeSingle();
+                
+                if (subsidiaryData) {
+                  const matchedSubsidiary = subsidiaries.find(
+                    (sub: any) => sub.id === subsidiaryData.id
+                  );
                   
-                  // 根據 subsidiary 的 country 篩選稅碼
-                  const country = matchedSubsidiary.country;
-                  if (country) {
-                    const filtered = taxCodes.filter((tc: any) => tc.country === country);
-                    setFilteredTaxCodes(filtered);
-                  } else {
-                    setFilteredTaxCodes(taxCodes);
+                  if (matchedSubsidiary) {
+                    setFormData(prev => ({
+                      ...prev,
+                      subsidiary: matchedSubsidiary.id,
+                    }));
+                    
+                    // 根據 subsidiary 的 country 篩選稅碼
+                    const country = matchedSubsidiary.country;
+                    if (country) {
+                      const filtered = taxCodes.filter((tc: any) => tc.country === country);
+                      setFilteredTaxCodes(filtered);
+                    } else {
+                      setFilteredTaxCodes(taxCodes);
+                    }
                   }
                 }
               }
-              
-              // 部門、地點、類別現在只在表身的每一行中選擇，不再在表頭
             }
+            
+            // 部門、地點、類別現在只在表身的每一行中選擇，不再在表頭
           }
         } else {
           console.error('載入表單選項失敗:', result.error || result.message);
@@ -1318,59 +1371,131 @@ export default function OCRExpensePage() {
     }
     
     // 從 OCR 結果取得費用類型，並匹配到 expense category
+    // 先記錄 OCR 結果以便除錯
+    console.log(`[createExpenseLineFromOCR] OCR 結果 (fileIndex: ${fileIndex}):`, {
+      ocrOutput: ocrOutput,
+      ocrOutputKeys: Object.keys(ocrOutput),
+      expenseCategoriesCount: formOptions.expenseCategories.length,
+    });
+    
     const expenseTypeFromOCR = ocrOutput['費用類型'] || ocrOutput['費用類別'] || '';
     // 取得費用描述（新格式中的欄位）
     const expenseDescription = ocrOutput['費用描述'] || '';
     let matchedCategoryId = '';
     
-    if (expenseTypeFromOCR && formOptions.expenseCategories.length > 0) {
+    console.log(`[createExpenseLineFromOCR] 費用類型從 OCR 取得: "${expenseTypeFromOCR}"`);
+    
+    // 匹配函數（可重複使用）
+    const matchCategory = (categories: typeof formOptions.expenseCategories): string => {
+      if (!expenseTypeFromOCR || categories.length === 0) {
+        return '';
+      }
+      
       // 優先嘗試：將費用類型轉換為數字，用 netsuite_internal_id 匹配
       // N8N 傳回的「費用類型」通常是 NetSuite 的 internal ID（如 "11"）
       const expenseTypeAsNumber = parseInt(String(expenseTypeFromOCR).trim());
+      console.log(`[createExpenseLineFromOCR] 嘗試將費用類型轉換為數字: ${expenseTypeAsNumber} (isNaN: ${isNaN(expenseTypeAsNumber)})`);
+      
       if (!isNaN(expenseTypeAsNumber)) {
-        const idMatch = formOptions.expenseCategories.find(
+        const idMatch = categories.find(
           cat => cat.netsuite_internal_id === expenseTypeAsNumber
         );
         
         if (idMatch) {
-          matchedCategoryId = idMatch.id;
-          console.log(`[createExpenseLineFromOCR] 透過 netsuite_internal_id (${expenseTypeAsNumber}) 匹配到費用類別: ${idMatch.name}`);
+          console.log(`[createExpenseLineFromOCR] ✅ 透過 netsuite_internal_id (${expenseTypeAsNumber}) 匹配到費用類別: ${idMatch.name} (ID: ${idMatch.id})`);
+          return idMatch.id;
+        } else {
+          console.log(`[createExpenseLineFromOCR] ❌ 無法透過 netsuite_internal_id (${expenseTypeAsNumber}) 找到匹配的 category`);
+          console.log(`[createExpenseLineFromOCR] 可用的 expense categories:`, categories.map(c => ({ id: c.netsuite_internal_id, name: c.name })));
         }
       }
       
       // 如果 ID 匹配失敗，嘗試用名稱匹配（作為 fallback）
-      if (!matchedCategoryId) {
-        // 將費用類型轉換為小寫以便進行大小寫不敏感匹配
-        const expenseTypeLower = String(expenseTypeFromOCR).trim().toLowerCase();
-        
-        // 嘗試精確匹配名稱（大小寫不敏感）
-        const exactMatch = formOptions.expenseCategories.find(
-          cat => cat.name.trim().toLowerCase() === expenseTypeLower
-        );
-        
-        if (exactMatch) {
-          matchedCategoryId = exactMatch.id;
-          console.log(`[createExpenseLineFromOCR] 透過名稱匹配到費用類別: ${exactMatch.name}`);
-        } else {
-          // 嘗試模糊匹配（包含關係，大小寫不敏感）
-          const fuzzyMatch = formOptions.expenseCategories.find(
-            cat => {
-              const catNameLower = cat.name.trim().toLowerCase();
-              return catNameLower.includes(expenseTypeLower) || expenseTypeLower.includes(catNameLower);
-            }
-          );
-          
-          if (fuzzyMatch) {
-            matchedCategoryId = fuzzyMatch.id;
-            console.log(`[createExpenseLineFromOCR] 透過模糊匹配到費用類別: ${fuzzyMatch.name}`);
-          } else {
-            // 如果找不到匹配，記錄到 console 以便除錯
-            console.warn(`[createExpenseLineFromOCR] 無法匹配費用類型 "${expenseTypeFromOCR}" 到任何 expense category`);
-            console.log(`[createExpenseLineFromOCR] 可用的 expense categories:`, formOptions.expenseCategories.map(c => ({ id: c.netsuite_internal_id, name: c.name })));
-          }
-        }
+      const expenseTypeLower = String(expenseTypeFromOCR).trim().toLowerCase();
+      console.log(`[createExpenseLineFromOCR] 嘗試用名稱匹配: "${expenseTypeLower}"`);
+      
+      // 嘗試精確匹配名稱（大小寫不敏感）
+      const exactMatch = categories.find(
+        cat => cat.name.trim().toLowerCase() === expenseTypeLower
+      );
+      
+      if (exactMatch) {
+        console.log(`[createExpenseLineFromOCR] ✅ 透過名稱匹配到費用類別: ${exactMatch.name} (ID: ${exactMatch.id})`);
+        return exactMatch.id;
       }
+      
+      // 嘗試模糊匹配（包含關係，大小寫不敏感）
+      const fuzzyMatch = categories.find(
+        cat => {
+          const catNameLower = cat.name.trim().toLowerCase();
+          return catNameLower.includes(expenseTypeLower) || expenseTypeLower.includes(catNameLower);
+        }
+      );
+      
+      if (fuzzyMatch) {
+        console.log(`[createExpenseLineFromOCR] ✅ 透過模糊匹配到費用類別: ${fuzzyMatch.name} (ID: ${fuzzyMatch.id})`);
+        return fuzzyMatch.id;
+      }
+      
+      // 如果找不到匹配，記錄到 console 以便除錯
+      console.warn(`[createExpenseLineFromOCR] ❌ 無法匹配費用類型 "${expenseTypeFromOCR}" 到任何 expense category`);
+      console.log(`[createExpenseLineFromOCR] 可用的 expense categories:`, categories.map(c => ({ id: c.netsuite_internal_id, name: c.name })));
+      return '';
+    };
+    
+    // 立即嘗試匹配
+    if (formOptions.expenseCategories.length > 0) {
+      matchedCategoryId = matchCategory(formOptions.expenseCategories);
+    } else {
+      console.warn(`[createExpenseLineFromOCR] ⚠️ formOptions.expenseCategories 尚未載入完成 (length: ${formOptions.expenseCategories.length})，將在載入完成後重新匹配`);
+      
+      // 如果 expenseCategories 還沒載入，等待載入完成後重新匹配
+      // 使用 setTimeout 來延遲檢查（最多等待 5 秒）
+      let retryCount = 0;
+      const maxRetries = 10; // 最多重試 10 次（每次 500ms，總共 5 秒）
+      
+      const retryMatch = () => {
+        retryCount++;
+        // 使用 ref 來獲取最新的 formOptions（避免閉包問題）
+        const currentCategories = formOptionsRef.current.expenseCategories;
+        if (currentCategories.length > 0) {
+          const matched = matchCategory(currentCategories);
+          if (matched) {
+            // 更新對應的 expense line 的 category
+            setExpenseLines(prev => prev.map(line => {
+              const lineId = line.id || '';
+              const lineOcrFileId = line.ocrData?.ocrFileId || '';
+              
+              // 匹配條件：id 包含 uniqueId，或 ocrFileId 相同
+              if (lineId.includes(uniqueId) || 
+                  lineOcrFileId === uniqueId ||
+                  (line.ocrData && line.ocrData.ocrFileId === ocrData.ocrFileId)) {
+                return {
+                  ...line,
+                  category: matched,
+                };
+              }
+              return line;
+            }));
+            console.log(`[createExpenseLineFromOCR] ✅ 延遲匹配成功，已更新 category: ${matched}`);
+          }
+        } else if (retryCount < maxRetries) {
+          setTimeout(retryMatch, 500); // 每 500ms 重試一次
+        } else {
+          console.warn(`[createExpenseLineFromOCR] ⚠️ 等待 expenseCategories 載入超時，放棄匹配`);
+        }
+      };
+      
+      // 第一次延遲 500ms 後開始重試
+      setTimeout(retryMatch, 500);
     }
+    
+    if (!expenseTypeFromOCR) {
+      console.warn(`[createExpenseLineFromOCR] ⚠️ OCR 結果中沒有「費用類型」或「費用類別」欄位`);
+      console.log(`[createExpenseLineFromOCR] OCR output 的所有欄位:`, Object.keys(ocrOutput));
+    }
+    
+    console.log(`[createExpenseLineFromOCR] 最終匹配到的 category ID: "${matchedCategoryId}"`);
     
     // 將檔案數據和類型添加到 ocrData 中
     const ocrDataWithAttachment = {

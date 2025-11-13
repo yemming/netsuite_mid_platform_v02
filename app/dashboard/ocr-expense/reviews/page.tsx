@@ -33,6 +33,7 @@ interface ExpenseReview {
   netsuite_tran_id: string | null; // NetSuite 交易編號（NetSuite 報告編號）
   netsuite_sync_error: string | null; // 同步錯誤訊息
   netsuite_url: string | null; // NetSuite 網址（用於直接連結）
+  netsuite_response_payload: any | null; // NetSuite 返回的 JSON（除錯用）
   created_by_name: string | null;
   created_at: string;
   review_notes: string | null;
@@ -227,6 +228,15 @@ export default function ExpenseReviewsPage() {
   const [isEditing, setIsEditing] = useState(false); // 是否處於編輯模式
   const [editingData, setEditingData] = useState<Partial<ExpenseReview> | null>(null); // 編輯中的資料
   const [saving, setSaving] = useState(false); // 是否正在保存
+  const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false); // 錯誤詳情 Dialog 開關
+  const [errorReview, setErrorReview] = useState<ExpenseReview | null>(null); // 當前查看錯誤的 review
+  const [errorDetails, setErrorDetails] = useState<{
+    error: string | null;
+    requestPayload: any | null;
+    responsePayload: any | null;
+  } | null>(null); // 錯誤詳情（從 API 獲取）
+  const [errorDetailsLoading, setErrorDetailsLoading] = useState(false); // 載入錯誤詳情中
+  const [retryingSync, setRetryingSync] = useState(false); // 正在重新同步中
   const [formOptions, setFormOptions] = useState<{
     employees: Array<{ id: string; name: string }>;
     expenseCategories: Array<{ id: string; name: string }>;
@@ -1257,25 +1267,148 @@ export default function ExpenseReviewsPage() {
     }
   };
 
-  const getNetSuiteSyncBadge = (syncStatus: string | null, reviewStatus: string) => {
+  // 載入錯誤詳情
+  const loadErrorDetails = async (reviewId: string) => {
+    setErrorDetailsLoading(true);
+    try {
+      const response = await fetch(`/api/expense-reports/${reviewId}`);
+      const result = await response.json();
+      
+      if (result.success && result.data?.header) {
+        setErrorDetails({
+          error: result.data.header.netsuite_sync_error || null,
+          requestPayload: result.data.header.netsuite_request_payload || null,
+          responsePayload: result.data.header.netsuite_response_payload || null,
+        });
+      } else {
+        setErrorDetails({
+          error: '無法載入錯誤詳情',
+          requestPayload: null,
+          responsePayload: null,
+        });
+      }
+    } catch (error: any) {
+      console.error('載入錯誤詳情失敗:', error);
+      setErrorDetails({
+        error: error.message || '載入錯誤詳情失敗',
+        requestPayload: null,
+        responsePayload: null,
+      });
+    } finally {
+      setErrorDetailsLoading(false);
+    }
+  };
+
+  // 處理查看錯誤詳情
+  const handleViewErrorDetails = async (review: ExpenseReview) => {
+    setErrorReview(review);
+    setIsErrorDialogOpen(true);
+    await loadErrorDetails(review.id);
+  };
+
+  // 重新上傳到 NetSuite（從錯誤詳情對話框）
+  const handleRetrySync = async () => {
+    if (!errorReview || retryingSync) {
+      return;
+    }
+
+    setRetryingSync(true);
+    try {
+      // 先更新狀態為同步中
+      setErrorReview(prev => prev ? {
+        ...prev,
+        netsuite_sync_status: 'syncing',
+      } : null);
+
+      // 調用同步 API
+      const response = await fetch('/api/sync-expense-to-netsuite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ review_id: errorReview.id }),
+      });
+
+      const result = await response.json();
+
+      // 等待一小段時間讓 API 處理完成
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // 重新載入錯誤詳情（會取得最新的錯誤訊息或成功狀態）
+      await loadErrorDetails(errorReview.id);
+
+      // 重新載入報支列表以取得最新狀態
+      await loadReviews();
+
+      // 如果同步成功，更新 errorReview 狀態
+      if (result.success) {
+        setErrorReview(prev => prev ? {
+          ...prev,
+          netsuite_sync_status: 'success',
+          netsuite_internal_id: result.netsuite_internal_id || null,
+          netsuite_tran_id: result.netsuite_tran_id || null,
+          netsuite_sync_error: null,
+          netsuite_url: result.netsuite_url || null,
+        } : null);
+      } else {
+        // 同步失敗，更新錯誤訊息
+        setErrorReview(prev => prev ? {
+          ...prev,
+          netsuite_sync_status: 'failed',
+          netsuite_sync_error: result.error || result.message || '同步失敗',
+        } : null);
+      }
+    } catch (error: any) {
+      console.error('重新同步失敗:', error);
+      const errorMessage = error.message || '未知錯誤';
+      
+      // 更新錯誤狀態
+      setErrorReview(prev => prev ? {
+        ...prev,
+        netsuite_sync_status: 'failed',
+        netsuite_sync_error: errorMessage,
+      } : null);
+      
+      // 重新載入錯誤詳情以顯示最新的錯誤訊息
+      await loadErrorDetails(errorReview.id);
+    } finally {
+      setRetryingSync(false);
+    }
+  };
+
+  const getNetSuiteSyncBadge = (review: ExpenseReview) => {
+    const { netsuite_sync_status, review_status } = review;
+    
     // 只有已審核通過的報支才顯示 NetSuite 同步狀態
-    if (reviewStatus !== 'approved') {
+    if (review_status !== 'approved') {
       return <span className="text-gray-400 dark:text-gray-500">-</span>;
     }
 
-    if (!syncStatus || syncStatus === 'pending') {
+    if (!netsuite_sync_status || netsuite_sync_status === 'pending') {
       return <Badge className="bg-gray-400 text-white">⏳ 待同步</Badge>;
     }
 
-    switch (syncStatus) {
+    switch (netsuite_sync_status) {
       case 'success':
         return <Badge className="bg-green-500 text-white">✅ 已同步</Badge>;
       case 'syncing':
         return <Badge className="bg-yellow-500 text-white">🔄 與 NetSuite 同步中</Badge>;
       case 'failed':
-        return <Badge className="bg-red-500 text-white">❌ 同步失敗</Badge>;
+        return (
+          <button
+            type="button"
+            className="inline-flex items-center px-2 py-1 rounded-md bg-red-500 text-white text-xs font-medium hover:bg-red-600 transition-colors cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleViewErrorDetails(review);
+            }}
+            title="點擊查看錯誤詳情"
+          >
+            ❌ 同步失敗
+          </button>
+        );
       default:
-        return <Badge>{syncStatus}</Badge>;
+        return <Badge>{netsuite_sync_status}</Badge>;
     }
   };
 
@@ -1392,7 +1525,7 @@ export default function ExpenseReviewsPage() {
                       {formatAmount(review.receipt_amount, review.receipt_currency)}
                     </TableCell>
                     <TableCell className="text-center">
-                      {getNetSuiteSyncBadge(review.netsuite_sync_status, review.review_status)}
+                      {getNetSuiteSyncBadge(review)}
                     </TableCell>
                     <TableCell className="text-center">
                       <Button
@@ -2463,7 +2596,18 @@ export default function ExpenseReviewsPage() {
                     {selectedReview.netsuite_sync_error && (
                       <div className="col-span-2">
                         <Label className="text-sm font-medium text-gray-500 dark:text-gray-400">錯誤訊息</Label>
-                        <p className="mt-1 text-sm text-red-600 dark:text-red-400">{selectedReview.netsuite_sync_error}</p>
+                        <div className="mt-1 flex items-start gap-2">
+                          <p className="text-sm text-red-600 dark:text-red-400 flex-1">{selectedReview.netsuite_sync_error}</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewErrorDetails(selectedReview)}
+                            className="shrink-0"
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            查看完整錯誤
+                          </Button>
+                        </div>
                       </div>
                     )}
                     {selectedReview.netsuite_sync_status !== 'success' && (
@@ -2553,6 +2697,181 @@ export default function ExpenseReviewsPage() {
                 )}
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 錯誤詳情對話框 */}
+      <Dialog open={isErrorDialogOpen} onOpenChange={setIsErrorDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              NetSuite 同步錯誤詳情
+            </DialogTitle>
+            <DialogDescription>
+              報支編號：{errorReview?.expense_report_number || errorReview?.id || '-'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {/* 重新上傳按鈕 */}
+          {errorReview && (errorReview.netsuite_sync_status === 'failed' || errorReview.netsuite_sync_status === 'syncing') && (
+            <div className="mb-4">
+              <Button
+                onClick={handleRetrySync}
+                disabled={retryingSync || errorReview.netsuite_sync_status === 'syncing'}
+                className="w-full"
+                variant={errorReview.netsuite_sync_status === 'failed' ? 'default' : 'outline'}
+              >
+                {retryingSync || errorReview.netsuite_sync_status === 'syncing' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    重新同步中...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4 mr-2" />
+                    重新上傳到 NetSuite
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {/* 同步成功提示 */}
+          {errorReview && errorReview.netsuite_sync_status === 'success' && (
+            <div className="mb-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md p-4">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                <p className="text-sm font-medium text-green-800 dark:text-green-200">
+                  同步成功！報支已成功上傳到 NetSuite
+                </p>
+              </div>
+              {errorReview.netsuite_url && (
+                <p className="mt-2 text-sm text-green-700 dark:text-green-300">
+                  <a
+                    href={errorReview.netsuite_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:no-underline"
+                  >
+                    在 NetSuite 中查看
+                  </a>
+                </p>
+              )}
+            </div>
+          )}
+          {errorDetailsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-primary mr-2" />
+              <span>載入錯誤詳情中...</span>
+            </div>
+          ) : errorDetails ? (
+            <div className="space-y-6">
+              {/* NetSuite 請求 Payload（放在最上面） */}
+              {errorDetails.requestPayload && (
+                <div>
+                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">
+                    NetSuite 請求 Payload
+                  </Label>
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4">
+                    <pre className="text-xs text-blue-800 dark:text-blue-200 whitespace-pre-wrap break-words overflow-x-auto">
+                      {JSON.stringify(errorDetails.requestPayload, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* 錯誤訊息 */}
+              {errorDetails.error && (
+                <div>
+                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">
+                    錯誤訊息
+                  </Label>
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-4">
+                    <p className="text-sm text-red-800 dark:text-red-200 whitespace-pre-wrap break-words">
+                      {errorDetails.error}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* NetSuite 回應內容 */}
+              {errorDetails.responsePayload && (
+                <div>
+                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">
+                    NetSuite 回應內容
+                  </Label>
+                  <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-md p-4">
+                    <pre className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words overflow-x-auto">
+                      {JSON.stringify(errorDetails.responsePayload, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* 如果沒有錯誤詳情 */}
+              {!errorDetails.error && !errorDetails.responsePayload && (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  沒有找到錯誤詳情
+                </div>
+              )}
+
+              {/* 報支基本資訊 */}
+              {errorReview && (
+                <div className="border-t pt-4">
+                  <Label className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 block">
+                    報支基本資訊
+                  </Label>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-500 dark:text-gray-400">報支日期：</span>
+                      <span className="ml-2">{formatDate(errorReview.expense_date)}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-gray-400">員工：</span>
+                      <span className="ml-2">{errorReview.employee_name || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-gray-400">公司別：</span>
+                      <span className="ml-2">{errorReview.subsidiary_name || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-gray-400">總金額：</span>
+                      <span className="ml-2">{formatAmount(errorReview.receipt_amount, errorReview.receipt_currency)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              載入錯誤詳情失敗
+            </div>
+          )}
+          <DialogFooter>
+            {errorReview && errorReview.netsuite_sync_status === 'failed' && (
+              <Button
+                onClick={handleRetrySync}
+                disabled={retryingSync || errorReview.netsuite_sync_status === 'syncing'}
+                className="mr-2"
+              >
+                {retryingSync || errorReview.netsuite_sync_status === 'syncing' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    重新同步中...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4 mr-2" />
+                    重新上傳
+                  </>
+                )}
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setIsErrorDialogOpen(false)}>
+              關閉
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
