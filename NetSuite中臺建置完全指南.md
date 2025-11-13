@@ -55,6 +55,7 @@
   - [12.4 前端頁面實作](#124-前端頁面實作)
   - [12.5 效能優化策略](#125-效能優化策略)
   - [12.6 錯誤處理與重試機制](#126-錯誤處理與重試機制)
+- [13. LINE Pay 金流對接設計](#13-line-pay-金流對接設計)
 
 ---
 
@@ -5558,6 +5559,63 @@ ALTER TABLE expense_lines
 5. 撰寫團隊操作手冊
 
 祝你建置順利！🚀
+
+---
+
+## 13. LINE Pay 金流對接設計
+
+> **本章節記錄 LINE Pay 金流對接的完整設計和實作細節。**  
+> **最後更新**: 2025-01-XX
+
+### 13.1 概述
+
+LINE Pay 金流對接系統提供完整的付款流程，包含：
+
+- **QR Code 付款條碼產生**：POS 系統產生 LINE Pay 付款條碼
+- **付款狀態輪詢**：自動檢查付款狀態
+- **付款確認機制**：確認付款後建立對賬記錄
+- **金流管理整合**：自動將付款記錄寫入金流管理系統
+
+### 13.2 完整設計文件
+
+詳細的設計文件請參考：[LINE Pay 金流對接設計文件](./docs/LINE_PAY_INTEGRATION_DESIGN.md)
+
+該文件包含：
+
+1. **系統架構**：完整的架構圖和元件說明
+2. **流程設計**：付款流程的完整序列圖和狀態轉換圖
+3. **API 設計**：所有 API 端點的詳細規格
+4. **資料結構**：所有相關資料結構的定義
+5. **前端實作**：前端元件的實作細節
+6. **後端實作**：後端 API 的實作邏輯
+7. **狀態管理**：狀態管理的完整流程
+8. **錯誤處理**：錯誤處理機制
+9. **測試流程**：測試步驟和場景
+10. **未來改進方向**：V1、V2、V3 的改進計劃
+
+### 13.3 快速參考
+
+#### 核心檔案
+
+- `lib/linepay-manager.ts` - LINE Pay 管理工具類別
+- `app/api/mock/linepay/request/route.ts` - 付款請求 API
+- `app/api/mock/linepay/confirm/route.ts` - 付款確認 API
+- `app/api/mock/linepay/status/route.ts` - 付款狀態查詢 API
+- `app/dashboard/my-mobile-pos/page.tsx` - POS 結帳流程整合
+- `app/dashboard/my-mobile-pos/payment-flow/page.tsx` - 金流管理頁面
+
+#### 關鍵流程
+
+1. **付款請求**：`LinePayManager.requestPayment()` → 產生 QR Code
+2. **狀態輪詢**：每 2 秒查詢一次付款狀態
+3. **付款確認**：付款成功後自動確認並建立對賬記錄
+4. **金流管理**：記錄自動寫入金流管理系統
+
+#### 環境變數
+
+```env
+NEXT_PUBLIC_USE_MOCK_PAYMENT=true  # 開發時用 true，正式上線改 false
+```
 
 ---
 

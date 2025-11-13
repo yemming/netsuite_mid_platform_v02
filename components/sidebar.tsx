@@ -36,7 +36,11 @@ import {
   Table,
   Move,
   Box,
-  Wrench
+  Wrench,
+  Inbox,
+  FileCheck,
+  DollarSign,
+  ClipboardList
 } from 'lucide-react'
 
 interface MenuItem {
@@ -92,9 +96,44 @@ const privatePages: MenuItem[] = [
     icon: Store,
     children: [
       {
-        name: 'POS資料檢視',
-        href: '/dashboard/pos',
-        icon: Search,
+        name: '我的行動POS',
+        href: '/dashboard/my-mobile-pos',
+        icon: Store,
+      },
+      {
+        name: 'POS交易記錄',
+        href: '/dashboard/my-mobile-pos/transactions',
+        icon: FileText,
+      },
+      {
+        name: 'POS產品主檔維護',
+        href: '/dashboard/my-mobile-pos/products',
+        icon: Package,
+      },
+      {
+        name: '門店收貨',
+        href: '/dashboard/my-mobile-pos/receiving',
+        icon: Inbox,
+      },
+      {
+        name: '門市訂貨',
+        href: '/dashboard/my-mobile-pos/ordering',
+        icon: ShoppingCart,
+      },
+      {
+        name: '門市對賬',
+        href: '/dashboard/my-mobile-pos/reconciliation',
+        icon: FileCheck,
+      },
+      {
+        name: '金流管理',
+        href: '/dashboard/my-mobile-pos/payment-flow',
+        icon: DollarSign,
+      },
+      {
+        name: '門市盤點',
+        href: '/dashboard/my-mobile-pos/inventory-check',
+        icon: ClipboardList,
       },
     ],
   },
