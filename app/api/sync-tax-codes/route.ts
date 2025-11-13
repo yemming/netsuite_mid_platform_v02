@@ -18,7 +18,7 @@ export async function POST() {
         st.isinactive,
         tt.id as taxtype_id,
         tt.name as taxtype_name,
-        tt.country,
+        tt.country as tax_country,
         tt.description as taxtype_description
       FROM salestaxitem st
       LEFT JOIN taxtype tt ON st.taxtype = tt.id
@@ -30,7 +30,8 @@ export async function POST() {
       // 處理 country：從 taxtype 表的 country 欄位取得
       // 根據 NetSuite 邏輯：Employee → Subsidiary → Country → Tax Code
       // 稅碼是從 salestaxitem 和 taxtype 兩張表 JOIN 出來的
-      let country = item.country || null;
+      // 使用 tax_country 別名避免欄位名稱衝突
+      let country = item.tax_country || null;
       
       // 如果 JOIN 沒有取得 country，嘗試從名稱中提取（作為 fallback）
       if (!country && item.itemid) {

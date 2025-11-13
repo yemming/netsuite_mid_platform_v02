@@ -1,13 +1,13 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 
 /**
  * 假的 LINE Pay 支付頁面
  * 模擬 LINE Pay 的支付流程，用於測試
  */
-export default function MockPaymentPage() {
+function MockPaymentContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const transactionId = searchParams.get('transactionId');
@@ -115,6 +115,21 @@ export default function MockPaymentPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MockPaymentPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-green-50 dark:bg-[#0f1419] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 dark:border-green-400 mx-auto mb-2"></div>
+          <p className="text-gray-600 dark:text-gray-400">載入中...</p>
+        </div>
+      </div>
+    }>
+      <MockPaymentContent />
+    </Suspense>
   );
 }
 

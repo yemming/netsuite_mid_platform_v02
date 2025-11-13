@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
@@ -11,7 +11,7 @@ import { linePayManager } from '@/lib/linepay-manager';
  * 支付確認頁面
  * 當用戶在 LINE Pay 支付頁面完成付款後，會導向此頁面進行確認
  */
-export default function PaymentConfirmPage() {
+function PaymentConfirmContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const transactionId = searchParams.get('transactionId');
@@ -149,6 +149,21 @@ export default function PaymentConfirmPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function PaymentConfirmPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 dark:bg-[#0f1419] flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-2" />
+          <p className="text-gray-600 dark:text-gray-400">載入中...</p>
+        </div>
+      </div>
+    }>
+      <PaymentConfirmContent />
+    </Suspense>
   );
 }
 
