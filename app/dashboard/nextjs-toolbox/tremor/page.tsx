@@ -245,7 +245,6 @@ export default function TremorShowcasePage() {
               colors={['violet']}
               yAxisWidth={80}
               showLegend={true}
-              margin={{ left: 10, right: 10 }}
               valueFormatter={(value) => `$${value.toLocaleString()}`}
             />
           </TremorCard>
@@ -262,7 +261,6 @@ export default function TremorShowcasePage() {
                 colors={['emerald', 'rose', 'blue']}
                 yAxisWidth={80}
                 showLegend={true}
-                margin={{ left: 10, right: 10 }}
                 valueFormatter={(value) => `$${value.toLocaleString()}`}
               />
             </TremorCard>
@@ -277,7 +275,6 @@ export default function TremorShowcasePage() {
                 colors={['emerald', 'rose']}
                 yAxisWidth={80}
                 showLegend={true}
-                margin={{ left: 10, right: 10 }}
                 valueFormatter={(value) => `$${value.toLocaleString()}`}
               />
             </TremorCard>
