@@ -53,7 +53,7 @@ export default function TanStackTableShowcasePage() {
   const [globalFilter, setGlobalFilter] = useState('');
 
   // 定義欄位
-  const columns = useMemo<ColumnDef<Person>[]>(
+  const columns = useMemo(
     () => [
       columnHelper.accessor('id', {
         header: 'ID',
