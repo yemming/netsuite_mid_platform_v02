@@ -2853,10 +2853,10 @@ export default function ExpenseReviewsPage() {
             {errorReview && errorReview.netsuite_sync_status === 'failed' && (
               <Button
                 onClick={handleRetrySync}
-                disabled={retryingSync || errorReview.netsuite_sync_status === 'syncing'}
+                disabled={retryingSync}
                 className="mr-2"
               >
-                {retryingSync || errorReview.netsuite_sync_status === 'syncing' ? (
+                {retryingSync ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     重新同步中...
