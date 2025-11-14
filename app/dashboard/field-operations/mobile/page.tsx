@@ -55,6 +55,72 @@ export default function MobileTechnicianPage() {
   const [photos, setPhotos] = useState<string[]>([]); // 儲存照片的 base64 或 URL
   const signatureCanvasRef = useRef<SignatureCanvas>(null);
   const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 500, height: 400 });
+
+  // 監聽視窗大小和方向改變，重新計算畫布大小
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      if (typeof window !== 'undefined') {
+        setCanvasSize({
+          width: window.innerWidth,
+          height: Math.max(window.innerHeight - 200, 400),
+        });
+      }
+    };
+
+    // 初始化大小
+    updateCanvasSize();
+
+    // 監聽 resize 事件
+    window.addEventListener('resize', updateCanvasSize);
+    // 監聽 orientationchange 事件（手機方向改變）
+    window.addEventListener('orientationchange', () => {
+      // 延遲一下，等方向改變完成後再更新
+      setTimeout(updateCanvasSize, 100);
+    });
+
+    return () => {
+      window.removeEventListener('resize', updateCanvasSize);
+      window.removeEventListener('orientationchange', updateCanvasSize);
+    };
+  }, []);
+
+  // 當畫布大小改變或簽名對話框打開時，重新調整畫布
+  useEffect(() => {
+    if (isSignatureModalOpen && signatureCanvasRef.current) {
+      // 延遲一下確保 DOM 已更新，特別是 orientationchange 事件
+      const timer = setTimeout(() => {
+        if (signatureCanvasRef.current) {
+          const canvas = signatureCanvasRef.current.getCanvas();
+          if (canvas) {
+            // 保存當前簽名（如果有）
+            const isEmpty = signatureCanvasRef.current.isEmpty();
+            let savedImage: string | null = null;
+            if (!isEmpty) {
+              savedImage = signatureCanvasRef.current.toDataURL('image/png');
+            }
+            
+            // 重新設置畫布的實際像素大小
+            canvas.width = canvasSize.width;
+            canvas.height = canvasSize.height;
+            
+            // 如果有保存的簽名，重新繪製到新畫布上
+            if (savedImage) {
+              const img = new Image();
+              img.onload = () => {
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                }
+              };
+              img.src = savedImage;
+            }
+          }
+        }
+      }, 150); // 增加延遲時間，確保方向改變完成
+      return () => clearTimeout(timer);
+    }
+  }, [canvasSize, isSignatureModalOpen]);
 
   // 模擬資料
   useEffect(() => {
@@ -906,8 +972,8 @@ export default function MobileTechnicianPage() {
                 <SignatureCanvas
                   ref={signatureCanvasRef}
                   canvasProps={{
-                    width: typeof window !== 'undefined' ? window.innerWidth : 500,
-                    height: typeof window !== 'undefined' ? Math.max(window.innerHeight - 200, 400) : 400,
+                    width: canvasSize.width,
+                    height: canvasSize.height,
                     className: 'signature-canvas-fullscreen',
                     style: {
                       width: '100%',
