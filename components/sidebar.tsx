@@ -44,7 +44,8 @@ import {
   Warehouse,
   Smartphone,
   HardHat,
-  Hammer
+  Hammer,
+  Clock
 } from 'lucide-react'
 
 interface MenuItem {
@@ -146,9 +147,44 @@ const privatePages: MenuItem[] = [
     icon: Users,
     children: [
       {
-        name: 'HCM資料檢視',
-        href: '/dashboard/hcm',
-        icon: Search,
+        name: 'BI 儀表板',
+        href: '/dashboard/hcm/admin/dashboards',
+        icon: BarChart3,
+      },
+      {
+        name: '人事管理',
+        href: '/dashboard/hcm/admin/employees',
+        icon: Users,
+      },
+      {
+        name: '考勤管理',
+        href: '/dashboard/hcm/admin/attendance',
+        icon: Clock,
+      },
+      {
+        name: '薪酬管理',
+        href: '/dashboard/hcm/admin/payroll',
+        icon: DollarSign,
+      },
+      {
+        name: '流程管理',
+        href: '/dashboard/hcm/admin/workflows',
+        icon: FileCheck,
+      },
+      {
+        name: '員工自助',
+        href: '/dashboard/hcm/ess/dashboard',
+        icon: UserCheck,
+      },
+      {
+        name: '主管自助',
+        href: '/dashboard/hcm/mss/team',
+        icon: UserCheck,
+      },
+      {
+        name: '招募管理',
+        href: '/dashboard/hcm/recruitment',
+        icon: ClipboardList,
       },
     ],
   },
@@ -364,20 +400,20 @@ export default function Sidebar() {
         <div key={item.name}>
           <button
             onClick={() => toggleExpand(item.name)}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded transition-colors text-sm ${
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-sm ${
               isActive 
-                ? 'bg-gray-100 dark:bg-[#3a4f5d] text-gray-900 dark:text-white' 
-                : 'text-gray-700 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3a4f5d] hover:text-gray-900 dark:hover:text-white'
+                ? 'bg-accent text-accent-foreground' 
+                : 'text-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
             style={{ paddingLeft: `${8 + indentLevel}px` }}
           >
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
               {isExpanded ? (
-                <ChevronDown className="w-3.5 h-3.5 text-gray-600 dark:text-white flex-shrink-0" />
+                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
               ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-gray-600 dark:text-white flex-shrink-0" />
+                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
               )}
-              <Icon className="w-4 h-4 flex-shrink-0 text-gray-700 dark:text-white" />
+              <Icon className="w-4 h-4 flex-shrink-0 text-foreground" />
               <span className="truncate font-normal">{item.name}</span>
             </div>
           </button>
@@ -392,19 +428,19 @@ export default function Sidebar() {
 
     const content = (
       <div
-        className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors text-sm ${
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-sm ${
           isActive
-            ? 'bg-gray-100 dark:bg-[#3a4f5d] text-gray-900 dark:text-white'
-            : 'text-gray-700 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3a4f5d] hover:text-gray-900 dark:hover:text-white'
+            ? 'bg-accent text-accent-foreground'
+            : 'text-foreground hover:bg-accent hover:text-accent-foreground'
         }`}
         style={{ paddingLeft: `${8 + indentLevel}px` }}
       >
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           <div className="w-3.5 h-3.5 flex-shrink-0" /> {/* Spacer for alignment */}
-          <Icon className="w-4 h-4 flex-shrink-0 text-gray-700 dark:text-white" />
+          <Icon className="w-4 h-4 flex-shrink-0 text-foreground" />
           <span className="truncate font-normal">{item.name}</span>
           {item.badge && (
-            <span className="ml-auto px-1.5 py-0.5 text-[10px] font-medium bg-blue-500 text-white rounded flex-shrink-0">
+            <span className="ml-auto px-1.5 py-0.5 text-[10px] font-medium bg-primary text-primary-foreground rounded-md flex-shrink-0">
               {item.badge}
             </span>
           )}
@@ -425,15 +461,15 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Sidebar - Light/Dark theme */}
-      <div className={`flex flex-col h-screen bg-white dark:bg-[#28363F] text-gray-900 dark:text-white transition-all duration-300 relative ${
-        isCollapsed ? 'w-0 overflow-hidden border-0' : 'w-[240px] border-r border-gray-200 dark:border-[#3a4f5d]'
+      {/* Sidebar - NetSuite Next UI Style */}
+      <div className={`flex flex-col h-screen bg-card text-foreground transition-all duration-300 relative ${
+        isCollapsed ? 'w-0 overflow-hidden border-0' : 'w-[240px] border-r border-border'
       }`}>
         {/* Sidebar Content */}
         <div className="flex flex-col h-full overflow-hidden">
           {/* Top Section - User & Workspace - Sticky to match header */}
-          <div className="sticky top-[6px] z-50 bg-white dark:bg-[#28363F]">
-            <div className="flex items-center gap-1 px-6 h-[38px] border-b border-gray-200 dark:border-[#3a4f5d]">
+          <div className="sticky top-[6px] z-50 bg-card">
+            <div className="flex items-center gap-1 px-6 h-[38px] border-b border-border">
             <div className="flex-shrink-0" style={{ width: '30px', height: '30px', marginLeft: '-16px' }}>
               {/* 亮色模式：綠色 logo */}
               <img
@@ -450,22 +486,22 @@ export default function Sidebar() {
                 style={{ width: '48px', height: '48px', marginTop: '-8px' }}
               />
             </div>
-            <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1" style={{ marginLeft: '3px' }}>
+            <span className="text-lg font-bold text-foreground truncate flex-1" style={{ marginLeft: '3px' }}>
               NetSuite交易模擬系統
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button 
                 onClick={() => setIsCollapsed(true)}
-                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors"
+                className="p-1.5 rounded-md hover:bg-accent transition-colors"
               >
-                <PanelLeftClose className="w-4 h-4 text-[#28363F] dark:text-white" />
+                <PanelLeftClose className="w-4 h-4 text-foreground" />
               </button>
             </div>
             </div>
           </div>
 
           {/* Main Navigation */}
-          <div className="px-1.5 py-2 border-b border-gray-200 dark:border-[#3a4f5d]">
+          <div className="px-1.5 py-2 border-b border-border">
             {mainNavigation.map((item) => (
               <div key={item.name}>
                 {renderMenuItem(item, 0)}
@@ -541,18 +577,18 @@ export default function Sidebar() {
           </div>
 
           {/* Bottom Bar */}
-          <div className="flex items-center justify-between px-3 py-2 border-t border-gray-200 dark:border-[#3a4f5d]">
-            <button className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors">
-              <Cog className="w-4 h-4 text-gray-700 dark:text-white" />
+          <div className="flex items-center justify-between px-3 py-2 border-t border-border">
+            <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
+              <Cog className="w-4 h-4 text-foreground" />
             </button>
-            <button className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors">
-              <Send className="w-4 h-4 text-gray-700 dark:text-white" />
+            <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
+              <Send className="w-4 h-4 text-foreground" />
             </button>
-            <button className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors">
-              <Share2 className="w-4 h-4 text-gray-700 dark:text-white" />
+            <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
+              <Share2 className="w-4 h-4 text-foreground" />
             </button>
-            <button className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors">
-              <HelpCircle className="w-4 h-4 text-gray-700 dark:text-white" />
+            <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
+              <HelpCircle className="w-4 h-4 text-foreground" />
             </button>
           </div>
         </div>
@@ -562,7 +598,7 @@ export default function Sidebar() {
       {isCollapsed && (
         <button
           onClick={() => setIsCollapsed(false)}
-          className="fixed left-0 top-[44px] z-[100] p-2 bg-white dark:bg-[#28363F] border-r border-b border-gray-200 dark:border-[#3a4f5d] text-gray-900 dark:text-white rounded-r-lg hover:bg-gray-100 dark:hover:bg-[#3a4f5d] transition-colors shadow-lg"
+          className="fixed left-0 top-[44px] z-[100] p-2 bg-card border-r border-b border-border text-foreground rounded-r-md hover:bg-accent transition-colors shadow-lg"
           aria-label="顯示側邊欄"
         >
           <Menu className="w-5 h-5" />

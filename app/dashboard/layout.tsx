@@ -75,10 +75,21 @@ export default function DashboardLayout({
       setAvatarUrl(event.detail.avatarUrl)
     }
     
+    // 監聽姓名更新事件
+    const handleNameUpdate = async () => {
+      const supabase = createClient()
+      const { data: { user: updatedUser } } = await supabase.auth.getUser()
+      if (updatedUser) {
+        setUser(updatedUser)
+      }
+    }
+    
     window.addEventListener('avatarUpdated', handleAvatarUpdate as EventListener)
+    window.addEventListener('nameUpdated', handleNameUpdate as EventListener)
     
     return () => {
       window.removeEventListener('avatarUpdated', handleAvatarUpdate as EventListener)
+      window.removeEventListener('nameUpdated', handleNameUpdate as EventListener)
     }
   }, [router])
 
@@ -122,9 +133,9 @@ export default function DashboardLayout({
       <Sidebar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-background">
+      <div className="flex-1 flex flex-col overflow-hidden bg-background">
         {/* Top Navbar - Fixed header aligned with sidebar */}
-        <nav className="sticky top-[6px] z-50 bg-gray-50 dark:bg-[#28363F] text-gray-900 dark:text-white">
+        <nav className="sticky top-[6px] z-50 bg-muted/50 border-b border-border">
           <div className="flex items-center gap-2 px-6 h-[38px] justify-end">
             <div className="flex items-center gap-1 flex-shrink-0">
               <ThemeToggle />
@@ -132,7 +143,7 @@ export default function DashboardLayout({
                 className="flex items-center space-x-2 ml-2 cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() => router.push('/dashboard/profile')}
               >
-                <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-[#354a56] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {avatarUrl ? (
                     <img 
                       src={avatarUrl} 
@@ -140,20 +151,22 @@ export default function DashboardLayout({
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <span className="text-gray-700 dark:text-white text-sm font-semibold">
+                    <span className="text-foreground text-sm font-semibold">
                       {user?.email?.charAt(0).toUpperCase() || 'U'}
                     </span>
                   )}
                 </div>
                 <div className="flex flex-col leading-none">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white leading-tight">{user?.email?.split('@')[0] || 'User'}</span>
-                  <span className="text-xs text-gray-500 dark:text-gray-300 leading-tight">Administrator</span>
+                  <span className="text-sm font-medium text-foreground leading-tight">
+                    {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                  </span>
+                  <span className="text-xs text-muted-foreground leading-tight">Administrator</span>
                 </div>
               </div>
               <button
                 onClick={handleSignOut}
                 disabled={signingOut}
-                className="px-3 py-1 bg-gray-100 dark:bg-[#354a56] text-gray-700 dark:text-white rounded hover:bg-gray-200 dark:hover:bg-[#3a4f5d] transition-colors text-xs font-medium ml-2 h-6 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-3 py-1 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors text-xs font-medium ml-2 h-6 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {signingOut ? '登出中...' : '登出'}
               </button>

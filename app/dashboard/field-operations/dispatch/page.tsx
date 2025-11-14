@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -51,6 +53,8 @@ export default function DispatchPage() {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
   const [suggestions, setSuggestions] = useState<SchedulingSuggestion[]>([]);
   const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
+  const [isWorkOrderDetailOpen, setIsWorkOrderDetailOpen] = useState(false);
+  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null);
   const [viewMode, setViewMode] = useState<'gantt' | 'map' | 'split'>('split');
   const [technicianSchedules, setTechnicianSchedules] = useState<TechnicianSchedule[]>([]);
   const [technicianLocations, setTechnicianLocations] = useState<TechnicianLocation[]>([]);
@@ -1041,6 +1045,39 @@ export default function DispatchPage() {
     setSelectedWorkOrder(null);
   };
 
+  // 保存工單修改
+  const handleSaveWorkOrder = (updatedWorkOrder: WorkOrder) => {
+    // TODO: 呼叫 API 更新工單
+    console.log('更新工單:', updatedWorkOrder);
+    
+    // 更新工單列表
+    const updatedWorkOrders = workOrders.map(wo => 
+      wo.id === updatedWorkOrder.id ? updatedWorkOrder : wo
+    );
+    setWorkOrders(updatedWorkOrders);
+    
+    // 更新技術人員排程（如果工單有技術人員）
+    if (updatedWorkOrder.technicianId) {
+      setTechnicianSchedules(prev => {
+        return prev.map(schedule => {
+          if (schedule.technician.id === updatedWorkOrder.technicianId) {
+            return {
+              ...schedule,
+              workOrders: schedule.workOrders.map(wo => 
+                wo.id === updatedWorkOrder.id ? updatedWorkOrder : wo
+              ),
+            };
+          }
+          return schedule;
+        });
+      });
+    }
+    
+    // 關閉 Dialog
+    setIsWorkOrderDetailOpen(false);
+    setEditingWorkOrder(null);
+  };
+
   const getStatusBadge = (status: WorkOrder['status']) => {
     const statusConfig = {
       pending: { label: '待排程', variant: 'default' as const },
@@ -1106,7 +1143,7 @@ export default function DispatchPage() {
 
   // 渲染甘特圖
   const renderGanttChart = () => {
-    const startHour = 6; // 擴展到6點開始
+    const startHour = 9; // 從9點開始
     const endHour = 22; // 擴展到22點結束
     const totalHours = endHour - startHour;
     const hours = Array.from({ length: totalHours + 1 }, (_, i) => startHour + i);
@@ -1114,10 +1151,10 @@ export default function DispatchPage() {
     const technicianNameWidth = 120; // 技術人員名稱區域寬度
 
     return (
-      <div className="space-y-0">
+      <div className="space-y-0 flex flex-col h-full">
         {/* 時間軸標題（可滾動） */}
         <div 
-          className="flex border-b pb-0.5 mb-0.5 overflow-x-auto w-full" 
+          className="flex border-b pb-0.5 mb-0.5 overflow-x-auto w-full flex-shrink-0" 
           ref={ganttHeaderRef}
           onScroll={(e) => handleGanttScroll(e.currentTarget.scrollLeft, e.currentTarget)}
           style={{ width: '100%' }}
@@ -1130,7 +1167,10 @@ export default function DispatchPage() {
             }}
           >
             {/* 技術人員名稱區域的佔位 */}
-            <div className="flex-shrink-0" style={{ width: `${technicianNameWidth}px` }}>
+            <div 
+              className="flex-shrink-0 sticky left-0 z-10 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700"
+              style={{ width: `${technicianNameWidth}px` }}
+            >
             </div>
             {/* 時間軸 */}
             <div className="flex relative">
@@ -1140,7 +1180,7 @@ export default function DispatchPage() {
                   className="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700"
                   style={{ width: `${hourWidth}px` }}
                 >
-                  <div className="px-1">{hour}:00</div>
+                  <div className="px-1 text-center">{hour}:00</div>
                 </div>
               ))}
             </div>
@@ -1151,12 +1191,13 @@ export default function DispatchPage() {
         <div 
           className="overflow-auto border rounded bg-white dark:bg-gray-900" 
           style={{ 
-            height: 'calc(40vh - 60px)', 
-            maxHeight: 'calc(40vh - 60px)',
-            minHeight: '300px',
+            height: 'calc(100% - 60px)',
+            minHeight: '160px',
+            maxHeight: 'calc(100% - 60px)',
             overflowX: 'auto',
             overflowY: 'auto',
-            width: '100%'
+            width: '100%',
+            flexShrink: 0
           }}
           ref={(el) => {
             if (el) ganttRowsRef.current[0] = el;
@@ -1164,7 +1205,7 @@ export default function DispatchPage() {
           onScroll={(e) => handleGanttScroll(e.currentTarget.scrollLeft, e.currentTarget)}
         >
           <div 
-            className="space-y-1 py-1" 
+            className="space-y-0.5 pt-1" 
             style={{ 
               minWidth: `${Math.max(technicianNameWidth + totalHours * hourWidth, 100)}px`,
               width: '100%'
@@ -1174,7 +1215,7 @@ export default function DispatchPage() {
               <div 
                 key={schedule.technician.id} 
                 className="flex items-center flex-shrink-0"
-                style={{ minHeight: '28px' }}
+                style={{ minHeight: '24px' }}
               >
               <div 
                 className="flex relative"
@@ -1185,7 +1226,7 @@ export default function DispatchPage() {
               >
                 {/* 技術人員名稱區域 */}
                 <div 
-                  className="flex-shrink-0 flex items-center gap-2 px-2"
+                  className="flex-shrink-0 flex items-center gap-2 px-2 sticky left-0 z-10 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700"
                   style={{ width: `${technicianNameWidth}px` }}
                 >
                   <div className={`w-2 h-2 rounded-full ${
@@ -1193,10 +1234,11 @@ export default function DispatchPage() {
                   }`} />
                   <span 
                     className="text-sm font-medium cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setFocusTechnicianId(schedule.technician.id);
-                      // 如果當前不是地圖視圖，自動切換到地圖視圖
-                      if (viewMode !== 'map') {
+                      // 只有在非分割視圖模式下，才自動切換到地圖視圖
+                      if (viewMode !== 'map' && viewMode !== 'split') {
                         setViewMode('map');
                       }
                     }}
@@ -1207,7 +1249,7 @@ export default function DispatchPage() {
                 </div>
                 {/* 工單時間軸區域 */}
                 <div 
-                  className="relative h-6 bg-gray-100 dark:bg-gray-800 rounded"
+                  className="relative h-5 bg-gray-100 dark:bg-gray-800 rounded"
                   style={{ width: `${totalHours * hourWidth}px` }}
                 >
                   {schedule.workOrders.map((wo) => {
@@ -1230,15 +1272,13 @@ export default function DispatchPage() {
                         className={`absolute ${bgColor} text-white text-xs px-1 rounded h-full flex items-center cursor-pointer hover:opacity-80 transition-opacity`}
                         style={{ left: `${left}px`, width: `${width}px`, minWidth: '60px' }}
                         title={`${wo.id}: ${wo.case?.title || 'N/A'}`}
-                        onClick={() => {
-                          setFocusTechnicianId(schedule.technician.id);
-                          // 如果當前不是地圖視圖，自動切換到地圖視圖
-                          if (viewMode !== 'map') {
-                            setViewMode('map');
-                          }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingWorkOrder(wo);
+                          setIsWorkOrderDetailOpen(true);
                         }}
                       >
-                        <span className="truncate">{wo.id}</span>
+                        <span className="truncate text-center w-full">{wo.customer?.name || wo.id}</span>
                       </div>
                     );
                   })}
@@ -1250,8 +1290,7 @@ export default function DispatchPage() {
         </div>
 
         {/* 圖例 */}
-        <div className="flex items-center gap-4 pt-3 border-t text-xs">
-          <span className="text-gray-600 dark:text-gray-400 font-medium">圖例：</span>
+        <div className="flex items-center justify-center gap-4 pt-4 pb-2 border-t text-xs flex-shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded bg-blue-500" />
             <span className="text-gray-600 dark:text-gray-400">已排程</span>
@@ -1303,21 +1342,6 @@ export default function DispatchPage() {
           height="100%"
           focusTechnicianId={focusTechnicianId}
         />
-        {/* 圖例 */}
-        <div className="absolute bottom-4 left-4 bg-white dark:bg-gray-700 p-3 rounded shadow-lg text-xs space-y-1 z-[1000]">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white" />
-            <span>技術人員（在線）</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-gray-400 border-2 border-white" />
-            <span>技術人員（離線）</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-red-500 border-2 border-white" />
-            <span>待排程工單</span>
-          </div>
-        </div>
       </div>
     );
   };
@@ -1369,8 +1393,8 @@ export default function DispatchPage() {
       {viewMode === 'split' && (
         <div className="grid grid-cols-2 gap-4">
           {/* 左側：甘特圖區域 */}
-          <Card className="flex flex-col" style={{ height: 'calc(40vh + 120px)' }}>
-            <CardHeader className="flex-shrink-0 pb-2">
+          <Card className="flex flex-col" style={{ height: 'calc(40vh + 110px)' }}>
+            <CardHeader className="flex-shrink-0">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Calendar className="h-5 w-5" />
@@ -1401,9 +1425,11 @@ export default function DispatchPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="flex-1 overflow-hidden px-6 pb-6 pt-1">
+            <CardContent className="flex-1 overflow-hidden p-0" style={{ display: 'flex', flexDirection: 'column' }}>
               {technicianSchedules.length > 0 ? (
-                renderGanttChart()
+                <div className="flex-1 overflow-hidden px-6 pb-1 pt-1" style={{ display: 'flex', flexDirection: 'column' }}>
+                  {renderGanttChart()}
+                </div>
               ) : (
                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -1414,18 +1440,43 @@ export default function DispatchPage() {
           </Card>
 
           {/* 右側：地圖區域 */}
-          <Card className="flex flex-col" style={{ height: 'calc(40vh + 120px)' }}>
+          <Card className="flex flex-col" style={{ height: 'calc(40vh + 110px)' }}>
             <CardHeader className="flex-shrink-0">
               <CardTitle className="text-lg flex items-center gap-2">
                 <MapPin className="h-5 w-5" />
                 即時位置追蹤
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 overflow-hidden p-0">
+            <CardContent className="flex-1 overflow-hidden p-0" style={{ display: 'flex', flexDirection: 'column' }}>
               {technicianLocations.length > 0 ? (
-                <div className="w-full h-full">
-                  {renderMapView()}
-                </div>
+                <>
+                  <div 
+                    className="w-full flex-1 relative" 
+                    style={{ 
+                      height: '100%',
+                      minHeight: '300px'
+                    }}
+                  >
+                    {renderMapView()}
+                  </div>
+                  {/* 圖例 - 放在地圖下方，橫向排列 */}
+                  <div className="bg-white dark:bg-gray-700 p-2 rounded shadow-lg text-xs mt-1 mx-4 mb-1 flex-shrink-0">
+                    <div className="flex items-center justify-center gap-4 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white" />
+                        <span>技術人員（在線）</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded-full bg-gray-400 border-2 border-white" />
+                        <span>技術人員（離線）</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded-full bg-red-500 border-2 border-white" />
+                        <span>待排程工單</span>
+                      </div>
+                    </div>
+                  </div>
+                </>
               ) : (
                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <MapPin className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -1495,9 +1546,28 @@ export default function DispatchPage() {
           </CardHeader>
           <CardContent className="p-0">
             {technicianLocations.length > 0 ? (
-              <div className="w-full" style={{ height: '45vw', maxHeight: '500px', minHeight: '300px' }}>
-                {renderMapView()}
-              </div>
+              <>
+                <div className="w-full" style={{ height: '45vw', maxHeight: '500px', minHeight: '300px' }}>
+                  {renderMapView()}
+                </div>
+                {/* 圖例 - 放在地圖下方，橫向排列 */}
+                <div className="bg-white dark:bg-gray-700 p-2 rounded shadow-lg text-xs mt-1 mx-4 mb-1 flex-shrink-0">
+                  <div className="flex items-center justify-center gap-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white" />
+                      <span>技術人員（在線）</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full bg-gray-400 border-2 border-white" />
+                      <span>技術人員（離線）</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full bg-red-500 border-2 border-white" />
+                      <span>待排程工單</span>
+                    </div>
+                  </div>
+                </div>
+              </>
             ) : (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <MapPin className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -1526,25 +1596,25 @@ export default function DispatchPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>工單 ID</TableHead>
-                  <TableHead>客戶</TableHead>
-                  <TableHead>概要</TableHead>
-                  <TableHead>優先級</TableHead>
-                  <TableHead>SLA 到期時間</TableHead>
-                  <TableHead>狀態</TableHead>
-                  <TableHead>操作</TableHead>
+                  <TableHead className="bg-muted text-center">工單 ID</TableHead>
+                  <TableHead className="bg-muted text-center">客戶</TableHead>
+                  <TableHead className="bg-muted text-center">概要</TableHead>
+                  <TableHead className="bg-muted text-center">優先級</TableHead>
+                  <TableHead className="bg-muted text-center">SLA 到期時間</TableHead>
+                  <TableHead className="bg-muted text-center">狀態</TableHead>
+                  <TableHead className="bg-muted text-center">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pendingWorkOrders.map((workOrder) => (
                   <TableRow key={workOrder.id}>
-                    <TableCell className="font-medium">{workOrder.id}</TableCell>
-                    <TableCell>{workOrder.customer?.name || 'N/A'}</TableCell>
-                    <TableCell>{workOrder.case?.title || 'N/A'}</TableCell>
-                    <TableCell>{getPriorityBadge(workOrder.priority)}</TableCell>
-                    <TableCell>
+                    <TableCell className="font-medium text-center">{workOrder.id}</TableCell>
+                    <TableCell className="text-center">{workOrder.customer?.name || 'N/A'}</TableCell>
+                    <TableCell className="text-center">{workOrder.case?.title || 'N/A'}</TableCell>
+                    <TableCell className="text-center">{getPriorityBadge(workOrder.priority)}</TableCell>
+                    <TableCell className="text-center">
                       {workOrder.slaDeadline ? (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center justify-center gap-1">
                           <Clock className="h-4 w-4" />
                           {new Date(workOrder.slaDeadline).toLocaleString('zh-TW')}
                         </div>
@@ -1552,8 +1622,18 @@ export default function DispatchPage() {
                         'N/A'
                       )}
                     </TableCell>
-                    <TableCell>{getStatusBadge(workOrder.status)}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-center">
+                      <div 
+                        onClick={() => {
+                          setEditingWorkOrder(workOrder);
+                          setIsWorkOrderDetailOpen(true);
+                        }}
+                        className="cursor-pointer inline-block"
+                      >
+                        {getStatusBadge(workOrder.status)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
                       <Button
                         size="sm"
                         onClick={() => handleGetSuggestions(workOrder)}
@@ -1608,7 +1688,241 @@ export default function DispatchPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* 工單詳情/編輯 Modal */}
+      <Dialog open={isWorkOrderDetailOpen} onOpenChange={setIsWorkOrderDetailOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>工單詳情</DialogTitle>
+            <DialogDescription>
+              工單編號: {editingWorkOrder?.id}
+            </DialogDescription>
+          </DialogHeader>
+          {editingWorkOrder && (
+            <WorkOrderDetailForm
+              workOrder={editingWorkOrder}
+              onSave={handleSaveWorkOrder}
+              onCancel={() => {
+                setIsWorkOrderDetailOpen(false);
+                setEditingWorkOrder(null);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+// 工單詳情表單組件
+function WorkOrderDetailForm({ 
+  workOrder, 
+  onSave, 
+  onCancel 
+}: { 
+  workOrder: WorkOrder; 
+  onSave: (workOrder: WorkOrder) => void;
+  onCancel: () => void;
+}) {
+  const [formData, setFormData] = useState<WorkOrder>(workOrder);
+
+  useEffect(() => {
+    setFormData(workOrder);
+  }, [workOrder]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave(formData);
+  };
+
+  const handleFieldChange = (field: keyof WorkOrder, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleCaseFieldChange = (field: keyof WorkOrder['case'], value: any) => {
+    if (!formData.case) return;
+    setFormData(prev => ({
+      ...prev,
+      case: {
+        ...prev.case!,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCustomerFieldChange = (field: keyof WorkOrder['customer'], value: any) => {
+    if (!formData.customer) return;
+    setFormData(prev => ({
+      ...prev,
+      customer: {
+        ...prev.customer!,
+        [field]: value,
+      },
+    }));
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6 mt-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="status">狀態</Label>
+          <select
+            id="status"
+            value={formData.status}
+            onChange={(e) => handleFieldChange('status', e.target.value)}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <option value="pending">待排程</option>
+            <option value="scheduled">已排程</option>
+            <option value="dispatched">已派送</option>
+            <option value="in_progress">進行中</option>
+            <option value="completed">已完成</option>
+            <option value="billed">已結帳</option>
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="priority">優先級</Label>
+          <select
+            id="priority"
+            value={formData.priority || 'medium'}
+            onChange={(e) => handleFieldChange('priority', e.target.value)}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+            <option value="urgent">緊急</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="scheduledStartTime">排程開始時間</Label>
+          <Input
+            id="scheduledStartTime"
+            type="datetime-local"
+            value={formData.scheduledStartTime ? new Date(formData.scheduledStartTime).toISOString().slice(0, 16) : ''}
+            onChange={(e) => handleFieldChange('scheduledStartTime', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="scheduledEndTime">排程結束時間</Label>
+          <Input
+            id="scheduledEndTime"
+            type="datetime-local"
+            value={formData.scheduledEndTime ? new Date(formData.scheduledEndTime).toISOString().slice(0, 16) : ''}
+            onChange={(e) => handleFieldChange('scheduledEndTime', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="customerName">客戶名稱</Label>
+        <Input
+          id="customerName"
+          value={formData.customer?.name || ''}
+          onChange={(e) => handleCustomerFieldChange('name', e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="customerAddress">客戶地址</Label>
+        <Input
+          id="customerAddress"
+          value={formData.customer?.address || ''}
+          onChange={(e) => handleCustomerFieldChange('address', e.target.value)}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="customerPhone">客戶電話</Label>
+          <Input
+            id="customerPhone"
+            value={formData.customer?.contactInfo?.phone || ''}
+            onChange={(e) => {
+              if (!formData.customer) return;
+              setFormData(prev => ({
+                ...prev,
+                customer: {
+                  ...prev.customer!,
+                  contactInfo: {
+                    ...prev.customer!.contactInfo,
+                    phone: e.target.value,
+                  },
+                },
+              }));
+            }}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="customerEmail">客戶 Email</Label>
+          <Input
+            id="customerEmail"
+            type="email"
+            value={formData.customer?.contactInfo?.email || ''}
+            onChange={(e) => {
+              if (!formData.customer) return;
+              setFormData(prev => ({
+                ...prev,
+                customer: {
+                  ...prev.customer!,
+                  contactInfo: {
+                    ...prev.customer!.contactInfo,
+                    email: e.target.value,
+                  },
+                },
+              }));
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="caseTitle">案件標題</Label>
+        <Input
+          id="caseTitle"
+          value={formData.case?.title || ''}
+          onChange={(e) => handleCaseFieldChange('title', e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="caseDescription">案件描述</Label>
+        <Textarea
+          id="caseDescription"
+          value={formData.case?.description || ''}
+          onChange={(e) => handleCaseFieldChange('description', e.target.value)}
+          rows={4}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="slaDeadline">SLA 到期時間</Label>
+        <Input
+          id="slaDeadline"
+          type="datetime-local"
+          value={formData.slaDeadline ? new Date(formData.slaDeadline).toISOString().slice(0, 16) : ''}
+          onChange={(e) => handleFieldChange('slaDeadline', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+        />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          取消
+        </Button>
+        <Button type="submit">
+          保存
+        </Button>
+      </div>
+    </form>
   );
 }
 

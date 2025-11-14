@@ -27,6 +27,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [name, setName] = useState<string>('')
 
   useEffect(() => {
     const fetchData = async () => {
@@ -56,10 +57,10 @@ export default function ProfilePage() {
           setEmployees(employeesData || [])
         }
         
-        // 取得使用者目前的員工 mapping 和頭像
+        // 取得使用者目前的員工 mapping、頭像和姓名
         const { data: userProfile, error: userProfileError } = await supabase
           .from('user_profiles')
-          .select('netsuite_employee_id, avatar_url')
+          .select('netsuite_employee_id, avatar_url, name')
           .eq('id', user.id)
           .maybeSingle()
         
@@ -70,6 +71,18 @@ export default function ProfilePage() {
           if (userProfile.avatar_url) {
             setAvatarUrl(userProfile.avatar_url)
           }
+          // 如果 user_profiles 有姓名，優先使用
+          if (userProfile.name) {
+            setName(userProfile.name)
+          } else {
+            // 如果 user_profiles 沒有姓名，則從 user_metadata 或 email 取得
+            const initialName = user.user_metadata?.full_name || user.email?.split('@')[0] || ''
+            setName(initialName)
+          }
+        } else {
+          // 如果沒有 user_profiles 記錄，則從 user_metadata 或 email 取得
+          const initialName = user.user_metadata?.full_name || user.email?.split('@')[0] || ''
+          setName(initialName)
         }
         
         setLoading(false)
@@ -118,11 +131,28 @@ export default function ProfilePage() {
         }
       }
       
+      // 更新使用者 metadata（姓名）
+      if (name && name !== user.user_metadata?.full_name) {
+        const { error: updateError } = await supabase.auth.updateUser({
+          data: { full_name: name }
+        })
+        
+        if (updateError) {
+          console.error('更新姓名錯誤:', updateError)
+          alert('更新姓名失敗，請稍後再試')
+          return
+        }
+        
+        // 觸發自定義事件，通知 layout 更新姓名
+        window.dispatchEvent(new CustomEvent('nameUpdated'))
+      }
+      
       // 使用 upsert 來更新或插入 user_profiles
       const { error } = await supabase
         .from('user_profiles')
         .upsert({
           id: user.id,
+          name: name, // 將姓名也存到 user_profiles 表
           netsuite_employee_id: selectedEmployeeId,
           subsidiary_id: subsidiaryId,
           avatar_url: avatarUrl,
@@ -136,6 +166,11 @@ export default function ProfilePage() {
         alert('儲存失敗，請稍後再試')
       } else {
         alert('儲存成功！')
+        // 更新本地 user 狀態
+        const { data: { user: updatedUser } } = await supabase.auth.getUser()
+        if (updatedUser) {
+          setUser(updatedUser)
+        }
       }
     } catch (err) {
       console.error('儲存錯誤:', err)
@@ -311,17 +346,24 @@ export default function ProfilePage() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">姓名</Label>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                {user?.user_metadata?.full_name || user?.email?.split('@')[0] || '未設定'}
-              </div>
+              <Label htmlFor="name" className="text-sm font-semibold">姓名</Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="輸入姓名"
+              />
             </div>
             
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">電子郵件</Label>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                {user?.email || '未設定'}
-              </div>
+              <Label htmlFor="email" className="text-sm font-semibold">電子郵件</Label>
+              <Input
+                id="email"
+                type="email"
+                value={user?.email || ''}
+                disabled
+                className="bg-muted cursor-not-allowed"
+              />
             </div>
             
             <div className="space-y-2">
