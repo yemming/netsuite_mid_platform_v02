@@ -40,7 +40,11 @@ import {
   Inbox,
   FileCheck,
   DollarSign,
-  ClipboardList
+  ClipboardList,
+  Warehouse,
+  Smartphone,
+  HardHat,
+  Hammer
 } from 'lucide-react'
 
 interface MenuItem {
@@ -65,13 +69,13 @@ const mainNavigation: MenuItem[] = [
   {
     name: 'SuiteQL 查詢',
     href: '/dashboard/query',
-    icon: Terminal,
+    icon: Search,
   },
 ]
 
 const privatePages: MenuItem[] = [
   {
-    name: 'NetSuite單據模擬',
+    name: 'NetSuite',
     icon: Receipt,
     children: [
       {
@@ -92,7 +96,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'POS單據模擬',
+    name: 'POS',
     icon: Store,
     children: [
       {
@@ -138,7 +142,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'HCM單據模擬',
+    name: 'HCM',
     icon: Users,
     children: [
       {
@@ -149,7 +153,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'CRM單據模擬',
+    name: 'CRM',
     icon: UserCheck,
     children: [
       {
@@ -160,7 +164,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'WMS單據模擬',
+    name: 'WMS',
     icon: Package,
     children: [
       {
@@ -168,10 +172,30 @@ const privatePages: MenuItem[] = [
         href: '/dashboard/wms',
         icon: Search,
       },
+      {
+        name: '收貨作業',
+        href: '/dashboard/wms/receiving',
+        icon: Inbox,
+      },
+      {
+        name: '儲存管理',
+        href: '/dashboard/wms/storage',
+        icon: Warehouse,
+      },
+      {
+        name: '出貨作業',
+        href: '/dashboard/wms/fulfilment',
+        icon: ShoppingCart,
+      },
+      {
+        name: '行動裝置',
+        href: '/dashboard/wms/mobile',
+        icon: Smartphone,
+      },
     ],
   },
   {
-    name: 'SCM模擬',
+    name: 'SCM',
     icon: Truck,
     children: [
       {
@@ -182,7 +206,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'EC模擬',
+    name: 'EC',
     icon: ShoppingBag,
     children: [
       {
@@ -193,13 +217,60 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'MES模擬',
+    name: 'MES',
     icon: Factory,
     children: [
       {
         name: 'MES資料檢視',
         href: '/dashboard/mes',
         icon: Search,
+      },
+    ],
+  },
+  {
+    name: '現場維運管理系統',
+    icon: HardHat,
+    children: [
+      {
+        name: '客戶管理',
+        href: '/dashboard/field-operations/customers',
+        icon: Users,
+      },
+      {
+        name: '建立工單',
+        href: '/dashboard/field-operations/create-work-order',
+        icon: ClipboardList,
+      },
+      {
+        name: '排程與調度',
+        href: '/dashboard/field-operations/dispatch',
+        icon: LayoutDashboard,
+      },
+      {
+        name: '行動現場服務',
+        href: '/dashboard/field-operations/mobile',
+        icon: Smartphone,
+      },
+      {
+        name: '後勤管理',
+        icon: Cog,
+        children: [
+          {
+            name: '人員管理',
+            href: '/dashboard/field-operations/admin/personnel',
+            icon: Users,
+          },
+          {
+            name: '料件管理',
+            href: '/dashboard/field-operations/admin/inventory',
+            icon: Package,
+          },
+          {
+            name: '資源管理',
+            href: '/dashboard/field-operations/admin/resources',
+            icon: Hammer,
+          },
+        ],
       },
     ],
   },
@@ -244,7 +315,7 @@ const privatePages: MenuItem[] = [
 export default function Sidebar() {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['NetSuite單據模擬']))
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['NetSuite']))
 
   // 自動展開包含當前路徑的父選單
   useEffect(() => {

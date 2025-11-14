@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Save } from 'lucide-react'
+import { Loader2, Save, Upload, X, User as UserIcon } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 
 interface Employee {
   id: string
@@ -24,6 +25,8 @@ export default function ProfilePage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,15 +56,20 @@ export default function ProfilePage() {
           setEmployees(employeesData || [])
         }
         
-        // 取得使用者目前的員工 mapping
+        // 取得使用者目前的員工 mapping 和頭像
         const { data: userProfile, error: userProfileError } = await supabase
           .from('user_profiles')
-          .select('netsuite_employee_id')
+          .select('netsuite_employee_id, avatar_url')
           .eq('id', user.id)
           .maybeSingle()
         
-        if (!userProfileError && userProfile?.netsuite_employee_id) {
-          setSelectedEmployeeId(userProfile.netsuite_employee_id)
+        if (!userProfileError && userProfile) {
+          if (userProfile.netsuite_employee_id) {
+            setSelectedEmployeeId(userProfile.netsuite_employee_id)
+          }
+          if (userProfile.avatar_url) {
+            setAvatarUrl(userProfile.avatar_url)
+          }
         }
         
         setLoading(false)
@@ -117,6 +125,7 @@ export default function ProfilePage() {
           id: user.id,
           netsuite_employee_id: selectedEmployeeId,
           subsidiary_id: subsidiaryId,
+          avatar_url: avatarUrl,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'id'
@@ -146,6 +155,90 @@ export default function ProfilePage() {
 
   const selectedEmployee = employees.find(emp => emp.netsuite_internal_id === selectedEmployeeId)
 
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    // 檢查檔案類型
+    if (!file.type.startsWith('image/')) {
+      alert('請選擇圖片檔案')
+      return
+    }
+
+    // 檢查檔案大小（限制 2MB）
+    if (file.size > 2 * 1024 * 1024) {
+      alert('圖片大小不能超過 2MB')
+      return
+    }
+
+    setUploadingAvatar(true)
+    try {
+      // 將圖片轉換為 base64
+      const reader = new FileReader()
+      reader.onloadend = async () => {
+        const base64String = reader.result as string
+        
+        // 保存到 user_profiles 表
+        const supabase = createClient()
+        const { error } = await supabase
+          .from('user_profiles')
+          .upsert({
+            id: user.id,
+            avatar_url: base64String,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'id'
+          })
+        
+        if (error) {
+          console.error('上傳頭像錯誤:', error)
+          alert('上傳頭像失敗，請稍後再試')
+        } else {
+          setAvatarUrl(base64String)
+          // 觸發自定義事件，通知 layout 更新頭像
+          window.dispatchEvent(new CustomEvent('avatarUpdated', { detail: { avatarUrl: base64String } }))
+          alert('頭像上傳成功！')
+        }
+        setUploadingAvatar(false)
+      }
+      reader.readAsDataURL(file)
+    } catch (err) {
+      console.error('上傳頭像錯誤:', err)
+      alert('上傳頭像失敗，請稍後再試')
+      setUploadingAvatar(false)
+    }
+  }
+
+  const handleRemoveAvatar = async () => {
+    if (!confirm('確定要移除頭像嗎？')) return
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('user_profiles')
+        .upsert({
+          id: user.id,
+          avatar_url: null,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'id'
+        })
+      
+      if (error) {
+        console.error('移除頭像錯誤:', error)
+        alert('移除頭像失敗，請稍後再試')
+      } else {
+        setAvatarUrl(null)
+        // 觸發自定義事件，通知 layout 更新頭像
+        window.dispatchEvent(new CustomEvent('avatarUpdated', { detail: { avatarUrl: null } }))
+        alert('頭像已移除')
+      }
+    } catch (err) {
+      console.error('移除頭像錯誤:', err)
+      alert('移除頭像失敗，請稍後再試')
+    }
+  }
+
   return (
     <div className="p-6">
       <div className="max-w-2xl mx-auto">
@@ -154,6 +247,69 @@ export default function ProfilePage() {
             <CardTitle>個人資料</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* 頭像上傳 */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">大頭照</Label>
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  {avatarUrl ? (
+                    <img 
+                      src={avatarUrl} 
+                      alt="頭像" 
+                      className="w-20 h-20 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-full bg-gray-200 dark:bg-[#354a56] flex items-center justify-center border-2 border-gray-200 dark:border-gray-700">
+                      <UserIcon className="h-10 w-10 text-gray-400" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="relative">
+                    <Input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      disabled={uploadingAvatar}
+                      className="hidden"
+                      id="avatar-upload"
+                    />
+                    <Label
+                      htmlFor="avatar-upload"
+                      className="cursor-pointer inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {uploadingAvatar ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          上傳中...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          上傳照片
+                        </>
+                      )}
+                    </Label>
+                  </div>
+                  {avatarUrl && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRemoveAvatar}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      移除照片
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                支援 JPG、PNG 格式，檔案大小不超過 2MB
+              </p>
+            </div>
+
             <div className="space-y-2">
               <Label className="text-sm font-semibold">姓名</Label>
               <div className="text-sm text-gray-600 dark:text-gray-400">

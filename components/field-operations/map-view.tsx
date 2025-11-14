@@ -66,27 +66,77 @@ export default function MapView({
 
   // 初始化地圖
   useEffect(() => {
+    // 確保只在客戶端執行
+    if (typeof window === 'undefined') return;
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // 初始化地圖
-    const map = L.map(mapContainerRef.current).setView(center, zoom);
+    let map: L.Map | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let cleanupTimers: NodeJS.Timeout[] = [];
 
-    // 添加 OpenStreetMap 圖層（只使用亮色模式）
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
-    }).addTo(map);
+    // 確保容器有尺寸
+    const checkAndInit = () => {
+      if (!mapContainerRef.current || mapRef.current) return;
+      
+      // 如果容器還沒有尺寸，等待一下再初始化
+      if (mapContainerRef.current.offsetWidth === 0 || mapContainerRef.current.offsetHeight === 0) {
+        const timer = setTimeout(checkAndInit, 100);
+        cleanupTimers.push(timer);
+        return;
+      }
 
-    mapRef.current = map;
+      // 初始化地圖
+      map = L.map(mapContainerRef.current).setView(center, zoom);
 
-    // 確保地圖正確調整大小
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 100);
+      // 添加 OpenStreetMap 圖層（只使用亮色模式）
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+      }).addTo(map);
+
+      mapRef.current = map;
+
+      // 設置 ResizeObserver 監聽容器大小變化
+      resizeObserver = new ResizeObserver(() => {
+        // 當容器大小改變時，更新地圖大小
+        requestAnimationFrame(() => {
+          if (map && !(map as any)._destroyed) {
+            map.invalidateSize();
+          }
+        });
+      });
+
+      if (mapContainerRef.current) {
+        resizeObserver.observe(mapContainerRef.current);
+      }
+
+      // 確保地圖在初始化時正確調整大小（多次調用以確保）
+      const initSize = () => {
+        if (map && !(map as any)._destroyed) {
+          map.invalidateSize();
+        }
+      };
+      
+      // 立即調用一次
+      initSize();
+      
+      // 使用多個延遲確保在不同渲染階段都能正確調整
+      cleanupTimers.push(setTimeout(initSize, 0));
+      cleanupTimers.push(setTimeout(initSize, 100));
+      cleanupTimers.push(setTimeout(initSize, 300));
+    };
+
+    checkAndInit();
 
     // 清理函數
     return () => {
-      map.remove();
+      cleanupTimers.forEach(timer => clearTimeout(timer));
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      if (map && !(map as any)._destroyed) {
+        map.remove();
+      }
       mapRef.current = null;
     };
   }, [center, zoom]);
@@ -209,12 +259,24 @@ export default function MapView({
   useEffect(() => {
     if (!mapRef.current) return;
 
-    // 使用 setTimeout 確保 DOM 更新後再調整地圖大小
-    const timeoutId = setTimeout(() => {
+    // 使用多個延遲確保在不同渲染階段都能正確調整
+    const updateSize = () => {
       mapRef.current?.invalidateSize();
-    }, 100);
+    };
 
-    return () => clearTimeout(timeoutId);
+    // 立即調用一次
+    updateSize();
+    
+    // 使用多個延遲確保 DOM 更新後再調整地圖大小
+    const timeoutId1 = setTimeout(updateSize, 0);
+    const timeoutId2 = setTimeout(updateSize, 100);
+    const timeoutId3 = setTimeout(updateSize, 300);
+
+    return () => {
+      clearTimeout(timeoutId1);
+      clearTimeout(timeoutId2);
+      clearTimeout(timeoutId3);
+    };
   }, [height]);
 
   // 監聽視窗大小改變，自動調整地圖大小
@@ -232,11 +294,16 @@ export default function MapView({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+
   return (
     <div
       ref={mapContainerRef}
       className="w-full h-full"
-      style={{ height: height === '100%' ? '100%' : height }}
+      style={{ 
+        height: height === '100%' ? '100%' : height,
+        minHeight: height === '100%' ? 0 : undefined,
+        position: 'relative',
+      }}
     />
   );
 }

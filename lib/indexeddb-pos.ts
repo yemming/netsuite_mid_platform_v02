@@ -35,6 +35,7 @@ export interface Transaction {
   total: number; // 總額
   paymentMethod: 'cash' | 'linepay' | 'credit'; // 付款方式
   mobileCarrier?: string; // 手機載具
+  taxIdNumber?: string; // 統編（統一編號）
   cashReceived?: number; // 現金收款金額
   cashChange?: number; // 找零
   createdAt: Date;

@@ -120,3 +120,85 @@ export interface SchedulingSuggestion {
   score: number; // 適合度分數
 }
 
+// 資源狀態
+export type ResourceStatus = 'available' | 'in_use' | 'maintenance' | 'disabled';
+
+// 資源類型
+export type ResourceType = 'vehicle' | 'crane' | 'excavator' | 'compressor' | 'generator' | 'tool' | 'other';
+
+// 資源（工具/機械）
+export interface Resource {
+  id: string;
+  name: string;
+  type: ResourceType;
+  serialNumber?: string;
+  description?: string;
+  status: ResourceStatus;
+  location?: string; // 位置/倉庫
+  assignedTo?: string; // 分配給的技術人員 ID 或工單 ID
+  purchaseDate?: string;
+  lastMaintenanceDate?: string;
+  nextMaintenanceDate?: string;
+  notes?: string;
+}
+
+// 客戶需求狀態
+export type CustomerRequirementStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+// 客戶需求
+export interface CustomerRequirement {
+  id: string;
+  customerId: string;
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: CustomerRequirementStatus;
+  requestedDate: string;
+  expectedDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  customer?: Customer;
+}
+
+// 客戶回櫃狀態
+export type CallbackStatus = 'pending' | 'scheduled' | 'completed' | 'cancelled';
+
+// 客戶回櫃
+export interface CustomerCallback {
+  id: string;
+  customerId: string;
+  workOrderId?: string;
+  reason: string;
+  notes?: string;
+  status: CallbackStatus;
+  scheduledDate?: string;
+  completedDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  customer?: Customer;
+}
+
+// 完工報告狀態
+export type CompletionReportStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+
+// 完工報告
+export interface CompletionReport {
+  id: string;
+  workOrderId: string;
+  customerId: string;
+  title: string;
+  summary: string;
+  workPerformed: string;
+  materialsUsed?: string;
+  customerFeedback?: string;
+  customerSignature?: string; // Base64 或圖片 URL
+  photos?: string[]; // 圖片 URL 陣列
+  status: CompletionReportStatus;
+  submittedAt?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  customer?: Customer;
+  workOrder?: WorkOrder;
+}
+

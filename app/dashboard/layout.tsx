@@ -15,6 +15,7 @@ export default function DashboardLayout({
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [signingOut, setSigningOut] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
 
   useEffect(() => {
     const checkUser = async () => {
@@ -48,6 +49,18 @@ export default function DashboardLayout({
         }
         
         setUser(user)
+        
+        // 取得使用者頭像
+        const { data: userProfile, error: userProfileError } = await supabase
+          .from('user_profiles')
+          .select('avatar_url')
+          .eq('id', user.id)
+          .maybeSingle()
+        
+        if (!userProfileError && userProfile?.avatar_url) {
+          setAvatarUrl(userProfile.avatar_url)
+        }
+        
         setLoading(false)
       } catch (err: any) {
         console.error('Check user error:', err)
@@ -56,6 +69,17 @@ export default function DashboardLayout({
       }
     }
     checkUser()
+    
+    // 監聽頭像更新事件
+    const handleAvatarUpdate = (event: CustomEvent) => {
+      setAvatarUrl(event.detail.avatarUrl)
+    }
+    
+    window.addEventListener('avatarUpdated', handleAvatarUpdate as EventListener)
+    
+    return () => {
+      window.removeEventListener('avatarUpdated', handleAvatarUpdate as EventListener)
+    }
   }, [router])
 
   const handleSignOut = async () => {
@@ -108,10 +132,18 @@ export default function DashboardLayout({
                 className="flex items-center space-x-2 ml-2 cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() => router.push('/dashboard/profile')}
               >
-                <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-[#354a56] flex items-center justify-center flex-shrink-0">
-                  <span className="text-gray-700 dark:text-white text-xs font-semibold">
-                    {user?.email?.charAt(0).toUpperCase() || 'U'}
-                  </span>
+                <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-[#354a56] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {avatarUrl ? (
+                    <img 
+                      src={avatarUrl} 
+                      alt="頭像" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-gray-700 dark:text-white text-sm font-semibold">
+                      {user?.email?.charAt(0).toUpperCase() || 'U'}
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-col leading-none">
                   <span className="text-sm font-medium text-gray-900 dark:text-white leading-tight">{user?.email?.split('@')[0] || 'User'}</span>

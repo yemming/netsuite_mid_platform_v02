@@ -22,7 +22,13 @@ import {
 } from '@/components/ui/dialog';
 import { LayoutDashboard, MapPin, Calendar, Users, Clock, AlertCircle, User, ZoomIn, ZoomOut } from 'lucide-react';
 import { WorkOrder, SchedulingSuggestion, User as UserType } from '@/lib/field-operations-types';
-import MapView from '@/components/field-operations/map-view';
+import dynamic from 'next/dynamic';
+
+// 動態導入 MapView 以避免 SSR 問題
+const MapView = dynamic(() => import('@/components/field-operations/map-view'), {
+  ssr: false,
+  loading: () => <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-800">載入地圖中...</div>,
+});
 
 // 技術人員排程資料結構
 interface TechnicianSchedule {
@@ -1111,13 +1117,17 @@ export default function DispatchPage() {
       <div className="space-y-0">
         {/* 時間軸標題（可滾動） */}
         <div 
-          className="flex border-b pb-0.5 mb-0.5 overflow-x-auto" 
+          className="flex border-b pb-0.5 mb-0.5 overflow-x-auto w-full" 
           ref={ganttHeaderRef}
           onScroll={(e) => handleGanttScroll(e.currentTarget.scrollLeft, e.currentTarget)}
+          style={{ width: '100%' }}
         >
           <div 
             className="flex relative"
-            style={{ width: `${technicianNameWidth + totalHours * hourWidth}px`, minWidth: '100%' }}
+            style={{ 
+              width: `${Math.max(technicianNameWidth + totalHours * hourWidth, 100)}px`,
+              minWidth: '100%'
+            }}
           >
             {/* 技術人員名稱區域的佔位 */}
             <div className="flex-shrink-0" style={{ width: `${technicianNameWidth}px` }}>
@@ -1141,18 +1151,25 @@ export default function DispatchPage() {
         <div 
           className="overflow-auto border rounded bg-white dark:bg-gray-900" 
           style={{ 
-            height: '40vh', 
-            maxHeight: '40vh',
+            height: 'calc(40vh - 60px)', 
+            maxHeight: 'calc(40vh - 60px)',
             minHeight: '300px',
             overflowX: 'auto',
-            overflowY: 'auto'
+            overflowY: 'auto',
+            width: '100%'
           }}
           ref={(el) => {
             if (el) ganttRowsRef.current[0] = el;
           }}
           onScroll={(e) => handleGanttScroll(e.currentTarget.scrollLeft, e.currentTarget)}
         >
-          <div className="space-y-1 py-1" style={{ minWidth: `${technicianNameWidth + totalHours * hourWidth}px` }}>
+          <div 
+            className="space-y-1 py-1" 
+            style={{ 
+              minWidth: `${Math.max(technicianNameWidth + totalHours * hourWidth, 100)}px`,
+              width: '100%'
+            }}
+          >
             {technicianSchedules.map((schedule) => (
               <div 
                 key={schedule.technician.id} 
@@ -1161,7 +1178,10 @@ export default function DispatchPage() {
               >
               <div 
                 className="flex relative"
-                style={{ width: `${technicianNameWidth + totalHours * hourWidth}px`, minWidth: '100%' }}
+                style={{ 
+                  width: `${Math.max(technicianNameWidth + totalHours * hourWidth, 100)}px`,
+                  minWidth: '100%'
+                }}
               >
                 {/* 技術人員名稱區域 */}
                 <div 
@@ -1274,7 +1294,7 @@ export default function DispatchPage() {
     }));
 
     return (
-      <div className="relative w-full h-full">
+      <div className="relative w-full h-full" style={{ height: '100%' }}>
         <MapView
           center={[centerLat, centerLng]}
           zoom={12}
@@ -1394,16 +1414,16 @@ export default function DispatchPage() {
           </Card>
 
           {/* 右側：地圖區域 */}
-          <Card>
-            <CardHeader>
+          <Card className="flex flex-col" style={{ height: 'calc(40vh + 120px)' }}>
+            <CardHeader className="flex-shrink-0">
               <CardTitle className="text-lg flex items-center gap-2">
                 <MapPin className="h-5 w-5" />
                 即時位置追蹤
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="flex-1 overflow-hidden p-0">
               {technicianLocations.length > 0 ? (
-                <div className="w-full" style={{ height: '30vw', maxHeight: '500px', minHeight: '300px' }}>
+                <div className="w-full h-full">
                   {renderMapView()}
                 </div>
               ) : (
