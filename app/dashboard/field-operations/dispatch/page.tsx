@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { LayoutDashboard, MapPin, Calendar, Users, Clock, AlertCircle, User, ZoomIn, ZoomOut } from 'lucide-react';
-import { WorkOrder, SchedulingSuggestion, User as UserType, Customer } from '@/lib/field-operations-types';
+import { WorkOrder, SchedulingSuggestion, User as UserType, Customer, Case } from '@/lib/field-operations-types';
 import dynamic from 'next/dynamic';
 
 // 動態導入 MapView 以避免 SSR 問題
@@ -1742,7 +1742,7 @@ function WorkOrderDetailForm({
     }));
   };
 
-  const handleCaseFieldChange = (field: keyof WorkOrder['case'], value: any) => {
+  const handleCaseFieldChange = (field: keyof Case, value: any) => {
     if (!formData.case) return;
     setFormData(prev => ({
       ...prev,
