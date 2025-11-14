@@ -141,8 +141,8 @@ export default function InventoryPage() {
       partNumber: item.partNumber,
       name: item.name,
       description: item.description || '',
-      unitPrice: item.unitPrice.toString(),
-      stockQuantity: item.stockQuantity.toString(),
+      unitPrice: item.unitPrice?.toString() || '',
+      stockQuantity: item.stockQuantity?.toString() || '',
     });
     setIsEditModalOpen(true);
   };
@@ -191,10 +191,10 @@ export default function InventoryPage() {
     const quantity = parseInt(transferData.quantity);
     if (transferData.from === 'warehouse') {
       // 從倉庫轉移到技術人員
-      if (item.stockQuantity >= quantity) {
+      if ((item.stockQuantity || 0) >= quantity) {
         setInventoryItems(inventoryItems.map(i => 
           i.id === transferData.itemId 
-            ? { ...i, stockQuantity: i.stockQuantity - quantity }
+            ? { ...i, stockQuantity: (i.stockQuantity || 0) - quantity }
             : i
         ));
         // 更新技術人員庫存
@@ -292,14 +292,14 @@ export default function InventoryPage() {
                 </TableRow>
               ) : (
                 filteredItems.map((item) => {
-                  const status = getStockStatus(item.stockQuantity);
+                  const status = getStockStatus(item.stockQuantity || 0);
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="font-medium">{item.partNumber}</TableCell>
                       <TableCell>{item.name}</TableCell>
                       <TableCell className="text-gray-500 text-sm">{item.description}</TableCell>
-                      <TableCell>NT$ {item.unitPrice.toLocaleString()}</TableCell>
-                      <TableCell>{item.stockQuantity}</TableCell>
+                      <TableCell>NT$ {(item.unitPrice || 0).toLocaleString()}</TableCell>
+                      <TableCell>{item.stockQuantity || 0}</TableCell>
                       <TableCell>
                         <Badge variant={status.variant} className="flex items-center gap-1 w-fit">
                           <status.icon className="h-3 w-3" />
@@ -436,7 +436,7 @@ export default function InventoryPage() {
                 <SelectContent>
                   {inventoryItems.map((item) => (
                     <SelectItem key={item.id} value={item.id}>
-                      {item.partNumber} - {item.name} (庫存: {item.stockQuantity})
+                      {item.partNumber} - {item.name} (庫存: {item.stockQuantity || 0})
                     </SelectItem>
                   ))}
                 </SelectContent>

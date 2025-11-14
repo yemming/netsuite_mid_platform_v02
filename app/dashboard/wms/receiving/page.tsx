@@ -61,6 +61,7 @@ interface ReceivingItem {
   lotNumber?: string;
   expiryDate?: string;
   suggestedBin?: string;
+  qualityStatus?: 'pending' | 'passed' | 'failed';
 }
 
 interface ReceivingRecord {
