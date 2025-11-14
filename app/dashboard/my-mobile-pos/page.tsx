@@ -66,6 +66,8 @@ export default function MyMobilePOSPage() {
   const [filteredItems, setFilteredItems] = useState<POSItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOverCart, setDragOverCart] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState<string>('');
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // 商品分類定義（12個分類）
   const categories = [
@@ -114,7 +116,7 @@ export default function MyMobilePOSPage() {
     init();
   }, []);
 
-  // 根據選中的分類篩選商品
+  // 根據選中的分類和搜尋關鍵字篩選商品
   useEffect(() => {
     const categoryMapping: Record<string, string[]> = {
       '雜貨類': ['雜貨', '食品', '白米', '雞蛋', '泡菜', '醬油', '醋', '鹽', '糖', '胡椒粉', '香油', '味噌'],
@@ -131,26 +133,40 @@ export default function MyMobilePOSPage() {
       '保健食品類': ['保健食品', '維他命', 'B群', '葉黃素', '鈣片', '魚油', '益生菌', '膠原蛋白', '蔓越莓', '葡萄糖胺'],
     };
 
-    const keywords = categoryMapping[selectedCategory] || [];
+    const categoryKeywords = categoryMapping[selectedCategory] || [];
+    const searchLower = searchKeyword.toLowerCase().trim();
+    
     const filtered = items.filter((item) => {
+      // 如果有搜尋關鍵字，優先使用搜尋關鍵字篩選
+      if (searchLower) {
+        const itemName = item.name.toLowerCase();
+        const itemBarcode = item.barcode.toLowerCase();
+        // 搜尋商品名稱或條碼
+        if (itemName.includes(searchLower) || itemBarcode.includes(searchLower)) {
+          return true;
+        }
+        return false;
+      }
+      
+      // 沒有搜尋關鍵字時，使用分類篩選
       if (!item.category) {
         // 如果沒有分類，根據商品名稱判斷
         const itemName = item.name.toLowerCase();
-        return keywords.some((keyword) => 
+        return categoryKeywords.some((keyword) => 
           itemName.includes(keyword.toLowerCase())
         );
       }
       // 根據分類或商品名稱匹配
       const categoryLower = item.category.toLowerCase();
       const nameLower = item.name.toLowerCase();
-      return keywords.some((keyword) => 
+      return categoryKeywords.some((keyword) => 
         categoryLower.includes(keyword.toLowerCase()) ||
         nameLower.includes(keyword.toLowerCase())
       );
     });
     
     setFilteredItems(filtered);
-  }, [selectedCategory, items]);
+  }, [selectedCategory, items, searchKeyword]);
 
   // 計算單個商品的稅金（含稅價 / 21，四捨五入）
   const calculateItemTax = (price: number): number => {
@@ -189,56 +205,102 @@ export default function MyMobilePOSPage() {
   // 總計 = 小計 + 稅額（應該等於所有商品的含稅價總和）
   const total = cartTotal + tax;
 
-  // 掃描條碼
+  // 處理輸入變化（用於搜尋商品名稱）
+  const handleInputChange = (value: string) => {
+    setBarcodeInput(value);
+    
+    // 清除之前的計時器
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    // 防抖：300ms 後更新搜尋關鍵字
+    searchTimeoutRef.current = setTimeout(() => {
+      setSearchKeyword(value);
+    }, 300);
+  };
+
+  // 判斷是否為條碼（通常條碼是純數字且長度較長）
+  const isBarcode = (input: string): boolean => {
+    const trimmed = input.trim();
+    // 條碼通常是純數字且長度 >= 8，或是包含特殊格式
+    return /^\d{8,}$/.test(trimmed) || /^[A-Z0-9]{8,}$/i.test(trimmed);
+  };
+
+  // 掃描條碼或搜尋商品
   const handleScan = async () => {
     if (!barcodeInput.trim()) {
-      showToast('請輸入條碼', 'error');
+      showToast('請輸入條碼或商品名稱', 'error');
       return;
     }
 
-    try {
-      // 從 IndexedDB 查詢商品
-      let item = await posDB.getItemByBarcode(barcodeInput.trim());
+    const input = barcodeInput.trim();
+    
+    // 判斷是條碼還是商品名稱
+    if (isBarcode(input)) {
+      // 條碼模式：直接查詢並加入購物車
+      try {
+        let item = await posDB.getItemByBarcode(input);
 
-      if (!item) {
-        // 如果找不到商品，提示是否要新增
-        const shouldAdd = confirm(`找不到條碼 ${barcodeInput} 的商品，是否要新增？`);
-        if (shouldAdd) {
-          const name = prompt('請輸入商品名稱：');
-          if (!name) return;
+        if (!item) {
+          // 如果找不到商品，提示是否要新增
+          const shouldAdd = confirm(`找不到條碼 ${input} 的商品，是否要新增？`);
+          if (shouldAdd) {
+            const name = prompt('請輸入商品名稱：');
+            if (!name) return;
 
-          const priceStr = prompt('請輸入商品價格：');
-          const price = parseFloat(priceStr || '0');
-          if (isNaN(price) || price <= 0) {
-            showToast('價格格式錯誤', 'error');
+            const priceStr = prompt('請輸入商品價格：');
+            const price = parseFloat(priceStr || '0');
+            if (isNaN(price) || price <= 0) {
+              showToast('價格格式錯誤', 'error');
+              return;
+            }
+
+            item = {
+              barcode: input,
+              name,
+              price,
+              unit: '個',
+            };
+            await posDB.upsertItem(item);
+            setItems(await posDB.getAllItems());
+            showToast('商品已新增', 'success');
+          } else {
+            setBarcodeInput('');
+            setSearchKeyword('');
             return;
           }
-
-          item = {
-            barcode: barcodeInput.trim(),
-            name,
-            price,
-            unit: '個',
-          };
-          await posDB.upsertItem(item);
-          setItems(await posDB.getAllItems());
-          showToast('商品已新增', 'success');
-        } else {
-          setBarcodeInput('');
-          return;
         }
-      }
 
-      // 加入購物車
-      await posDB.addToCart(item);
-      const updatedCart = await posDB.getCartItems();
-      setCartItems(updatedCart);
-      setBarcodeInput('');
-      barcodeInputRef.current?.focus();
-      showToast(`已加入：${item.name}`, 'success');
-    } catch (error) {
-      console.error('掃描失敗:', error);
-      showToast('掃描失敗', 'error');
+        // 加入購物車
+        await posDB.addToCart(item);
+        const updatedCart = await posDB.getCartItems();
+        setCartItems(updatedCart);
+        setBarcodeInput('');
+        setSearchKeyword('');
+        barcodeInputRef.current?.focus();
+        showToast(`已加入：${item.name}`, 'success');
+      } catch (error) {
+        console.error('掃描失敗:', error);
+        showToast('掃描失敗', 'error');
+      }
+    } else {
+      // 商品名稱模式：更新搜尋關鍵字，讓商品分類區域顯示搜尋結果
+      setSearchKeyword(input);
+      // 如果搜尋結果只有一個商品，可以提示用戶可以直接點擊加入購物車
+      const matchingItems = items.filter(item => 
+        item.name.toLowerCase().includes(input.toLowerCase()) ||
+        item.barcode.toLowerCase().includes(input.toLowerCase())
+      );
+      
+      if (matchingItems.length === 0) {
+        showToast('找不到符合的商品', 'info');
+      } else if (matchingItems.length === 1) {
+        // 如果只有一個結果，可以提示用戶
+        showToast(`找到 1 個商品：${matchingItems[0].name}`, 'info');
+      } else {
+        showToast(`找到 ${matchingItems.length} 個商品`, 'info');
+      }
     }
   };
 
@@ -423,6 +485,8 @@ export default function MyMobilePOSPage() {
         showToast('現金收款金額不足', 'error');
         return;
       }
+    } else {
+      // 非現金付款方式不需要收款金額驗證，直接繼續
     }
 
     try {
@@ -515,9 +579,9 @@ export default function MyMobilePOSPage() {
                 <Input
                   ref={barcodeInputRef}
                   type="text"
-                  placeholder="輸入或掃描條碼"
+                  placeholder="輸入或掃描條碼，或輸入商品名稱搜尋"
                   value={barcodeInput}
-                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value)}
                   onKeyPress={(e) => {
                     if (e.key === 'Enter') {
                       handleScan();
@@ -741,13 +805,13 @@ export default function MyMobilePOSPage() {
           <Card className="m-4 dark:bg-[#1a2332] dark:border-gray-700">
             <CardContent className="p-2.5">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs text-gray-600 dark:text-gray-400">小計</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">小計</span>
                 <span className="text-sm font-semibold text-gray-900 dark:text-white">
                   ${cartTotal}
                 </span>
               </div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs text-gray-600 dark:text-gray-400">稅額</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">稅額</span>
                 <span className="text-sm font-semibold text-gray-900 dark:text-white">${tax}</span>
               </div>
               <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
@@ -793,6 +857,66 @@ export default function MyMobilePOSPage() {
             </div>
 
             <div className="space-y-4 py-4">
+              {/* 付款方式 */}
+              <div>
+                <Label className="mb-2 block">付款方式 <span className="text-red-500">*</span></Label>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(value: 'cash' | 'linepay' | 'credit') => {
+                    setPaymentMethod(value);
+                    // 切換付款方式時清空收款金額
+                    if (value !== 'cash') {
+                      setCashReceived('');
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="h-4 w-4" />
+                        現金
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="linepay">
+                      <div className="flex items-center gap-2">
+                        <Smartphone className="h-4 w-4" />
+                        Line Pay
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="credit">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="h-4 w-4" />
+                        信用卡
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 現金收款 - 只有選擇現金時才顯示 */}
+              {paymentMethod === 'cash' && (
+                <div>
+                  <Label htmlFor="cashReceived">收款金額 <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="cashReceived"
+                    type="number"
+                    placeholder="輸入收款金額"
+                    value={cashReceived}
+                    onChange={(e) => setCashReceived(e.target.value)}
+                    min={total}
+                    step="1"
+                  />
+                  {cashReceived && parseFloat(cashReceived) >= total && (
+                    <p className="text-sm text-green-600 dark:text-green-400 mt-1">
+                      找零：${(parseFloat(cashReceived) - total).toFixed(0)}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* 載具 */}
               <div>
                 <Label htmlFor="mobileCarrier">載具（選填）</Label>
@@ -827,67 +951,16 @@ export default function MyMobilePOSPage() {
                   統一編號為8位數字
                 </p>
               </div>
-
-              {/* 現金收款 */}
-              {paymentMethod === 'cash' && (
-                <div>
-                  <Label htmlFor="cashReceived">收款金額</Label>
-                  <Input
-                    id="cashReceived"
-                    type="number"
-                    placeholder="輸入收款金額"
-                    value={cashReceived}
-                    onChange={(e) => setCashReceived(e.target.value)}
-                    min={total}
-                    step="1"
-                  />
-                  {cashReceived && parseFloat(cashReceived) >= total && (
-                    <p className="text-sm text-green-600 dark:text-green-400 mt-1">
-                      找零：${(parseFloat(cashReceived) - total).toFixed(0)}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* 付款方式 */}
-              <div>
-                <Label className="mb-2 block">付款方式</Label>
-                <Select
-                  value={paymentMethod}
-                  onValueChange={(value: 'cash' | 'linepay' | 'credit') => setPaymentMethod(value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="h-4 w-4" />
-                        現金
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="linepay">
-                      <div className="flex items-center gap-2">
-                        <Smartphone className="h-4 w-4" />
-                        Line Pay
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="credit">
-                      <div className="flex items-center gap-2">
-                        <CreditCard className="h-4 w-4" />
-                        信用卡
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCheckoutOpen(false)}>
                 取消
               </Button>
-              <Button onClick={handleCheckout} disabled={paymentMethod === 'cash' && (!cashReceived || parseFloat(cashReceived) < total)}>
+              <Button 
+                onClick={handleCheckout} 
+                disabled={paymentMethod === 'cash' && (!cashReceived || parseFloat(cashReceived) < total)}
+              >
                 確認結帳
               </Button>
             </DialogFooter>

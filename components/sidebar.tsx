@@ -46,7 +46,15 @@ import {
   HardHat,
   Hammer,
   Clock,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Calendar,
+  MessageSquare,
+  Radio,
+  Bot,
+  QrCode,
+  Monitor,
+  Grid3x3,
+  TrendingUp
 } from 'lucide-react'
 
 interface MenuItem {
@@ -98,7 +106,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'POS',
+    name: '收銀/自助點餐結帳系統',
     icon: Store,
     children: [
       {
@@ -149,7 +157,7 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'HCM',
+    name: '人資管理系統',
     icon: Users,
     children: [
       {
@@ -195,25 +203,40 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
-    name: 'CRM',
+    name: '客戶管理系統',
     icon: UserCheck,
     children: [
       {
-        name: 'CRM資料檢視',
+        name: 'BD追蹤系統',
         href: '/dashboard/crm',
         icon: Search,
+      },
+      {
+        name: '商機看板',
+        href: '/dashboard/crm/opportunities',
+        icon: LayoutDashboard,
+      },
+      {
+        name: '客戶管理',
+        href: '/dashboard/crm/accounts',
+        icon: Users,
+      },
+      {
+        name: '報價單管理',
+        href: '/dashboard/crm/quotes',
+        icon: FileText,
+      },
+      {
+        name: '訂單管理',
+        href: '/dashboard/crm/orders',
+        icon: ShoppingCart,
       },
     ],
   },
   {
-    name: 'WMS',
+    name: '倉儲管理系統',
     icon: Package,
     children: [
-      {
-        name: 'WMS資料檢視',
-        href: '/dashboard/wms',
-        icon: Search,
-      },
       {
         name: '收貨作業',
         href: '/dashboard/wms/receiving',
@@ -229,43 +252,255 @@ const privatePages: MenuItem[] = [
         href: '/dashboard/wms/fulfilment',
         icon: ShoppingCart,
       },
-      {
-        name: '行動裝置',
-        href: '/dashboard/wms/mobile',
-        icon: Smartphone,
-      },
     ],
   },
   {
-    name: 'SCM',
-    icon: Truck,
-    children: [
-      {
-        name: 'SCM資料檢視',
-        href: '/dashboard/scm',
-        icon: Search,
-      },
-    ],
-  },
-  {
-    name: 'EC',
-    icon: ShoppingBag,
-    children: [
-      {
-        name: 'EC資料檢視',
-        href: '/dashboard/ec',
-        icon: Search,
-      },
-    ],
-  },
-  {
-    name: 'MES',
+    name: '製造執行系統',
     icon: Factory,
     children: [
       {
-        name: 'MES資料檢視',
+        name: 'MES 儀表板',
         href: '/dashboard/mes',
-        icon: Search,
+        icon: LayoutDashboard,
+      },
+      {
+        name: '有限產能排程 (FCS)',
+        icon: Calendar,
+        children: [
+          {
+            name: 'FCS 總覽',
+            href: '/dashboard/mes/fcs',
+            icon: Calendar,
+          },
+          {
+            name: '資源型態維護',
+            href: '/dashboard/mes/fcs/resource-types',
+            icon: Settings,
+          },
+          {
+            name: '資源資料維護',
+            href: '/dashboard/mes/fcs/resources',
+            icon: Settings,
+          },
+          {
+            name: '機台行事曆維護',
+            href: '/dashboard/mes/fcs/machine-calendar',
+            icon: Calendar,
+          },
+          {
+            name: '製令單轉排程規劃',
+            href: '/dashboard/mes/fcs/scheduling',
+            icon: FileText,
+          },
+          {
+            name: '工單機台生產順序設定',
+            href: '/dashboard/mes/fcs/work-order-sequence',
+            icon: Settings,
+          },
+          {
+            name: '需求規劃處理',
+            href: '/dashboard/mes/fcs/demand-planning',
+            icon: Calendar,
+          },
+          {
+            name: '生管令單/現場令單調整',
+            href: '/dashboard/mes/fcs/work-order-adjustment',
+            icon: Settings,
+          },
+          {
+            name: '機台現況查詢',
+            href: '/dashboard/mes/fcs/machine-status',
+            icon: Search,
+          },
+          {
+            name: '機台排程狀況查詢',
+            href: '/dashboard/mes/fcs/schedule-status',
+            icon: Search,
+          },
+        ],
+      },
+      {
+        name: '現場報工 (SFC)',
+        icon: ClipboardList,
+        children: [
+          {
+            name: 'SFC 總覽',
+            href: '/dashboard/mes/sfc',
+            icon: ClipboardList,
+          },
+          {
+            name: '機台工作日誌維護',
+            href: '/dashboard/mes/sfc/machine-log',
+            icon: Calendar,
+          },
+          {
+            name: '機台改停機維護',
+            href: '/dashboard/mes/sfc/machine-downtime',
+            icon: Settings,
+          },
+          {
+            name: '現場報工登錄',
+            href: '/dashboard/mes/sfc/work-report',
+            icon: ClipboardList,
+          },
+          {
+            name: '現場檢驗登錄',
+            href: '/dashboard/mes/sfc/inspection-log',
+            icon: ClipboardCheck,
+          },
+        ],
+      },
+      {
+        name: '模具管理',
+        icon: Wrench,
+        children: [
+          {
+            name: '模具管理總覽',
+            href: '/dashboard/mes/mold',
+            icon: Wrench,
+          },
+          {
+            name: '模具基本資料維護',
+            href: '/dashboard/mes/mold/basic-data',
+            icon: Settings,
+          },
+          {
+            name: '模具狀況/交易明細查詢',
+            href: '/dashboard/mes/mold/status-query',
+            icon: Search,
+          },
+        ],
+      },
+      {
+        name: '品質檢驗 (QC)',
+        icon: ClipboardCheck,
+        children: [
+          {
+            name: 'QC 總覽',
+            href: '/dashboard/mes/qc',
+            icon: ClipboardCheck,
+          },
+          {
+            name: '料品檢驗標準資料建立',
+            href: '/dashboard/mes/qc/standards',
+            icon: Settings,
+          },
+          {
+            name: '各類檢驗資料維護/審核',
+            href: '/dashboard/mes/qc/inspections',
+            icon: FileCheck,
+          },
+        ],
+      },
+      {
+        name: 'WMS 手持設備',
+        icon: Smartphone,
+        children: [
+          {
+            name: 'WMS 手持設備主選單',
+            href: '/dashboard/wms/mobile',
+            icon: Smartphone,
+          },
+          {
+            name: 'WMS 後台設定',
+            href: '/dashboard/wms/settings',
+            icon: Settings,
+          },
+        ],
+      },
+      {
+        name: 'IoT & BI 戰情室',
+        icon: Radio,
+        children: [
+          {
+            name: 'IoT & BI 儀表板',
+            href: '/dashboard/iot-bi',
+            icon: Radio,
+          },
+          {
+            name: '工廠可視化 Kanban',
+            href: '/dashboard/iot-bi/kanban',
+            icon: Monitor,
+          },
+          {
+            name: '高階主管應用看板',
+            href: '/dashboard/iot-bi/executive',
+            icon: BarChart3,
+          },
+          {
+            name: '現場輪播看板',
+            href: '/dashboard/iot-bi/carousel',
+            icon: Grid3x3,
+          },
+        ],
+      },
+      {
+        name: 'RPA 流程機器人',
+        icon: Bot,
+        children: [
+          {
+            name: 'RPA 儀表板',
+            href: '/dashboard/rpa',
+            icon: Bot,
+          },
+          {
+            name: '採購收料 QR Code',
+            href: '/dashboard/rpa/purchase-receiving',
+            icon: QrCode,
+          },
+        ],
+      },
+      {
+        name: '供應鏈管理系統',
+        icon: Truck,
+        children: [
+          {
+            name: 'SCM 儀表板',
+            href: '/dashboard/scm',
+            icon: LayoutDashboard,
+          },
+          {
+            name: '詢報價作業',
+            href: '/dashboard/scm/quotes',
+            icon: MessageSquare,
+          },
+          {
+            name: '採購委外作業',
+            href: '/dashboard/scm/purchase-orders',
+            icon: ShoppingCart,
+          },
+          {
+            name: '出貨作業',
+            href: '/dashboard/scm/shipments',
+            icon: Package,
+          },
+          {
+            name: '帳務作業',
+            href: '/dashboard/scm/accounting',
+            icon: Receipt,
+          },
+        ],
+      },
+      {
+        name: 'O9 需求規劃平台',
+        icon: TrendingUp,
+        children: [
+          {
+            name: 'O9 探索性數據分析 (EDA)',
+            href: '/dashboard/scm/eda',
+            icon: TrendingUp,
+          },
+          {
+            name: 'O9 預測分析駕駛艙',
+            href: '/dashboard/scm/forecast-analysis',
+            icon: BarChart3,
+          },
+          {
+            name: 'O9 需求假設與預測層',
+            href: '/dashboard/scm/demand-assumptions',
+            icon: FileText,
+          },
+        ],
       },
     ],
   },
