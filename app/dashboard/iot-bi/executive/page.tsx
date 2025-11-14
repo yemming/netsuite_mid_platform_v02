@@ -192,7 +192,18 @@ export default function ExecutiveDashboardPage() {
                   dataKey="稼動率" 
                   fill="#2196F3" 
                   radius={[8, 8, 0, 0]}
-                  onClick={(data) => handleZoneClick(data.zone)}
+                  onClick={(data: any) => {
+                    // 從 payload 中取得原始數據，或使用 index
+                    const payload = data?.payload;
+                    if (payload && payload.zone) {
+                      handleZoneClick(payload.zone);
+                    } else if (data?.activePayload && data.activePayload[0]?.payload) {
+                      const zone = data.activePayload[0].payload.zone;
+                      if (zone) {
+                        handleZoneClick(zone);
+                      }
+                    }
+                  }}
                   style={{ cursor: 'pointer' }}
                 />
               </BarChart>
