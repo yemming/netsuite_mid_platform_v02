@@ -514,7 +514,6 @@ export default function MyMobilePOSPage() {
               onClick={async () => {
                 if (confirm('確定要清空所有商品資料並重新初始化嗎？這將刪除所有現有商品，並載入新的240個商品。')) {
                   try {
-                    await posDB.clearAllItems();
                     await posDB.deleteDatabase();
                     // 重新初始化
                     await posDB.init();
