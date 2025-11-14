@@ -739,29 +739,29 @@ export default function MyMobilePOSPage() {
         {/* 結帳區域 */}
         {cartItems.length > 0 && (
           <Card className="m-4 dark:bg-[#1a2332] dark:border-gray-700">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600 dark:text-gray-400">小計</span>
-                <span className="text-lg font-semibold text-gray-900 dark:text-white">
+            <CardContent className="p-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-600 dark:text-gray-400">小計</span>
+                <span className="text-sm font-semibold text-gray-900 dark:text-white">
                   ${cartTotal}
                 </span>
               </div>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600 dark:text-gray-400">稅額</span>
-                <span className="text-lg font-semibold text-gray-900 dark:text-white">${tax}</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-gray-600 dark:text-gray-400">稅額</span>
+                <span className="text-sm font-semibold text-gray-900 dark:text-white">${tax}</span>
               </div>
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-                <span className="text-lg font-bold text-gray-900 dark:text-white">總計</span>
-                <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+                <span className="text-sm font-bold text-gray-900 dark:text-white">總計</span>
+                <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
                   ${total}
                 </span>
               </div>
               <Button
                 onClick={() => setIsCheckoutOpen(true)}
-                className="w-full h-12 text-lg"
-                size="lg"
+                className="w-full h-9 text-sm"
+                size="sm"
               >
-                <CreditCard className="h-5 w-5 mr-2" />
+                <CreditCard className="h-4 w-4 mr-1.5" />
                 結帳
               </Button>
             </CardContent>
