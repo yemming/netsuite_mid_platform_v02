@@ -450,7 +450,7 @@ export default function Sidebar() {
                 style={{ width: '48px', height: '48px', marginTop: '-8px' }}
               />
             </div>
-            <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1" style={{ marginLeft: '-3px' }}>
+            <span className="text-lg font-bold text-gray-900 dark:text-white truncate flex-1" style={{ marginLeft: '3px' }}>
               NetSuite交易模擬系統
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">
