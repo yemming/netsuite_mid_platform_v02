@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { LayoutDashboard, MapPin, Calendar, Users, Clock, AlertCircle, User, ZoomIn, ZoomOut } from 'lucide-react';
-import { WorkOrder, SchedulingSuggestion, User as UserType } from '@/lib/field-operations-types';
+import { WorkOrder, SchedulingSuggestion, User as UserType, Customer } from '@/lib/field-operations-types';
 import dynamic from 'next/dynamic';
 
 // 動態導入 MapView 以避免 SSR 問題
@@ -1753,7 +1753,7 @@ function WorkOrderDetailForm({
     }));
   };
 
-  const handleCustomerFieldChange = (field: keyof WorkOrder['customer'], value: any) => {
+  const handleCustomerFieldChange = (field: keyof Customer, value: any) => {
     if (!formData.customer) return;
     setFormData(prev => ({
       ...prev,
