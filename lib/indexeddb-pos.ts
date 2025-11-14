@@ -645,6 +645,46 @@ class IndexedDBPOS {
       request.onerror = () => reject(request.error);
     });
   }
+
+  /**
+   * 清空所有商品資料（用於重新初始化）
+   */
+  async clearAllItems(): Promise<void> {
+    const db = await this.ensureDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORES.ITEMS], 'readwrite');
+      const store = transaction.objectStore(STORES.ITEMS);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  /**
+   * 清空整個資料庫（刪除資料庫）
+   */
+  async deleteDatabase(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(DB_NAME);
+      request.onsuccess = () => {
+        this.db = null;
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => {
+        // 如果資料庫被其他連線使用，等待一下再重試
+        setTimeout(() => {
+          const retryRequest = indexedDB.deleteDatabase(DB_NAME);
+          retryRequest.onsuccess = () => {
+            this.db = null;
+            resolve();
+          };
+          retryRequest.onerror = () => reject(retryRequest.error);
+        }, 100);
+      };
+    });
+  }
 }
 
 // 匯出單例

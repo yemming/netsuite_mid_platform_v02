@@ -45,7 +45,8 @@ import {
   Smartphone,
   HardHat,
   Hammer,
-  Clock
+  Clock,
+  ArrowRightLeft
 } from 'lucide-react'
 
 interface MenuItem {
@@ -139,6 +140,11 @@ const privatePages: MenuItem[] = [
         name: '門市盤點',
         href: '/dashboard/my-mobile-pos/inventory-check',
         icon: ClipboardList,
+      },
+      {
+        name: 'POS設定',
+        href: '/dashboard/my-mobile-pos/settings',
+        icon: Cog,
       },
     ],
   },
@@ -311,6 +317,42 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
+    name: 'ETL管理工具',
+    icon: ArrowRightLeft,
+    children: [
+      {
+        name: '倉庫管理器',
+        href: '/dashboard/etl',
+        icon: Database,
+      },
+      {
+        name: '數據源管理',
+        href: '/dashboard/etl/sources',
+        icon: Inbox,
+      },
+      {
+        name: '數據目標設計',
+        href: '/dashboard/etl/targets',
+        icon: FileCheck,
+      },
+      {
+        name: '映射設計器',
+        href: '/dashboard/etl/mappings',
+        icon: Share2,
+      },
+      {
+        name: '工作流管理器',
+        href: '/dashboard/etl/workflows',
+        icon: Cog,
+      },
+      {
+        name: '工作流監視器',
+        href: '/dashboard/etl/monitor',
+        icon: BarChart3,
+      },
+    ],
+  },
+  {
     name: 'Next.JS工具箱',
     icon: Wrench,
     children: [
@@ -474,20 +516,20 @@ export default function Sidebar() {
               {/* 亮色模式：綠色 logo */}
               <img
                 src="/OC_Logo_Green.png"
-                alt="NetSuite交易模擬系統 Logo"
+                alt="ICARUS交易管理系統 Logo"
                 className="w-full h-full object-contain dark:hidden"
                 style={{ width: '30px', height: '30px' }}
               />
               {/* 暗色模式：紅色 logo */}
               <img
                 src="/OC_Logo_Red.png"
-                alt="NetSuite交易模擬系統 Logo"
+                alt="ICARUS交易管理系統 Logo"
                 className="w-full h-full object-contain hidden dark:block"
                 style={{ width: '48px', height: '48px', marginTop: '-8px' }}
               />
             </div>
             <span className="text-lg font-bold text-foreground truncate flex-1" style={{ marginLeft: '3px' }}>
-              NetSuite交易模擬系統
+              ICARUS交易管理系統
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button 

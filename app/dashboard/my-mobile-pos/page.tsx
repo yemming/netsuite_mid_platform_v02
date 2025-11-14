@@ -499,48 +499,8 @@ export default function MyMobilePOSPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[#0f1419] pb-20">
+    <div className="min-h-screen bg-gray-50 dark:bg-[#0f1419]">
       <div className="max-w-md mx-auto">
-        {/* 標題列 */}
-        <div className="bg-white dark:bg-[#1a2332] border-b border-gray-200 dark:border-gray-700 px-4 py-3 sticky top-0 z-10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Store className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              <h1 className="text-lg font-bold text-gray-900 dark:text-white">我的行動POS</h1>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                if (confirm('確定要清空所有商品資料並重新初始化嗎？這將刪除所有現有商品，並載入新的240個商品。')) {
-                  try {
-                    // 取得所有現有商品並逐個刪除
-                    const allItems = await posDB.getAllItems();
-                    for (const item of allItems) {
-                      if (item.id) {
-                        await posDB.deleteItem(item.id);
-                      }
-                    }
-                    // 載入新商品
-                    for (const item of productData) {
-                      await posDB.upsertItem(item);
-                    }
-                    const updatedItems = await posDB.getAllItems();
-                    setItems(updatedItems);
-                    showToast('資料庫已清空並重新初始化！', 'success');
-                  } catch (error) {
-                    console.error('清空資料庫失敗:', error);
-                    showToast('清空資料庫失敗', 'error');
-                  }
-                }
-              }}
-              className="text-xs"
-            >
-              重置商品
-            </Button>
-          </div>
-        </div>
-
         {/* 掃描區域 */}
         <Card className="m-4 dark:bg-[#1a2332] dark:border-gray-700">
           <CardHeader className="pb-3">
@@ -776,10 +736,10 @@ export default function MyMobilePOSPage() {
           </CardContent>
         </Card>
 
-        {/* 結帳按鈕 */}
+        {/* 結帳區域 */}
         {cartItems.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#1a2332] border-t border-gray-200 dark:border-gray-700 p-4 shadow-lg">
-            <div className="max-w-md mx-auto">
+          <Card className="m-4 dark:bg-[#1a2332] dark:border-gray-700">
+            <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-gray-600 dark:text-gray-400">小計</span>
                 <span className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -804,8 +764,8 @@ export default function MyMobilePOSPage() {
                 <CreditCard className="h-5 w-5 mr-2" />
                 結帳
               </Button>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* 結帳對話框 */}

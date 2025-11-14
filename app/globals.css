@@ -113,6 +113,16 @@
   background: rgba(71, 85, 105, 0.6);
 }
 
+/* Hide scrollbar */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
 /* Colorful Header Bar Animation */
 @keyframes headerShimmer {
   0%, 100% {

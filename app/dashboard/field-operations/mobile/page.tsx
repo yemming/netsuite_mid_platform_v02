@@ -54,73 +54,6 @@ export default function MobileTechnicianPage() {
   const [signatureData, setSignatureData] = useState<string>('');
   const [photos, setPhotos] = useState<string[]>([]); // 儲存照片的 base64 或 URL
   const signatureCanvasRef = useRef<SignatureCanvas>(null);
-  const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
-  const [canvasSize, setCanvasSize] = useState({ width: 500, height: 400 });
-
-  // 監聽視窗大小和方向改變，重新計算畫布大小
-  useEffect(() => {
-    const updateCanvasSize = () => {
-      if (typeof window !== 'undefined') {
-        setCanvasSize({
-          width: window.innerWidth,
-          height: Math.max(window.innerHeight - 200, 400),
-        });
-      }
-    };
-
-    // 初始化大小
-    updateCanvasSize();
-
-    // 監聽 resize 事件
-    window.addEventListener('resize', updateCanvasSize);
-    // 監聽 orientationchange 事件（手機方向改變）
-    window.addEventListener('orientationchange', () => {
-      // 延遲一下，等方向改變完成後再更新
-      setTimeout(updateCanvasSize, 100);
-    });
-
-    return () => {
-      window.removeEventListener('resize', updateCanvasSize);
-      window.removeEventListener('orientationchange', updateCanvasSize);
-    };
-  }, []);
-
-  // 當畫布大小改變或簽名對話框打開時，重新調整畫布
-  useEffect(() => {
-    if (isSignatureModalOpen && signatureCanvasRef.current) {
-      // 延遲一下確保 DOM 已更新，特別是 orientationchange 事件
-      const timer = setTimeout(() => {
-        if (signatureCanvasRef.current) {
-          const canvas = signatureCanvasRef.current.getCanvas();
-          if (canvas) {
-            // 保存當前簽名（如果有）
-            const isEmpty = signatureCanvasRef.current.isEmpty();
-            let savedImage: string | null = null;
-            if (!isEmpty) {
-              savedImage = signatureCanvasRef.current.toDataURL('image/png');
-            }
-            
-            // 重新設置畫布的實際像素大小
-            canvas.width = canvasSize.width;
-            canvas.height = canvasSize.height;
-            
-            // 如果有保存的簽名，重新繪製到新畫布上
-            if (savedImage) {
-              const img = new Image();
-              img.onload = () => {
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                }
-              };
-              img.src = savedImage;
-            }
-          }
-        }
-      }, 150); // 增加延遲時間，確保方向改變完成
-      return () => clearTimeout(timer);
-    }
-  }, [canvasSize, isSignatureModalOpen]);
 
   // 模擬資料
   useEffect(() => {
@@ -888,50 +821,66 @@ export default function MobileTechnicianPage() {
             <div>
               <Label>客戶簽名</Label>
               <div className="mt-2 space-y-2">
-                {signatureData ? (
-                  <div className="space-y-2">
-                    <div 
-                      className="border-2 border-dashed rounded p-4 bg-gray-50 dark:bg-gray-800 flex items-center justify-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      onClick={() => setIsSignatureModalOpen(true)}
-                    >
-                      <img src={signatureData} alt="客戶簽名" className="max-w-full max-h-[150px]" />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsSignatureModalOpen(true)}
-                        className="flex-1"
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        重新簽名
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSignatureData('');
-                          if (signatureCanvasRef.current) {
-                            signatureCanvasRef.current.clear();
-                          }
-                        }}
-                        className="flex-1"
-                      >
-                        <Eraser className="h-4 w-4 mr-2" />
-                        清除簽名
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div 
-                    className="border-2 border-dashed rounded p-8 bg-gray-50 dark:bg-gray-800 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors min-h-[150px]"
-                    onClick={() => setIsSignatureModalOpen(true)}
+                {/* 簽名畫布 */}
+                <div className="border-2 border-dashed rounded-lg bg-white dark:bg-gray-800 p-2">
+                  <SignatureCanvas
+                    ref={signatureCanvasRef}
+                    canvasProps={{
+                      width: 500,
+                      height: 200,
+                      className: 'signature-canvas',
+                      style: {
+                        width: '100%',
+                        height: 'auto',
+                        touchAction: 'none',
+                        display: 'block',
+                      },
+                    }}
+                    backgroundColor="#ffffff"
+                    penColor="#000000"
+                  />
+                </div>
+                
+                {/* 操作按鈕 */}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (signatureCanvasRef.current) {
+                        signatureCanvasRef.current.clear();
+                        setSignatureData('');
+                      }
+                    }}
+                    className="flex-1"
                   >
-                    <User className="h-12 w-12 text-gray-400 mb-2" />
-                    <p className="text-gray-600 dark:text-gray-400 font-medium">點擊此處開始簽名</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">將開啟全屏簽名頁面</p>
+                    <Eraser className="h-4 w-4 mr-2" />
+                    清除
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (signatureCanvasRef.current && !signatureCanvasRef.current.isEmpty()) {
+                        const dataURL = signatureCanvasRef.current.toDataURL('image/png');
+                        setSignatureData(dataURL);
+                      } else {
+                        alert('請先簽名');
+                      }
+                    }}
+                    className="flex-1"
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    確認簽名
+                  </Button>
+                </div>
+                
+                {/* 簽名預覽 */}
+                {signatureData && (
+                  <div className="border rounded-lg p-2 bg-gray-50 dark:bg-gray-800">
+                    <img src={signatureData} alt="客戶簽名" className="max-w-full max-h-[100px] mx-auto" />
                   </div>
                 )}
               </div>
@@ -950,86 +899,6 @@ export default function MobileTechnicianPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 全屏簽名對話框 */}
-      <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
-        <DialogContent className="max-w-full w-full h-full max-h-full m-0 p-0 rounded-none flex flex-col">
-          <div className="flex-1 flex flex-col bg-white dark:bg-gray-900">
-            {/* 標題欄 */}
-            <div className="flex items-center justify-between p-4 border-b">
-              <DialogTitle className="text-lg font-semibold">客戶簽名</DialogTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsSignatureModalOpen(false)}
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-
-            {/* 簽名區域 - 佔滿剩餘空間 */}
-            <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-800">
-              <div className="flex-1 relative overflow-hidden" style={{ minHeight: 0 }}>
-                <SignatureCanvas
-                  ref={signatureCanvasRef}
-                  canvasProps={{
-                    width: canvasSize.width,
-                    height: canvasSize.height,
-                    className: 'signature-canvas-fullscreen',
-                    style: {
-                      width: '100%',
-                      height: '100%',
-                      touchAction: 'none',
-                      display: 'block',
-                    },
-                  }}
-                  backgroundColor="#ffffff"
-                  penColor="#000000"
-                />
-              </div>
-
-              {/* 操作按鈕欄 */}
-              <div className="p-4 border-t bg-white dark:bg-gray-900 space-y-2">
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="lg"
-                    onClick={() => {
-                      if (signatureCanvasRef.current) {
-                        signatureCanvasRef.current.clear();
-                      }
-                    }}
-                    className="flex-1"
-                  >
-                    <Eraser className="h-5 w-5 mr-2" />
-                    清除
-                  </Button>
-                  <Button
-                    type="button"
-                    size="lg"
-                    onClick={() => {
-                      if (signatureCanvasRef.current && !signatureCanvasRef.current.isEmpty()) {
-                        const dataURL = signatureCanvasRef.current.toDataURL('image/png');
-                        setSignatureData(dataURL);
-                        setIsSignatureModalOpen(false);
-                      } else {
-                        alert('請先簽名');
-                      }
-                    }}
-                    className="flex-1"
-                  >
-                    <CheckCircle2 className="h-5 w-5 mr-2" />
-                    確認簽名
-                  </Button>
-                </div>
-                <p className="text-xs text-center text-gray-500 dark:text-gray-400">
-                  請在白色區域簽名
-                </p>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

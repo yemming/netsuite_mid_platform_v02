@@ -1,6 +1,6 @@
 {
-  "name": "NetSuite交易模擬系統",
-  "short_name": "NetSuite交易模擬",
+  "name": "ICARUS交易管理系統",
+  "short_name": "Icarus DMS",
   "description": "NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration",
   "start_url": "/",
   "display": "standalone",
