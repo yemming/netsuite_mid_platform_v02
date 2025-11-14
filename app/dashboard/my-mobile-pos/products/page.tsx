@@ -54,7 +54,7 @@ export default function POSProductsPage() {
   const [products, setProducts] = useState<POSItem[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<POSItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('card');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<POSItem | null>(null);
