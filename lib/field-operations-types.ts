@@ -14,6 +14,14 @@ export type CaseStatus = 'open' | 'closed';
 // 工單狀態
 export type WorkOrderStatus = 'pending' | 'scheduled' | 'dispatched' | 'in_progress' | 'completed' | 'billed';
 
+// 使用者位置資訊
+export interface UserLocation {
+  latitude: number;
+  longitude: number;
+  lastUpdated?: string; // ISO 8601 格式的時間戳記
+  address?: string; // 可選的地址字串（可透過反向地理編碼取得）
+}
+
 // 使用者
 export interface User {
   id: string;
@@ -23,6 +31,7 @@ export interface User {
   skills: string[];
   status: UserStatus;
   avatar?: string;
+  location?: UserLocation; // GPS 位置資訊（僅在登入且授權時記錄）
 }
 
 // 客戶

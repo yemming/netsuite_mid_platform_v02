@@ -27,10 +27,13 @@ import { WorkOrder, SchedulingSuggestion, User as UserType, Customer, Case } fro
 import dynamic from 'next/dynamic';
 
 // 動態導入 MapView 以避免 SSR 問題
-const MapView = dynamic(() => import('@/components/field-operations/map-view'), {
-  ssr: false,
-  loading: () => <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-800">載入地圖中...</div>,
-});
+const MapView = dynamic(
+  () => import('@/components/field-operations/map-view').then((mod) => mod.default || mod),
+  {
+    ssr: false,
+    loading: () => <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-800">載入地圖中...</div>,
+  }
+);
 
 // 技術人員排程資料結構
 interface TechnicianSchedule {

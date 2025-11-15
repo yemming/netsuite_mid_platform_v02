@@ -547,6 +547,11 @@ const privatePages: MenuItem[] = [
             href: '/dashboard/field-operations/admin/resources',
             icon: Hammer,
           },
+          {
+            name: '系統參數設定',
+            href: '/dashboard/field-operations/admin/system-settings',
+            icon: Settings,
+          },
         ],
       },
     ],

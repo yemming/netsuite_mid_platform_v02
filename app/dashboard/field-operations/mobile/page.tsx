@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
+import { createClient } from '@/utils/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +55,118 @@ export default function MobileTechnicianPage() {
   const [signatureData, setSignatureData] = useState<string>('');
   const [photos, setPhotos] = useState<string[]>([]); // 儲存照片的 base64 或 URL
   const signatureCanvasRef = useRef<SignatureCanvas>(null);
+  
+  // GPS 位置狀態
+  const [gpsLocation, setGpsLocation] = useState<{
+    latitude: number;
+    longitude: number;
+    accuracy: number | null;
+    address?: string;
+  } | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  
+  // 工程師姓名
+  const [technicianName, setTechnicianName] = useState<string>('');
+
+  // 獲取工程師姓名
+  useEffect(() => {
+    const fetchTechnicianName = async () => {
+      try {
+        const supabase = createClient();
+        
+        // 取得當前使用者
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        
+        if (userError || !user) {
+          console.error('無法取得使用者資訊:', userError);
+          return;
+        }
+
+        // 先嘗試從 user_profiles 取得姓名
+        const { data: userProfile } = await supabase
+          .from('user_profiles')
+          .select('name')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (userProfile?.name) {
+          setTechnicianName(userProfile.name);
+          return;
+        }
+
+        // 如果 user_profiles 沒有姓名，嘗試從 field_operations_personnel 根據 email 查找
+        if (user.email) {
+          const { data: personnel } = await supabase
+            .from('field_operations_personnel')
+            .select('name')
+            .eq('email', user.email)
+            .maybeSingle();
+
+          if (personnel?.name) {
+            setTechnicianName(personnel.name);
+            return;
+          }
+        }
+
+        // 如果都找不到，使用 user_metadata 或 email 的前綴
+        const fallbackName = user.user_metadata?.full_name || user.email?.split('@')[0] || '工程師';
+        setTechnicianName(fallbackName);
+      } catch (error) {
+        console.error('取得工程師姓名錯誤:', error);
+        setTechnicianName('工程師');
+      }
+    };
+
+    fetchTechnicianName();
+  }, []);
+
+  // 獲取 GPS 位置
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGpsError('您的瀏覽器不支援 GPS 定位功能');
+      return;
+    }
+
+    setIsGettingLocation(true);
+    setGpsError(null);
+
+    const options: PositionOptions = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        setGpsLocation({
+          latitude,
+          longitude,
+          accuracy,
+        });
+        setIsGettingLocation(false);
+      },
+      (error) => {
+        console.error('GPS 定位錯誤:', error);
+        let errorMessage = '無法取得 GPS 位置';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'GPS 定位權限被拒絕';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'GPS 位置資訊不可用';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'GPS 定位逾時';
+            break;
+        }
+        setGpsError(errorMessage);
+        setIsGettingLocation(false);
+      },
+      options
+    );
+  }, []);
 
   // 模擬資料
   useEffect(() => {
@@ -447,12 +560,46 @@ export default function MobileTechnicianPage() {
     <div className="container mx-auto p-4 max-w-4xl">
       {/* 標題 */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2 mb-2">
-          <Smartphone className="h-6 w-6" />
-          我的任務
-        </h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Smartphone className="h-6 w-6" />
+            我的工單任務
+          </h1>
+          {/* GPS 位置顯示 */}
+          <div className="flex items-center gap-2 text-sm">
+            {isGettingLocation ? (
+              <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                <Navigation className="h-4 w-4 animate-spin" />
+                <span>定位中...</span>
+              </div>
+            ) : gpsError ? (
+              <div className="flex items-center gap-1.5 text-red-500 dark:text-red-400">
+                <MapPin className="h-4 w-4" />
+                <span className="text-xs">{gpsError}</span>
+              </div>
+            ) : gpsLocation ? (
+              <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                <MapPin className="h-4 w-4" />
+                <div className="flex flex-col items-end">
+                  <span className="text-xs font-medium">
+                    {gpsLocation.latitude.toFixed(6)}, {gpsLocation.longitude.toFixed(6)}
+                  </span>
+                  {gpsLocation.accuracy && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      準確度: ±{Math.round(gpsLocation.accuracy)}m
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          查看並管理分配給您的工單
+          {technicianName ? (
+            <>Hi <span className="font-bold text-gray-700 dark:text-gray-300">{technicianName}</span> 您好，這是指派給您的任務</>
+          ) : (
+            <>查看並管理分配給您的工單</>
+          )}
         </p>
       </div>
 
