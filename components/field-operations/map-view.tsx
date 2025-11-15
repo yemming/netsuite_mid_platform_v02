@@ -34,6 +34,7 @@ interface TechnicianLocation {
   longitude: number;
   status: 'online' | 'offline';
   currentWorkOrder?: string;
+  avatar?: string; // 從 user_profiles 取得的頭像 URL
 }
 
 interface WorkOrderLocation {
@@ -153,7 +154,11 @@ export default function MapView({
 
     // 添加技術人員標記
     technicianLocations.forEach((location) => {
-      const avatarUrl = characterAvatars[location.technicianName] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${location.technicianName}&backgroundColor=b6e3f4`;
+      // 優先使用從 Supabase 取得的 avatar，如果沒有則使用 fallback
+      const avatarUrl = location.avatar 
+        ? location.avatar 
+        : (characterAvatars[location.technicianName] || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(location.technicianName)}&backgroundColor=b6e3f4`);
+      const fallbackUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(location.technicianName)}&backgroundColor=b6e3f4`;
       const statusColor = location.status === 'online' ? 'border-green-500' : 'border-gray-400';
       const statusRing = location.status === 'online' ? 'ring-2 ring-green-500 ring-offset-1' : 'ring-2 ring-gray-400 ring-offset-1';
       
@@ -168,7 +173,7 @@ export default function MapView({
                   alt="${location.technicianName}"
                   class="w-full h-full rounded-full object-cover"
                   style="image-rendering: -webkit-optimize-contrast;"
-                  onerror="this.onerror=null; this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=${location.technicianName}&backgroundColor=b6e3f4'"
+                  onerror="this.onerror=null; this.src='${fallbackUrl}'"
                 />
               </div>
               <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-white shadow-sm ${

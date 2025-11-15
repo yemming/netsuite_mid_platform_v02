@@ -30,24 +30,12 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') as UserStatus | null;
     const search = searchParams.get('search');
 
-    // 建立查詢
-    let query = supabase
-      .from('field_operations_personnel')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    // 套用篩選條件
-    if (role) {
-      query = query.eq('role', role);
-    }
-    if (status) {
-      query = query.eq('status', status);
-    }
-    if (search) {
-      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
-    }
-
-    const { data, error } = await query;
+    // 使用 RPC 函數取得人員列表（包含 auth.users 的 name 和 email）
+    const { data, error } = await supabase.rpc('get_personnel_with_user_info', {
+      p_role: role || null,
+      p_status: status || null,
+      p_search: search || null,
+    });
 
     if (error) {
       console.error('查詢人員資料錯誤:', error);
@@ -102,12 +90,21 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { personnel_id, name, email, role, skills, status, avatar, location } = body;
+    const { user_id, role, skills, status, avatar, location } = body;
 
     // 驗證必填欄位
-    if (!personnel_id || !name || !email || !role) {
+    if (!user_id || !role) {
       return NextResponse.json(
-        { error: '缺少必要欄位', required: ['personnel_id', 'name', 'email', 'role'] },
+        { error: '缺少必要欄位', required: ['user_id', 'role'] },
+        { status: 400 }
+      );
+    }
+
+    // 驗證 user_id 格式（UUID）
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(user_id)) {
+      return NextResponse.json(
+        { error: '無效的 user_id 格式' },
         { status: 400 }
       );
     }
@@ -129,15 +126,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 驗證 email 格式
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return NextResponse.json(
-        { error: '無效的電子郵件格式' },
-        { status: 400 }
-      );
-    }
-
     // 驗證 location 格式（如果有提供）
     if (location) {
       if (typeof location.latitude !== 'number' || typeof location.longitude !== 'number') {
@@ -148,11 +136,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 直接使用 user_id 作為 personnel_id
     // 準備插入資料
     const insertData: any = {
-      personnel_id,
-      name,
-      email,
+      personnel_id: user_id, // 直接使用 user_id (UUID) 作為 personnel_id
+      user_id,
       role,
       skills: skills || [],
       status: status || 'offline',
@@ -180,25 +168,32 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('新增人員錯誤:', error);
+      console.error('錯誤詳情:', JSON.stringify(error, null, 2));
       
       // 處理唯一約束錯誤
       if (error.code === '23505') {
-        if (error.message.includes('personnel_id')) {
+        if (error.message.includes('personnel_id') || error.message.includes('personnel_id')) {
           return NextResponse.json(
-            { error: '人員識別碼已存在', field: 'personnel_id' },
+            { error: '此使用者已經存在於人員列表中', field: 'personnel_id', details: error.message },
+            { status: 409 }
+          );
+        }
+        if (error.message.includes('user_id')) {
+          return NextResponse.json(
+            { error: '此使用者已經存在於人員列表中', field: 'user_id', details: error.message },
             { status: 409 }
           );
         }
         if (error.message.includes('email')) {
           return NextResponse.json(
-            { error: '電子郵件已存在', field: 'email' },
+            { error: '電子郵件已存在', field: 'email', details: error.message },
             { status: 409 }
           );
         }
       }
 
       return NextResponse.json(
-        { error: '新增失敗', message: error.message },
+        { error: '新增失敗', message: error.message, code: error.code, details: error },
         { status: 500 }
       );
     }

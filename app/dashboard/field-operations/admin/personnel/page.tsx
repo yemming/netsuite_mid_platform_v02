@@ -43,20 +43,17 @@ import {
   MapPin,
   Loader2,
   AlertCircle,
-  Upload,
-  Image as ImageIcon,
-  X,
-  User as UserIcon,
-  CheckCircle2
+  User as UserIcon
 } from 'lucide-react';
 import { User, UserLocation } from '@/lib/field-operations-types';
 
-// 資料庫資料型別（包含 personnel_id）
+// 資料庫資料型別（包含 personnel_id 和 user_id）
 interface PersonnelDB {
   id: string;
   personnel_id: string;
-  name: string;
-  email: string;
+  user_id?: string; // 關聯到 auth.users.id
+  name: string; // 從 auth.users 取得（透過 RPC 函數）
+  email: string; // 從 auth.users 取得（透過 RPC 函數）
   role: 'dispatcher' | 'technician' | 'admin';
   skills: string[];
   status: 'online' | 'offline';
@@ -64,6 +61,13 @@ interface PersonnelDB {
   location?: UserLocation;
   created_at?: string;
   updated_at?: string;
+}
+
+// 使用者選項（從 auth.users）
+interface UserOption {
+  id: string;
+  email: string;
+  name: string;
 }
 
 // 將資料庫格式轉換為前端 User 格式
@@ -89,19 +93,19 @@ export default function PersonnelPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [formData, setFormData] = useState({
-    personnel_id: '',
-    name: '',
-    email: '',
+    user_id: '', // 關聯到 auth.users.id
+    name: '', // 只讀顯示（從 auth.users 取得）
+    email: '', // 只讀顯示（從 auth.users 取得）
     role: 'technician' as 'dispatcher' | 'technician' | 'admin',
     skills: [] as string[],
     status: 'offline' as 'online' | 'offline',
-    avatar: '',
   });
+  
+  // 使用者選項列表（從 auth.users）
+  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
 
   // 從 API 載入人員資料
   const loadPersonnel = async () => {
@@ -131,9 +135,38 @@ export default function PersonnelPage() {
     }
   };
 
+  // 載入使用者列表（從 auth.users）
+  const loadUsers = async () => {
+    try {
+      setIsLoadingUsers(true);
+      setError(null);
+      const response = await fetch('/api/field-operations/personnel/users');
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('載入使用者列表 API 錯誤:', result);
+        throw new Error(result.error || '載入使用者列表失敗');
+      }
+
+      const users = result.data || [];
+      console.log('載入的使用者列表:', users);
+      setUserOptions(users);
+      
+      if (users.length === 0) {
+        console.warn('沒有找到任何使用者');
+      }
+    } catch (err: any) {
+      console.error('載入使用者列表錯誤:', err);
+      setError(err.message || '載入使用者列表失敗，請檢查瀏覽器 Console');
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
   // 初始載入
   useEffect(() => {
     loadPersonnel();
+    loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -149,126 +182,74 @@ export default function PersonnelPage() {
 
   const handleAdd = () => {
     setFormData({
-      personnel_id: '',
+      user_id: '',
       name: '',
       email: '',
       role: 'technician',
       skills: [],
       status: 'offline',
-      avatar: '',
     });
-    setAvatarPreview(null);
-    setAvatarFile(null);
     setError(null);
     setIsAddModalOpen(true);
   };
+  
+  // 當選擇 user_id 時，自動填入 name 和 email
+  const handleUserSelect = (userId: string) => {
+    const selectedUser = userOptions.find(u => u.id === userId);
+    if (selectedUser) {
+      setFormData(prev => ({
+        ...prev,
+        user_id: userId,
+        name: selectedUser.name,
+        email: selectedUser.email,
+      }));
+    }
+  };
 
-  const handleEdit = (person: User) => {
+  const handleEdit = async (person: User) => {
     setSelectedPerson(person);
-    setFormData({
-      personnel_id: person.id, // 使用 id (實際是 personnel_id)
-      name: person.name,
-      email: person.email,
-      role: person.role,
-      skills: person.skills || [],
-      status: person.status,
-      avatar: person.avatar || '',
-    });
-    setAvatarPreview(person.avatar || null);
-    setAvatarFile(null);
     setError(null);
-    setIsEditModalOpen(true);
-  };
-
-  // 處理照片選擇（自動上傳）
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 驗證檔案類型
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      setError('不支援的檔案類型，僅支援 JPEG、PNG、WebP');
-      return;
-    }
-
-    // 驗證檔案大小（5MB）
-    const maxFileSize = 5 * 1024 * 1024;
-    if (file.size > maxFileSize) {
-      setError('檔案大小超過限制（最大 5MB）');
-      return;
-    }
-
-    setAvatarFile(file);
-    setError(null);
-
-    // 建立預覽
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setAvatarPreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-
-    // 如果有 personnel_id，自動上傳
-    const personnelId = isAddModalOpen 
-      ? formData.personnel_id 
-      : selectedPerson?.id;
-
-    if (personnelId) {
-      // 自動上傳
-      await handleUploadAvatar();
-    }
-    // 如果沒有 personnel_id，會在儲存時自動上傳
-  };
-
-  // 移除照片
-  const handleRemoveAvatar = () => {
-    setAvatarFile(null);
-    setAvatarPreview(null);
-    setFormData({ ...formData, avatar: '' });
-  };
-
-  // 上傳照片
-  const handleUploadAvatar = async () => {
-    if (!avatarFile) return;
-
-    const personnelId = isAddModalOpen 
-      ? formData.personnel_id 
-      : selectedPerson?.id;
-
-    if (!personnelId) {
-      setError('請先填寫人員識別碼');
-      return;
-    }
-
+    
+    // 從 API 取得完整資料（包含 user_id）
     try {
-      setIsUploading(true);
-      setError(null);
-
-      const uploadFormData = new FormData();
-      uploadFormData.append('file', avatarFile);
-      uploadFormData.append('personnel_id', personnelId);
-
-      const response = await fetch('/api/field-operations/personnel/upload-avatar', {
-        method: 'POST',
-        body: uploadFormData,
-      });
-
+      const response = await fetch(`/api/field-operations/personnel/${person.id}`);
       const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || '上傳失敗');
+      
+      if (response.ok && result.data) {
+        const dbData = result.data as PersonnelDB;
+        setFormData({
+          user_id: dbData.user_id || '',
+          name: dbData.name,
+          email: dbData.email,
+          role: dbData.role,
+          skills: dbData.skills || [],
+          status: dbData.status,
+        });
+      } else {
+        // 如果 API 失敗，使用現有資料
+        setFormData({
+          user_id: '',
+          name: person.name,
+          email: person.email,
+          role: person.role,
+          skills: person.skills || [],
+          status: person.status,
+        });
       }
-
-      // 更新表單中的 avatar URL
-      setFormData({ ...formData, avatar: result.data.url });
-      setError(null);
-    } catch (err: any) {
-      console.error('上傳照片錯誤:', err);
-      setError(err.message || '照片上傳失敗');
-    } finally {
-      setIsUploading(false);
+    } catch (err) {
+      console.error('取得人員詳細資料錯誤:', err);
+      // 使用現有資料
+      setFormData({
+        user_id: '',
+        name: person.name,
+        email: person.email,
+        role: person.role,
+        skills: person.skills || [],
+        status: person.status,
+      });
     }
+    
+    setIsEditModalOpen(true);
   };
 
   const handleSave = async () => {
@@ -276,20 +257,10 @@ export default function PersonnelPage() {
       setIsSaving(true);
       setError(null);
 
-      // 如果有選擇新照片但還沒上傳，先上傳照片
-      if (avatarFile && !formData.avatar) {
-        await handleUploadAvatar();
-        // 如果上傳失敗，handleUploadAvatar 會設定 error，這裡直接返回
-        if (!formData.avatar) {
-          setIsSaving(false);
-          return;
-        }
-      }
-
       if (isAddModalOpen) {
         // 新增人員
-        if (!formData.personnel_id) {
-          setError('請輸入人員識別碼');
+        if (!formData.user_id) {
+          setError('請選擇使用者');
           setIsSaving(false);
           return;
         }
@@ -297,7 +268,12 @@ export default function PersonnelPage() {
         const response = await fetch('/api/field-operations/personnel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData),
+          body: JSON.stringify({
+            user_id: formData.user_id,
+            role: formData.role,
+            skills: formData.skills,
+            status: formData.status,
+          }),
         });
 
         const result = await response.json();
@@ -309,20 +285,16 @@ export default function PersonnelPage() {
         // 重新載入列表
         await loadPersonnel();
         setIsAddModalOpen(false);
-        setAvatarPreview(null);
-        setAvatarFile(null);
       } else if (isEditModalOpen && selectedPerson) {
         // 編輯人員
         const response = await fetch(`/api/field-operations/personnel/${selectedPerson.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: formData.name,
-            email: formData.email,
+            user_id: formData.user_id, // 允許更新 user_id
             role: formData.role,
             skills: formData.skills,
             status: formData.status,
-            avatar: formData.avatar,
           }),
         });
 
@@ -336,8 +308,6 @@ export default function PersonnelPage() {
         await loadPersonnel();
         setIsEditModalOpen(false);
         setSelectedPerson(null);
-        setAvatarPreview(null);
-        setAvatarFile(null);
       }
     } catch (err: any) {
       console.error('儲存人員資料錯誤:', err);
@@ -553,105 +523,63 @@ export default function PersonnelPage() {
                 <span className="text-sm">{error}</span>
               </div>
             )}
-            {isAddModalOpen && (
-              <div className="space-y-2">
-                <Label htmlFor="personnel_id">人員識別碼 *</Label>
-                <Input
-                  id="personnel_id"
-                  value={formData.personnel_id}
-                  onChange={(e) => setFormData({ ...formData, personnel_id: e.target.value })}
-                  placeholder="例如：USER-001"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  唯一識別碼，例如：USER-001
-                </p>
-              </div>
-            )}
             <div className="space-y-2">
-              <Label htmlFor="name">姓名 *</Label>
+              <Label htmlFor="user_id">使用者帳號 *</Label>
+              <Select
+                value={formData.user_id}
+                onValueChange={handleUserSelect}
+                disabled={isLoadingUsers}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={isLoadingUsers ? "載入中..." : "請選擇 Supabase 使用者"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {userOptions.length === 0 && !isLoadingUsers ? (
+                    <div className="p-2 text-sm text-gray-500">沒有可用的使用者</div>
+                  ) : (
+                    userOptions.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name || '未命名'} ({user.email})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                第一步：選擇系統中的 Supabase 使用者帳號（從 auth.users）
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="name">姓名（自動帶入）</Label>
               <Input
                 id="name"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="輸入姓名"
+                readOnly
+                className="bg-gray-50 dark:bg-gray-900 cursor-not-allowed"
+                placeholder="選擇使用者後自動帶入"
               />
             </div>
             <div className="space-y-2">
-              <Label>人員照片</Label>
-              <div className="flex items-start gap-4">
-                {/* 照片預覽 */}
-                <div className="flex-shrink-0">
-                  {avatarPreview ? (
-                    <div className="relative">
-                      <img
-                        src={avatarPreview}
-                        alt="照片預覽"
-                        className="w-24 h-24 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleRemoveAvatar}
-                        className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
-                      <ImageIcon className="h-8 w-8 text-gray-400" />
-                    </div>
-                  )}
-                </div>
-                {/* 上傳控制 */}
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <label
-                      htmlFor="avatar-upload"
-                      className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md cursor-pointer transition-colors"
-                    >
-                      <Upload className="h-4 w-4" />
-                      <span className="text-sm">選擇照片</span>
-                    </label>
-                    <input
-                      id="avatar-upload"
-                      type="file"
-                      accept="image/jpeg,image/jpg,image/png,image/webp"
-                      onChange={handleAvatarChange}
-                      className="hidden"
-                    />
-                    {isUploading && (
-                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        上傳中...
-                      </span>
-                    )}
-                    {avatarFile && formData.avatar && !isUploading && (
-                      <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                        <CheckCircle2 className="h-4 w-4" />
-                        已上傳
-                      </span>
-                    )}
-                    {avatarFile && !formData.avatar && !isUploading && (
-                      <span className="text-xs text-amber-600 dark:text-amber-400">
-                        將在儲存時自動上傳
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    支援 JPEG、PNG、WebP 格式，最大 5MB
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">電子郵件</Label>
+              <Label htmlFor="email">電子郵件（自動帶入）</Label>
               <Input
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                placeholder="example@company.com"
+                readOnly
+                className="bg-gray-50 dark:bg-gray-900 cursor-not-allowed"
+                placeholder="選擇使用者後自動帶入"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>人員照片</Label>
+              <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-dashed">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  人員照片請至 <strong>個人資料設定</strong> 頁面進行上傳和管理
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  照片會自動從 user_profiles 表取得並顯示
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">角色</Label>

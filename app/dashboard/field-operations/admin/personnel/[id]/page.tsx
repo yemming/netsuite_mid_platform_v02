@@ -36,8 +36,9 @@ export default function PersonnelDetailPage() {
   interface PersonnelDB {
     id: string;
     personnel_id: string;
-    name: string;
-    email: string;
+    user_id?: string; // 關聯到 auth.users.id
+    name: string; // 從 auth.users 取得（透過 RPC 函數）
+    email: string; // 從 auth.users 取得（透過 RPC 函數）
     role: 'dispatcher' | 'technician' | 'admin';
     skills: string[];
     status: 'online' | 'offline';

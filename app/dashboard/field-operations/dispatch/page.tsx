@@ -22,9 +22,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { LayoutDashboard, MapPin, Calendar, Users, Clock, AlertCircle, User, ZoomIn, ZoomOut } from 'lucide-react';
+import { LayoutDashboard, MapPin, Calendar, Users, Clock, AlertCircle, ZoomIn, ZoomOut } from 'lucide-react';
 import { WorkOrder, SchedulingSuggestion, User as UserType, Customer, Case } from '@/lib/field-operations-types';
 import dynamic from 'next/dynamic';
+import { createClient } from '@/utils/supabase/client';
 
 // 動態導入 MapView 以避免 SSR 問題
 const MapView = dynamic(
@@ -68,114 +69,170 @@ export default function DispatchPage() {
   const ganttHeaderRef = useRef<HTMLDivElement>(null);
   const ganttRowsRef = useRef<HTMLDivElement[]>([]);
 
-  // 模擬資料
+  // 從 Supabase 載入第一筆人員資料，然後載入模擬資料
   useEffect(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const loadData = async () => {
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      
+      let firstTechnician: UserType | null = null;
+      let firstLocation: TechnicianLocation | null = null;
+      
+      // 1. 先從 Supabase 載入第一筆人員資料
+      try {
+        const supabase = createClient();
+        
+        // 使用 RPC 函數取得第一筆人員資料（包含 auth.users 的 name 和 email，以及 user_profiles 的 avatar）
+        const { data: personnelData, error } = await supabase.rpc('get_personnel_with_user_info', {
+          p_role: null,
+          p_status: null,
+          p_search: null,
+        });
 
-    // 技術人員資料
-    const techs: UserType[] = [
-      {
-        id: 'TECH-001',
-        name: '魯夫',
-        email: 'luffy@example.com',
-        role: 'technician',
-        skills: ['空調維修', '電氣'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-002',
-        name: '索隆',
-        email: 'zoro@example.com',
-        role: 'technician',
-        skills: ['網路設備', '監控系統'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-003',
-        name: '香吉士',
-        email: 'sanji@example.com',
-        role: 'technician',
-        skills: ['智慧家電', '門禁系統'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-004',
-        name: '佛朗基',
-        email: 'franky@example.com',
-        role: 'technician',
-        skills: ['空調維修', '太陽能'],
-        status: 'offline',
-      },
-      {
-        id: 'TECH-005',
-        name: '娜美',
-        email: 'nami@example.com',
-        role: 'technician',
-        skills: ['智慧家電', '監控系統'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-006',
-        name: '羅賓',
-        email: 'robin@example.com',
-        role: 'technician',
-        skills: ['網路設備', '電氣'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-007',
-        name: '喬巴',
-        email: 'chopper@example.com',
-        role: 'technician',
-        skills: ['門禁系統', '空調維修'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-008',
-        name: '布魯克',
-        email: 'brook@example.com',
-        role: 'technician',
-        skills: ['電氣', '網路設備'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-009',
-        name: '甚平',
-        email: 'jinbe@example.com',
-        role: 'technician',
-        skills: ['空調維修', '太陽能'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-010',
-        name: '騙人布',
-        email: 'usopp@example.com',
-        role: 'technician',
-        skills: ['監控系統', '智慧家電'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-011',
-        name: '羅',
-        email: 'law@example.com',
-        role: 'technician',
-        skills: ['網路設備', '電氣'],
-        status: 'online',
-      },
-      {
-        id: 'TECH-012',
-        name: '大和',
-        email: 'yamato@example.com',
-        role: 'technician',
-        skills: ['門禁系統', '監控系統'],
-        status: 'online',
-      },
-    ];
-    setTechnicians(techs);
+        if (!error && personnelData && personnelData.length > 0) {
+          // 取得第一筆資料
+          const firstPerson = personnelData[0];
+          
+          // 轉換為 UserType 格式
+          firstTechnician = {
+            id: firstPerson.personnel_id || firstPerson.id,
+            name: firstPerson.name || '未命名',
+            email: firstPerson.email || '',
+            role: firstPerson.role as 'technician' | 'dispatcher' | 'admin',
+            skills: firstPerson.skills || [],
+            status: firstPerson.status as 'online' | 'offline',
+            avatar: firstPerson.avatar || undefined,
+          };
 
-    // 工單資料（包含待排程和已排程）
-    const mockWorkOrders: WorkOrder[] = [
+          // 建立技術人員位置資料（如果有 GPS 位置）
+          if (firstPerson.location && firstPerson.location.latitude && firstPerson.location.longitude) {
+            firstLocation = {
+              technicianId: firstTechnician.id,
+              technicianName: firstTechnician.name,
+              latitude: firstPerson.location.latitude,
+              longitude: firstPerson.location.longitude,
+              status: firstTechnician.status,
+              avatar: firstTechnician.avatar,
+            };
+          } else {
+            // 如果沒有 GPS 位置，使用預設位置（台北市中心）
+            firstLocation = {
+              technicianId: firstTechnician.id,
+              technicianName: firstTechnician.name,
+              latitude: 25.0330,
+              longitude: 121.5654,
+              status: firstTechnician.status,
+              avatar: firstTechnician.avatar,
+            };
+          }
+        }
+      } catch (err) {
+        console.error('載入人員資料錯誤:', err);
+      }
+
+      // 2. 載入模擬資料（技術人員）
+      const mockTechs: UserType[] = [
+        {
+          id: 'TECH-002',
+          name: '索隆',
+          email: 'zoro@example.com',
+          role: 'technician',
+          skills: ['網路設備', '監控系統'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-003',
+          name: '香吉士',
+          email: 'sanji@example.com',
+          role: 'technician',
+          skills: ['智慧家電', '門禁系統'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-004',
+          name: '佛朗基',
+          email: 'franky@example.com',
+          role: 'technician',
+          skills: ['空調維修', '太陽能'],
+          status: 'offline',
+        },
+        {
+          id: 'TECH-005',
+          name: '娜美',
+          email: 'nami@example.com',
+          role: 'technician',
+          skills: ['智慧家電', '監控系統'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-006',
+          name: '羅賓',
+          email: 'robin@example.com',
+          role: 'technician',
+          skills: ['網路設備', '電氣'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-007',
+          name: '喬巴',
+          email: 'chopper@example.com',
+          role: 'technician',
+          skills: ['門禁系統', '空調維修'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-008',
+          name: '布魯克',
+          email: 'brook@example.com',
+          role: 'technician',
+          skills: ['電氣', '網路設備'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-009',
+          name: '甚平',
+          email: 'jinbe@example.com',
+          role: 'technician',
+          skills: ['空調維修', '太陽能'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-010',
+          name: '騙人布',
+          email: 'usopp@example.com',
+          role: 'technician',
+          skills: ['監控系統', '智慧家電'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-011',
+          name: '羅',
+          email: 'law@example.com',
+          role: 'technician',
+          skills: ['網路設備', '電氣'],
+          status: 'online',
+        },
+        {
+          id: 'TECH-012',
+          name: '大和',
+          email: 'yamato@example.com',
+          role: 'technician',
+          skills: ['門禁系統', '監控系統'],
+          status: 'online',
+        },
+      ];
+
+      // 合併技術人員資料（第一筆從 DB，後面是模擬資料）
+      const allTechnicians = firstTechnician 
+        ? [firstTechnician, ...mockTechs]
+        : mockTechs;
+      setTechnicians(allTechnicians);
+
+      // 3. 載入模擬工單資料
+      // 如果第一筆技術人員存在，使用第一筆的 ID；否則使用 TECH-001
+      const firstTechId = firstTechnician ? firstTechnician.id : 'TECH-001';
+      
+      const mockWorkOrders: WorkOrder[] = [
       // 待排程工單
       {
         id: 'WO-001',
@@ -835,23 +892,31 @@ export default function DispatchPage() {
     ];
     setWorkOrders(mockWorkOrders);
 
-    // 建立技術人員排程資料
-    const schedules: TechnicianSchedule[] = techs.map(tech => ({
-      technician: tech,
-      workOrders: mockWorkOrders.filter(wo => wo.technicianId === tech.id),
-    }));
-    setTechnicianSchedules(schedules);
+      // 4. 建立技術人員排程資料
+      const schedules: TechnicianSchedule[] = allTechnicians.map(tech => ({
+        technician: tech,
+        workOrders: mockWorkOrders.filter(wo => wo.technicianId === tech.id),
+      }));
+      setTechnicianSchedules(schedules);
 
-    // 技術人員位置資料（台北地區座標）
-    const locations: TechnicianLocation[] = [
-      {
-        technicianId: 'TECH-001',
-        technicianName: '魯夫',
-        latitude: 25.0330,
-        longitude: 121.5654,
-        status: 'online',
-        currentWorkOrder: 'WO-008',
-      },
+      // 5. 建立技術人員位置資料（第一筆從 DB，其他是模擬資料）
+      const locations: TechnicianLocation[] = [];
+      
+      // 加入第一筆技術人員的位置（如果存在）
+      if (firstLocation) {
+        // 找出第一筆技術人員的工單
+        const firstTechWorkOrders = mockWorkOrders.filter(wo => wo.technicianId === firstTechId);
+        const currentWorkOrder = firstTechWorkOrders.find(wo => 
+          wo.status === 'in_progress' || wo.status === 'dispatched'
+        );
+        locations.push({
+          ...firstLocation,
+          currentWorkOrder: currentWorkOrder?.id,
+        });
+      }
+      
+      // 加入模擬技術人員的位置
+      const mockLocations: TechnicianLocation[] = [
       {
         technicianId: 'TECH-002',
         technicianName: '索隆',
@@ -939,8 +1004,14 @@ export default function DispatchPage() {
         status: 'online',
         currentWorkOrder: 'WO-027',
       },
-    ];
-    setTechnicianLocations(locations);
+      ];
+      
+      // 合併所有位置資料
+      const allLocations = [...locations, ...mockLocations];
+      setTechnicianLocations(allLocations);
+    };
+
+    loadData();
   }, []);
 
   // 當工單列表改變時，自動更新技術人員排程（用於甘特圖顯示）
@@ -1232,11 +1303,12 @@ export default function DispatchPage() {
                   className="flex-shrink-0 flex items-center gap-2 px-2 sticky left-0 z-10 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700"
                   style={{ width: `${technicianNameWidth}px` }}
                 >
-                  <div className={`w-2 h-2 rounded-full ${
+                  {/* 狀態指示器（綠點） */}
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
                     schedule.technician.status === 'online' ? 'bg-green-500' : 'bg-gray-400'
                   }`} />
                   <span 
-                    className="text-sm font-medium cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                    className="text-sm font-medium cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors truncate"
                     onClick={(e) => {
                       e.stopPropagation();
                       setFocusTechnicianId(schedule.technician.id);

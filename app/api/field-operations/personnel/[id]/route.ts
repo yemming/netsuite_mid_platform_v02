@@ -30,25 +30,13 @@ export async function GET(
       );
     }
 
-    // 查詢人員資料（使用 id 或 personnel_id）
-    // 先嘗試用 personnel_id 查詢
-    let { data, error } = await supabase
-      .from('field_operations_personnel')
-      .select('*')
-      .eq('personnel_id', personnelId)
-      .maybeSingle();
+    // 使用 RPC 函數查詢人員資料（包含 auth.users 的 name 和 email）
+    const { data: rpcData, error: rpcError } = await supabase.rpc('get_personnel_by_id', {
+      p_id: personnelId,
+    });
 
-    // 如果找不到，再嘗試用 id 查詢（可能是 UUID）
-    if (!data && !error) {
-      const { data: dataById, error: errorById } = await supabase
-        .from('field_operations_personnel')
-        .select('*')
-        .eq('id', personnelId)
-        .maybeSingle();
-      
-      data = dataById;
-      error = errorById;
-    }
+    const data = rpcData && rpcData.length > 0 ? rpcData[0] : null;
+    const error = rpcError;
 
     if (error) {
       console.error('查詢人員資料錯誤:', error);
@@ -119,7 +107,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, email, role, skills, status, avatar, location } = body;
+    const { user_id, role, skills, status, avatar, location } = body;
 
     // 驗證角色（如果有提供）
     if (role) {
@@ -140,12 +128,12 @@ export async function PUT(
       );
     }
 
-    // 驗證 email 格式（如果有提供）
-    if (email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
+    // 驗證 user_id 格式（如果有提供）
+    if (user_id !== undefined) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(user_id)) {
         return NextResponse.json(
-          { error: '無效的電子郵件格式' },
+          { error: '無效的 user_id 格式' },
           { status: 400 }
         );
       }
@@ -164,8 +152,7 @@ export async function PUT(
     // 準備更新資料
     const updateData: any = {};
 
-    if (name !== undefined) updateData.name = name;
-    if (email !== undefined) updateData.email = email;
+    if (user_id !== undefined) updateData.user_id = user_id;
     if (role !== undefined) updateData.role = role;
     if (skills !== undefined) updateData.skills = skills;
     if (status !== undefined) updateData.status = status;

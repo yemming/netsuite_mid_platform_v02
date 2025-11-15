@@ -95,18 +95,26 @@ export default function MobileTechnicianPage() {
           return;
         }
 
-        // 如果 user_profiles 沒有姓名，嘗試從 field_operations_personnel 根據 email 查找
-        if (user.email) {
-          const { data: personnel } = await supabase
-            .from('field_operations_personnel')
-            .select('name')
-            .eq('email', user.email)
-            .maybeSingle();
+        // 如果 user_profiles 沒有姓名，嘗試從 field_operations_personnel 根據 user_id 查找
+        const { data: personnelData } = await supabase.rpc('get_personnel_by_id', {
+          p_id: user.id,
+        });
+        
+        if (personnelData && personnelData.length > 0 && personnelData[0].name) {
+          setTechnicianName(personnelData[0].name);
+          return;
+        }
+        
+        // 如果還是找不到，嘗試用 user_id 直接查詢
+        const { data: personnel } = await supabase
+          .from('field_operations_personnel')
+          .select('name')
+          .eq('user_id', user.id)
+          .maybeSingle();
 
-          if (personnel?.name) {
-            setTechnicianName(personnel.name);
-            return;
-          }
+        if (personnel?.name) {
+          setTechnicianName(personnel.name);
+          return;
         }
 
         // 如果都找不到，使用 user_metadata 或 email 的前綴
@@ -138,14 +146,40 @@ export default function MobileTechnicianPage() {
     };
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude, accuracy } = position.coords;
-        setGpsLocation({
+        const locationData = {
           latitude,
           longitude,
           accuracy,
-        });
+        };
+        setGpsLocation(locationData);
         setIsGettingLocation(false);
+
+        // 自動將 GPS 位置回寫到 Supabase
+        try {
+          const response = await fetch('/api/field-operations/personnel/update-location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              latitude,
+              longitude,
+              accuracy,
+            }),
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            console.error('更新 GPS 位置失敗:', result.error || '未知錯誤');
+            // 不顯示錯誤給使用者，因為 GPS 已經成功取得並顯示
+          } else {
+            console.log('GPS 位置已成功更新到資料庫');
+          }
+        } catch (err) {
+          console.error('更新 GPS 位置 API 呼叫錯誤:', err);
+          // 不顯示錯誤給使用者，因為 GPS 已經成功取得並顯示
+        }
       },
       (error) => {
         console.error('GPS 定位錯誤:', error);
