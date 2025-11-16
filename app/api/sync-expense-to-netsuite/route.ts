@@ -399,6 +399,46 @@ export async function POST(request: Request) {
       expenseReportPayload.memo = review.description;
     }
 
+    // 自訂欄位：Expense System Number (custbody_es_number)
+    // 使用 expense_report_number，如果沒有則使用 review.id
+    const expenseSystemNumber = review.expense_report_number || review.id;
+    if (expenseSystemNumber) {
+      expenseReportPayload.custbody_es_number = expenseSystemNumber;
+    }
+
+    // 自訂欄位：Expense System URL (custbody_es_link)
+    // ⚠️ 注意：NetSuite 的自訂欄位可能需要特定的格式
+    // 嘗試多種可能的欄位名稱格式，確保能正確寫入
+    const getBaseUrl = () => {
+      // 優先使用環境變數
+      if (process.env.NEXT_PUBLIC_APP_URL) {
+        return process.env.NEXT_PUBLIC_APP_URL;
+      }
+      // 從 request headers 取得（適用於生產環境）
+      const headers = request.headers;
+      const host = headers.get('host');
+      const protocol = headers.get('x-forwarded-proto') || 'https';
+      if (host) {
+        return `${protocol}://${host}`;
+      }
+      // 預設值（開發環境）
+      return 'http://localhost:3000';
+    };
+
+    const baseUrl = getBaseUrl();
+    // 簡化 URL：只使用基本路徑和 ID
+    const expenseDetailUrl = `${baseUrl}/dashboard/ocr-expense/reviews?id=${review.id}`;
+    
+    // 嘗試多種可能的欄位名稱格式（NetSuite 可能使用不同的命名格式）
+    // 格式 1: custbody_es_link（標準格式，使用底線）
+    expenseReportPayload.custbody_es_link = expenseDetailUrl;
+    
+    // 格式 2: custbodyeslink（無底線格式，某些 NetSuite 版本可能使用）
+    // expenseReportPayload.custbodyeslink = expenseDetailUrl;
+    
+    // 格式 3: 如果欄位類型是 URL，可能需要特定格式
+    // 如果以上都不行，可能需要檢查 NetSuite 中的實際欄位 ID
+
     // Expense Items（費用明細）
     // ⚠️ 重要：現在需要從 expense_lines 建立多個 expense items
     // 每個 expense_line 對應一個 NetSuite expense item
@@ -634,6 +674,10 @@ export async function POST(request: Request) {
           currency: item.currency.id,
           amount: item.amount,
         })),
+        customFields: {
+          custbody_es_number: expenseReportPayload.custbody_es_number,
+          custbody_es_link: expenseReportPayload.custbody_es_link,
+        },
         payload: JSON.stringify(expenseReportPayload, null, 2), // 記錄完整 payload
       });
     }
@@ -673,7 +717,7 @@ export async function POST(request: Request) {
                throw new Error('無法從 NetSuite 回應中取得記錄 ID');
              }
 
-             // 查詢已建立的記錄以取得 tranId（NetSuite 建立回應通常不包含 tranId）
+             // 查詢已建立的記錄以取得 tranId 並驗證自訂欄位是否寫入
              try {
                const createdRecord = await netsuite.getRecord('expenseReport', netsuiteInternalId.toString());
                if (createdRecord && createdRecord.tranId) {
@@ -685,6 +729,24 @@ export async function POST(request: Request) {
                  console.log(`[Sync Expense] 從查詢記錄取得 tranid: ${netsuiteTranId}`);
                } else {
                  console.warn(`[Sync Expense] 查詢記錄後仍無法取得 tranId，記錄內容:`, JSON.stringify(createdRecord).substring(0, 200));
+               }
+               
+               // 驗證自訂欄位是否寫入
+               if (createdRecord) {
+                 const esNumber = createdRecord.custbody_es_number || createdRecord.custbodyesnumber;
+                 const esLink = createdRecord.custbody_es_link || createdRecord.custbodyeslink;
+                 
+                 console.log(`[Sync Expense] 自訂欄位驗證:`, {
+                   custbody_es_number: esNumber || '未寫入',
+                   custbody_es_link: esLink || '未寫入',
+                   sent_es_number: expenseReportPayload.custbody_es_number,
+                   sent_es_link: expenseReportPayload.custbody_es_link,
+                   allCustomFields: Object.keys(createdRecord).filter(key => key.includes('custbody')),
+                 });
+                 
+                 if (!esLink && expenseReportPayload.custbody_es_link) {
+                   console.warn(`[Sync Expense] ⚠️ custbody_es_link 未寫入 NetSuite！可能原因：1) 欄位 ID 錯誤 2) 欄位類型不匹配 3) 欄位沒有寫入權限`);
+                 }
                }
              } catch (queryError: any) {
                // 查詢失敗不影響主要流程，但記錄警告

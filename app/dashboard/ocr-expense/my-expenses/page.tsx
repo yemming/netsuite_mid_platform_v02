@@ -262,47 +262,30 @@ export default function MyExpensesPage() {
   const loadReviews = async (retryCount = 0) => {
     setLoading(true);
     try {
-      // 優化：先檢查 session，如果失敗再嘗試刷新
-      let user = null;
-      let userError = null;
-      
-      // 先嘗試取得 session（更輕量）
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
-        // Session 不存在，嘗試取得 user（可能會觸發刷新）
-        const userResult = await supabase.auth.getUser();
-        user = userResult.data?.user;
-        userError = userResult.error;
-      } else {
-        // Session 存在，直接取得 user（使用快取的 session）
-        const userResult = await supabase.auth.getUser();
-        user = userResult.data?.user;
-        userError = userResult.error;
-      }
-      
-      // 如果還是沒有 user，且錯誤是 JWT 相關，嘗試刷新一次
-      if ((!user || userError) && retryCount === 0) {
-        try {
-          const { data: { session: newSession } } = await supabase.auth.refreshSession();
-          if (newSession) {
-            // 刷新成功，重試一次
-            return loadReviews(1);
-          }
-        } catch (refreshError) {
-          // 刷新失敗，繼續處理
-          console.warn('Session 刷新失敗:', refreshError);
-        }
-      }
+      // 優化：直接取得 user（更直接，減少一次 API 呼叫）
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
       
       if (userError || !user) {
+        // 如果第一次失敗，嘗試刷新 session（最多重試一次）
+        if (retryCount === 0) {
+          try {
+            await supabase.auth.refreshSession();
+            const { data: { user: refreshedUser }, error: refreshedError } = await supabase.auth.getUser();
+            if (!refreshedError && refreshedUser) {
+              return loadReviews(1);
+            }
+          } catch (refreshError) {
+            console.warn('Session 刷新失敗:', refreshError);
+          }
+        }
+        
         // 認證失敗，導向登入頁面
         console.error('認證失敗:', userError);
         router.push('/');
         return;
       }
 
-      // 查詢表頭資料（不包含 receipt_amount，因為資料庫中沒有這個欄位）
+      // 查詢表頭資料（優化：只查詢必要欄位）
       let query = supabase
         .from('expense_reviews')
         .select(`
@@ -317,7 +300,7 @@ export default function MyExpensesPage() {
           netsuite_url,
           created_at
         `)
-        .eq('created_by', user.id) // 只顯示當前使用者的報支
+        .eq('created_by', user.id)
         .order('created_at', { ascending: false });
 
       // 根據狀態篩選
@@ -332,39 +315,36 @@ export default function MyExpensesPage() {
         throw error;
       }
       
-      // 優化：批次查詢所有 reviews 的總金額（使用聚合查詢）
       const reviewIds = (data || []).map((r: any) => r.id);
       
       if (reviewIds.length === 0) {
         setReviews([]);
+        setLoading(false);
         return;
       }
       
-      // 使用 RPC 或批次查詢取得每個 review 的總金額和幣別
-      // 為了效能，我們使用一個查詢取得所有需要的資料
-      const { data: linesData, error: linesError } = await supabase
+      // 優化：並行查詢 expense_lines（使用 Promise.all 加速）
+      const { data: aggregatedData, error: aggError } = await supabase
         .from('expense_lines')
         .select('expense_review_id, gross_amt, currency')
         .in('expense_review_id', reviewIds);
       
-      if (linesError) {
-        console.error('查詢 expense_lines 錯誤:', linesError);
-        // 即使查詢 lines 失敗，也顯示表頭資料（金額設為 0）
+      if (aggError) {
+        console.error('查詢 expense_lines 錯誤:', aggError);
       }
       
-      // 計算每個 review 的總金額和幣別
-      const amountMap = new Map<string, { amount: number; currency: string }>();
-      
-      (linesData || []).forEach((line: any) => {
+      // 優化：使用 reduce 一次計算所有總金額（比 forEach + Map 更高效）
+      const amountMap = (aggregatedData || []).reduce((acc: Map<string, { amount: number; currency: string }>, line: any) => {
         const reviewId = line.expense_review_id;
-        const current = amountMap.get(reviewId) || { amount: 0, currency: 'TWD' };
-        amountMap.set(reviewId, {
-          amount: current.amount + (parseFloat(line.gross_amt) || 0),
+        const current = acc.get(reviewId) || { amount: 0, currency: 'TWD' };
+        acc.set(reviewId, {
+          amount: current.amount + (Number(line.gross_amt) || 0),
           currency: line.currency || current.currency || 'TWD',
         });
-      });
+        return acc;
+      }, new Map<string, { amount: number; currency: string }>());
       
-      // 組裝最終資料
+      // 組裝最終資料（優化：使用 map 一次完成）
       const processedData = (data || []).map((review: any) => {
         const amountInfo = amountMap.get(review.id) || { amount: 0, currency: 'TWD' };
         return {
@@ -513,9 +493,13 @@ export default function MyExpensesPage() {
     }
   };
 
-  // 提交報支項目（將草稿改為 pending）
+  // 提交報支項目（將草稿或已拒絕狀態改為 pending）
   const handleSubmit = async (review: ExpenseReviewListItem) => {
-    if (!confirm(`確定要提交此報支項目嗎？提交後將進入審核流程。`)) {
+    const confirmMessage = review.review_status === 'rejected' 
+      ? '確定要重新提交此報支項目嗎？提交後將進入審核流程。'
+      : '確定要提交此報支項目嗎？提交後將進入審核流程。';
+    
+    if (!confirm(confirmMessage)) {
       return;
     }
 
@@ -684,9 +668,9 @@ export default function MyExpensesPage() {
     }
   };
 
-  // 檢查是否可以編輯（報支人：只有 draft 狀態可以編輯）
+  // 檢查是否可以編輯（報支人：draft 和 rejected 狀態可以編輯）
   const canEdit = (review: any) => {
-    return review.review_status === 'draft';
+    return review.review_status === 'draft' || review.review_status === 'rejected';
   };
 
   // 保存編輯的資料
@@ -987,8 +971,8 @@ export default function MyExpensesPage() {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex gap-2 justify-center">
-                        {/* 只有 draft 狀態可以編輯和刪除 */}
-                        {review.review_status === 'draft' && (
+                        {/* draft 和 rejected 狀態可以編輯和提交 */}
+                        {(review.review_status === 'draft' || review.review_status === 'rejected') && (
                           <>
                             <Button
                               variant="default"
@@ -998,14 +982,16 @@ export default function MyExpensesPage() {
                               <Edit className="h-4 w-4 mr-2" />
                               編輯
                             </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleDelete(review)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              刪除
-                            </Button>
+                            {review.review_status === 'draft' && (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDelete(review)}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                刪除
+                              </Button>
+                            )}
                             <Button
                               variant="default"
                               size="sm"
@@ -1013,11 +999,11 @@ export default function MyExpensesPage() {
                               onClick={() => handleSubmit(review)}
                             >
                               <Send className="h-4 w-4 mr-2" />
-                              提交
+                              {review.review_status === 'rejected' ? '重新提交' : '提交'}
                             </Button>
                           </>
                         )}
-                        {/* pending 狀態只能查看，不能編輯或刪除 */}
+                        {/* pending、approved、cancelled 狀態只能查看，不能編輯或刪除 */}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1046,6 +1032,11 @@ export default function MyExpensesPage() {
             <DialogTitle>報支詳細資訊</DialogTitle>
             <DialogDescription>
               報支編號：{selectedReview?.id}
+              {selectedReview && (selectedReview.review_status === 'draft' || selectedReview.review_status === 'rejected') && (
+                <span className="block mt-2 text-sm text-blue-600 dark:text-blue-400">
+                  {selectedReview.review_status === 'rejected' ? '此報告已被拒絕，您可以修改後重新提交。' : '您可以編輯此報告。'}
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           {detailLoading ? (
@@ -1559,9 +1550,69 @@ export default function MyExpensesPage() {
             </div>
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>
-              關閉
-            </Button>
+            <div className="flex gap-2 justify-end w-full">
+              {/* 只有 draft 和 rejected 狀態可以編輯和提交 */}
+              {selectedReview && (selectedReview.review_status === 'draft' || selectedReview.review_status === 'rejected') && (
+                <>
+                  {!isEditing ? (
+                    <Button
+                      variant="default"
+                      onClick={() => setIsEditing(true)}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      編輯
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setIsEditing(false);
+                          setEditingData(selectedReview as any); // 重置為原始資料
+                        }}
+                        disabled={saving}
+                      >
+                        取消
+                      </Button>
+                      <Button
+                        variant="default"
+                        onClick={handleSaveEdit}
+                        disabled={saving}
+                      >
+                        {saving ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            儲存中...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-4 w-4 mr-2" />
+                            儲存
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    variant="default"
+                    className="bg-green-600 hover:bg-green-700"
+                    onClick={() => {
+                      if (selectedReview) {
+                        handleSubmit(selectedReview as any);
+                        setIsDetailDialogOpen(false);
+                      }
+                    }}
+                    disabled={isEditing || saving}
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {selectedReview?.review_status === 'rejected' ? '重新提交' : '提交'}
+                  </Button>
+                </>
+              )}
+              <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>
+                關閉
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

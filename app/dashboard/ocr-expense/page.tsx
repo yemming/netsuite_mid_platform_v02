@@ -264,8 +264,16 @@ export default function OCRExpensePage() {
   const [nextRefNo, setNextRefNo] = useState(1);
   const [useMultiCurrency, setUseMultiCurrency] = useState(false);
 
+  // 追蹤是否正在手動修改表頭總金額（避免循環更新）
+  const isManuallyUpdatingTotalRef = useRef(false);
+
   // 當 expenseLines 改變時，自動更新收據金額（一律由 expense line items 的總金額加總）
   useEffect(() => {
+    // 如果正在手動更新總金額，跳過自動計算
+    if (isManuallyUpdatingTotalRef.current) {
+      return;
+    }
+
     // 計算所有 expense lines 的總金額
     const total = expenseLines.reduce((sum, line) => {
       const grossAmt = parseFloat(line.grossAmt || '0') || 0;
@@ -283,6 +291,72 @@ export default function OCRExpensePage() {
       return prev;
     });
   }, [expenseLines]);
+
+  // 處理表頭總金額變更（反向同步到明細行）
+  const handleTotalAmountChange = (newTotalAmount: string) => {
+    const newTotal = parseFloat(newTotalAmount.replace(/,/g, '')) || 0;
+    
+    if (newTotal <= 0 || expenseLines.length === 0) {
+      // 如果總金額為 0 或沒有明細行，只更新表頭
+      isManuallyUpdatingTotalRef.current = true;
+      setFormData(prev => ({
+        ...prev,
+        receiptAmount: newTotal.toFixed(2),
+      }));
+      setTimeout(() => {
+        isManuallyUpdatingTotalRef.current = false;
+      }, 100);
+      return;
+    }
+
+    // 計算當前所有明細行的總金額
+    const currentTotal = expenseLines.reduce((sum, line) => {
+      return sum + (parseFloat(line.grossAmt || '0') || 0);
+    }, 0);
+
+    if (currentTotal === 0) {
+      // 如果當前總金額為 0，平均分配給所有明細行
+      const amountPerLine = (newTotal / expenseLines.length).toFixed(2);
+      setExpenseLines(prev => prev.map(line => ({
+        ...line,
+        amount: amountPerLine,
+        grossAmt: amountPerLine,
+      })));
+    } else {
+      // 按比例分配新總金額到各明細行
+      const ratio = newTotal / currentTotal;
+      setExpenseLines(prev => prev.map(line => {
+        const currentGrossAmt = parseFloat(line.grossAmt || '0') || 0;
+        const newGrossAmt = (currentGrossAmt * ratio).toFixed(2);
+        const currentAmount = parseFloat(line.amount || '0') || 0;
+        const currentTaxAmt = parseFloat(line.taxAmt || '0') || 0;
+        // 保持金額和稅額的比例
+        const newAmount = currentAmount > 0 
+          ? (currentAmount * ratio).toFixed(2)
+          : (parseFloat(newGrossAmt) - currentTaxAmt * ratio).toFixed(2);
+        const newTaxAmt = currentTaxAmt > 0
+          ? (currentTaxAmt * ratio).toFixed(2)
+          : '0.00';
+        
+        return {
+          ...line,
+          amount: newAmount,
+          taxAmt: newTaxAmt,
+          grossAmt: newGrossAmt,
+        };
+      }));
+    }
+
+    // 更新表頭總金額
+    isManuallyUpdatingTotalRef.current = true;
+    setFormData(prev => ({
+      ...prev,
+      receiptAmount: newTotal.toFixed(2),
+    }));
+    setTimeout(() => {
+      isManuallyUpdatingTotalRef.current = false;
+    }, 100);
+  };
   
   // 拖拽相關 state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -2470,111 +2544,27 @@ export default function OCRExpensePage() {
         throw new Error('無法取得使用者資訊，請重新登入');
       }
 
-      // 處理每個 line 的附件上傳（優化：並行上傳，但有超時限制）
-      const processedLines = await Promise.all(
-        expenseLines.map(async (line, index) => {
-          let attachmentUrl: string | null = null;
-          let attachmentBase64: string | null = null;
-          let documentFileName: string | null = null;
-          let documentFilePath: string | null = null;
+      // 優化：預先建立幣別符號到 UUID 的對應表（避免每個 line 都查找）
+      const currencySymbolToIdMap = new Map<string, string>();
+      formOptions.currencies.forEach((curr) => {
+        if (curr.symbol) currencySymbolToIdMap.set(curr.symbol, curr.id);
+        if (curr.name) currencySymbolToIdMap.set(curr.name, curr.id);
+      });
+      const defaultTwdId = formOptions.currencies.find((curr) => curr.symbol === 'TWD')?.id || formOptions.currencies[0]?.id || '';
 
-          // 處理附件：優先使用已上傳的 documentFilePath（OCR 處理時已上傳），否則處理新的附件
-          if (line.ocrData?.documentFilePath) {
-            // 優先使用：OCR 處理時已經上傳的檔案路徑
-            documentFilePath = line.ocrData.documentFilePath;
-            documentFileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
-            console.log(`Line ${index + 1} 使用已上傳的檔案路徑: ${documentFilePath}`);
-          } else if (line.ocrData?.attachmentUrl) {
-            // 編輯模式：如果已經有 attachment_url，直接使用
-            attachmentUrl = line.ocrData.attachmentUrl;
-            documentFileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
-          } else if (line.ocrData?.attachmentImageData) {
-            // 新建模式或新增的附件：如果還沒有上傳，嘗試上傳
-            const imageData = line.ocrData.attachmentImageData;
-            
-            // 如果有 ocrFileName，使用它作為檔案名稱
-            const fileName = line.ocrData.ocrFileName || `line_${index + 1}_${Date.now()}`;
-            documentFileName = fileName;
-
-            // 嘗試從 attachments 陣列中找到對應的檔案
-            const fileIndex = attachments.findIndex((file, idx) => {
-              // 嘗試匹配檔案名稱或索引
-              return file.name === fileName || 
-                     (line.ocrData.ocrFileId && file.name.includes(line.ocrData.ocrFileId));
-            });
-
-            // 如果找到檔案，嘗試上傳（作為備用方案）
-            if (fileIndex >= 0 && attachments[fileIndex]) {
-              const file = attachments[fileIndex];
-              
-              // 檢查檔案大小（限制為 5MB，避免上傳過大檔案）
-              const maxFileSize = 5 * 1024 * 1024; // 5MB
-              if (file.size > maxFileSize) {
-                console.warn(`Line ${index + 1} 檔案太大 (${(file.size / 1024 / 1024).toFixed(2)}MB)，跳過上傳`);
-                documentFileName = fileName;
-              } else {
-                // 檔案大小合理，嘗試上傳（備用方案）
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                const fileExt = file.name.split('.').pop() || (line.ocrData.attachmentFileType?.includes('pdf') ? 'pdf' : 'jpg');
-                const storageFileName = `${user.id}/${timestamp}_${Date.now()}_${index + 1}.${fileExt}`;
-                documentFilePath = storageFileName;
-
-                try {
-                  // 上傳到 Supabase Storage（設定 30 秒超時）
-                  const uploadPromise = supabase.storage
-                    .from('expense-receipts')
-                    .upload(storageFileName, file, {
-                      cacheControl: '3600',
-                      upsert: false,
-                    });
-
-                  const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('上傳超時')), 30000) // 30 秒超時
-                  );
-
-                  const { data: uploadData, error: uploadError } = await Promise.race([
-                    uploadPromise,
-                    timeoutPromise,
-                  ]) as any;
-
-                  if (uploadError) {
-                    console.warn(`Line ${index + 1} Storage 上傳失敗（備用方案）:`, uploadError);
-                    documentFileName = fileName;
-                    documentFilePath = null; // 上傳失敗，清除路徑
-                  } else {
-                    console.log(`Line ${index + 1} Storage 上傳成功（備用方案）: ${storageFileName}`);
-                  }
-                } catch (storageError: any) {
-                  console.warn(`Line ${index + 1} Storage 上傳錯誤（備用方案）:`, storageError);
-                  documentFileName = fileName;
-                  documentFilePath = null; // 上傳失敗，清除路徑
-                }
-              }
-            } else {
-              // 如果找不到對應的檔案，只保存檔案名稱
-              documentFileName = fileName;
-            }
-          }
+      // 處理每個 line 的附件資訊（優化：OCR 時已上傳，這裡只處理資料組裝，不進行上傳）
+      const processedLines = expenseLines.map((line, index) => {
+          // 處理附件：優先使用已上傳的 documentFilePath（OCR 處理時已上傳）
+          // ⚠️ 優化：OCR 時已經上傳圖檔，這裡直接使用，不進行任何上傳操作
+          const documentFilePath = line.ocrData?.documentFilePath || null;
+          const documentFileName = line.ocrData?.ocrFileName || `line_${index + 1}`;
+          const attachmentUrl = line.ocrData?.attachmentUrl || null;
 
           // 將幣別符號轉換成 UUID（如果 line.currency 是符號）
           let currencyId = line.currency;
           if (line.currency && !line.currency.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-            // 如果不是 UUID 格式，則視為符號，需要轉換
-            const currencyOption = formOptions.currencies.find(
-              (curr) => curr.symbol === line.currency || curr.name === line.currency
-            );
-            if (currencyOption) {
-              currencyId = currencyOption.id;
-            } else {
-              // 如果找不到對應的幣別，使用預設的 TWD
-              const defaultCurrency = formOptions.currencies.find((curr) => curr.symbol === 'TWD');
-              if (defaultCurrency) {
-                currencyId = defaultCurrency.id;
-              } else {
-                console.warn(`找不到幣別 ${line.currency}，使用第一個可用幣別`);
-                currencyId = formOptions.currencies[0]?.id || '';
-              }
-            }
+            // 如果不是 UUID 格式，則視為符號，使用預先建立的 Map 查找
+            currencyId = currencySymbolToIdMap.get(line.currency) || defaultTwdId;
           }
 
           // 組裝 line 資料
@@ -2597,42 +2587,13 @@ export default function OCRExpensePage() {
             customer: line.customer || '',
             projectTask: line.projectTask || '',
             billable: line.billable || false,
-            ocrData: line.ocrData || {
-              invoiceTitle: '',
-              invoicePeriod: '',
-              invoiceNumber: '',
-              invoiceDate: '',
-              randomCode: '',
-              formatCode: '',
-              sellerName: '',
-              sellerTaxId: '',
-              sellerAddress: '',
-              buyerName: '',
-              buyerTaxId: '',
-              buyerAddress: '',
-              untaxedAmount: '',
-              taxAmount: '',
-              totalAmount: '',
-              ocrSuccess: false,
-              ocrConfidence: 0,
-              ocrDocumentType: '',
-              ocrErrors: '',
-              ocrWarnings: '',
-              ocrErrorCount: 0,
-              ocrWarningCount: 0,
-              ocrQualityGrade: '',
-              ocrFileName: '',
-              ocrFileId: '',
-              ocrWebViewLink: '',
-              ocrProcessedAt: '',
-            },
+            ocrData: line.ocrData || undefined, // 優化：沒有 OCR 資料時不傳送空物件
             attachment_url: attachmentUrl,
-            attachment_base64: attachmentBase64,
+            attachment_base64: null, // 優化：不再使用 base64，直接使用 document_file_path
             document_file_name: documentFileName,
             document_file_path: documentFilePath,
           };
-        })
-      );
+        });
 
       // 組裝請求資料
       const requestData = {
@@ -2648,20 +2609,13 @@ export default function OCRExpensePage() {
         reviewStatus: action === 'submit' ? 'pending' : 'draft', // 提交時為 pending，儲存時為 draft
       };
 
-      // 除錯：檢查請求資料格式
-      console.log('發送請求資料:', {
-        header: requestData.header,
-        linesCount: requestData.lines.length,
-        firstLine: requestData.lines[0] ? {
-          refNo: requestData.lines[0].refNo,
-          date: requestData.lines[0].date,
-          category: requestData.lines[0].category,
-          currency: requestData.lines[0].currency,
-          amount: requestData.lines[0].amount,
-          grossAmt: requestData.lines[0].grossAmt,
-          hasOcrData: !!requestData.lines[0].ocrData,
-        } : null,
-      });
+      // 除錯：只在開發環境記錄（優化：減少生產環境的日誌輸出）
+      if (process.env.NODE_ENV === 'development') {
+        console.log('發送請求資料:', {
+          header: requestData.header,
+          linesCount: requestData.lines.length,
+        });
+      }
 
       // 發送請求到 API（編輯模式使用 PUT，新建模式使用 POST）
       const apiUrl = isEditMode && expenseReviewId
@@ -2785,16 +2739,18 @@ export default function OCRExpensePage() {
         </Card>
       )}
 
-      {/* Main Form Card */}
+      {/* Main Form, Upload and Preview - 三欄併排顯示 */}
       {!loadingData && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>費用報告資訊</CardTitle>
-          </CardHeader>
-          <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Left Column - Form Fields */}
-            <div className="space-y-2 flex flex-col">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          {/* Left: Form Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle>費用報告資訊</CardTitle>
+            </CardHeader>
+            <CardContent>
+            <div className="space-y-2">
+              {/* Form Fields */}
+              <div className="space-y-2">
               {/* Expense Date */}
               <div className="space-y-1">
                 <Label htmlFor="expenseDate" className="text-sm font-semibold">
@@ -2893,91 +2849,324 @@ export default function OCRExpensePage() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* Right Column - Preview */}
-            <div className="space-y-2 flex flex-col">
-              {/* Description */}
-              <div className="space-y-1">
-                <Label htmlFor="description" className="text-sm font-semibold">
-                  費用報告描述
-                </Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
-                  rows={5}
-                  placeholder="輸入費用報告項目描述..."
-                  className="min-h-[90px]"
-                />
-              </div>
-
-              {/* Receipt Amount */}
-              <div className="space-y-1 mt-auto">
-                <Label htmlFor="receiptAmount" className="text-sm font-semibold">
-                  總金額 <span className="text-red-500">*</span>
-                </Label>
-                <div className="flex gap-2">
-                  <Select
-                    value={formData.receiptCurrency}
-                    onValueChange={(value) => handleInputChange('receiptCurrency', value)}
-                    disabled={loadingFormOptions}
-                  >
-                    <SelectTrigger className="w-24">
-                      <SelectValue placeholder={loadingFormOptions ? "載入中..." : "幣別"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {formOptions.currencies.length > 0 ? (
-                        formOptions.currencies.map((currency) => (
-                          <SelectItem key={currency.id} value={currency.symbol || currency.name}>
-                            {currency.symbol || currency.name}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
-                          {loadingFormOptions ? "載入中..." : "無可用幣別"}
-                        </div>
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    id="receiptAmount"
-                    type="text"
-                    value={formatAmountDisplay(formData.receiptAmount, formData.receiptCurrency || 'TWD')}
-                    placeholder="0"
-                    className="flex-1 bg-gray-100 dark:bg-gray-800 cursor-not-allowed text-right font-bold"
-                    required
-                    readOnly={true}
-                    title="費用報告總金額會自動加總所有行的總金額"
+              {/* Description and Total Amount - 垂直排列 */}
+              <div className="space-y-2 mt-4">
+                {/* Description */}
+                <div className="space-y-1">
+                  <Label htmlFor="description" className="text-sm font-semibold">
+                    費用報告描述
+                  </Label>
+                  <Textarea
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => handleInputChange('description', e.target.value)}
+                    rows={1}
+                    placeholder="輸入費用報告項目描述..."
+                    className="min-h-[40px] resize-none"
                   />
                 </div>
+
+                {/* Receipt Amount */}
+                <div className="space-y-1">
+                  <Label htmlFor="receiptAmount" className="text-sm font-semibold">
+                    總金額 <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <Select
+                      value={formData.receiptCurrency}
+                      onValueChange={(value) => handleInputChange('receiptCurrency', value)}
+                      disabled={loadingFormOptions}
+                    >
+                      <SelectTrigger className="w-24">
+                        <SelectValue placeholder={loadingFormOptions ? "載入中..." : "幣別"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {formOptions.currencies.length > 0 ? (
+                          formOptions.currencies.map((currency) => (
+                            <SelectItem key={currency.id} value={currency.symbol || currency.name}>
+                              {currency.symbol || currency.name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">
+                            {loadingFormOptions ? "載入中..." : "無可用幣別"}
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      id="receiptAmount"
+                      type="text"
+                      value={formatAmountDisplay(formData.receiptAmount, formData.receiptCurrency || 'TWD')}
+                      onChange={(e) => {
+                        const cleanedValue = e.target.value.replace(/,/g, '').replace(/[^\d.]/g, '');
+                        handleTotalAmountChange(cleanedValue);
+                      }}
+                      onBlur={(e) => {
+                        const cleanedValue = e.target.value.replace(/,/g, '').replace(/[^\d.]/g, '');
+                        if (cleanedValue) {
+                          handleTotalAmountChange(cleanedValue);
+                        }
+                      }}
+                      placeholder="0"
+                      className="flex-1 text-right font-bold"
+                      required
+                      title="修改總金額會自動按比例分配給所有明細行"
+                    />
+                  </div>
+                </div>
               </div>
+            </div>
+            </div>
+          </CardContent>
+          </Card>
+
+          {/* Middle: Preview and OCR Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle>檔案預覽與 OCR 識別</CardTitle>
+            </CardHeader>
+            <CardContent>
+            <div className="space-y-4">
+              {/* 檔案預覽區域 */}
+              <div className="flex flex-col gap-4">
+              {/* File Preview */}
+              <div className="w-full">
+              <div
+                ref={previewRef}
+                className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative w-full"
+                style={{ minHeight: '262px', height: '262px' }}
+              >
+                {previewImage ? (
+                  <div className="relative w-full h-full" style={{ minHeight: '321px', height: '321px' }}>
+                    {/* 檢查當前檔案類型 */}
+                    {(() => {
+                      const currentFileType = previewFileTypes[previewImageIndex] || '';
+                      const isPdf = currentFileType === 'application/pdf';
+                      const isImage = currentFileType.startsWith('image/');
+                      
+                      return (
+                        <>
+                          {/* Zoom Controls - 僅圖片顯示 */}
+                          {isImage && (
+                            <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-lg p-1 border border-gray-200 dark:border-gray-700">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleZoomOut}
+                                disabled={zoom <= 0.5}
+                                className="h-7 w-7 p-0"
+                              >
+                                <ZoomOut className="h-4 w-4" />
+                              </Button>
+                              <span className="px-2 py-1 text-sm font-medium flex items-center text-gray-700 dark:text-gray-300">
+                                {Math.round(zoom * 100)}%
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleZoomIn}
+                                disabled={zoom >= 3}
+                                className="h-7 w-7 p-0"
+                              >
+                                <ZoomIn className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleResetZoom}
+                                className="h-7 w-7 p-0"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Navigation Arrows */}
+                          {previewImages.length > 1 && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handlePreviousImage}
+                                className="absolute left-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
+                              >
+                                <ChevronLeft className="h-5 w-5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleNextImage}
+                                className="absolute right-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
+                              >
+                                <ChevronRight className="h-5 w-5" />
+                              </Button>
+                            </>
+                          )}
+
+                          {/* File Container */}
+                          {isPdf ? (
+                            <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                              <iframe
+                                src={previewImage}
+                                className="w-full h-full border-0"
+                                style={{ minHeight: '321px', height: '321px' }}
+                                title="PDF 預覽"
+                              />
+                            </div>
+                          ) : isImage ? (
+                            <div
+                              className="w-full h-full flex items-center justify-center overflow-hidden cursor-move"
+                              onMouseDown={handleMouseDown}
+                              onMouseMove={handleMouseMove}
+                              onMouseUp={handleMouseUp}
+                              onMouseLeave={handleMouseUp}
+                              style={{
+                                minHeight: '214px',
+                                height: '214px',
+                              }}
+                            >
+                              <img
+                                src={previewImage}
+                                alt="收據預覽"
+                                className="max-w-full max-h-full object-contain select-none"
+                                style={{
+                                  transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,
+                                  transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+                                  cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default',
+                                }}
+                                draggable={false}
+                              />
+                            </div>
+                          ) : null}
+
+                          {/* File Counter */}
+                          {previewImages.length > 1 && (
+                            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/50 text-white px-3 py-1 rounded-full text-xs">
+                              {previewImageIndex + 1} / {previewImages.length}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full gap-3" style={{ minHeight: '262px', height: '321px' }}>
+                    <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+                    <p className="text-gray-400 dark:text-gray-500 text-center text-sm">檔案預覽</p>
+                  </div>
+                )}
+              </div>
+              </div>
+              
+              {/* AI OCR Button */}
+              <Button
+              onClick={handleAIOCR}
+              disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
+              className="w-full text-white flex-shrink-0"
+              style={{ backgroundColor: '#1a5490' }}
+              onMouseEnter={(e) => {
+                if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
+                  e.currentTarget.style.backgroundColor = '#174880';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
+                  e.currentTarget.style.backgroundColor = '#1a5490';
+                }
+              }}
+            >
+              {ocrProcessing || multiOcrTasks.size > 0 ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {multiOcrTasks.size > 0 
+                    ? `處理中 (${Array.from(multiOcrTasks.values()).filter(t => t.status === 'completed').length}/${multiOcrTasks.size})`
+                    : '等待 OCR 辨識結果...'}
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI OCR 識別
+                </>
+              )}
+            </Button>
+            
+              {/* OCR 處理中的載入提示 */}
+              {(ocrProcessing || multiOcrTasks.size > 0) && (
+              <div className="mt-0 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg w-full flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>
+                      {multiOcrTasks.size > 0
+                        ? `正在處理 ${multiOcrTasks.size} 個附件的 OCR 辨識，請稍候...`
+                        : '正在處理 OCR 辨識，請稍候...'}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelOCR}
+                    className="h-7 px-3 text-sm border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    取消
+                  </Button>
+                </div>
+                <p className="text-sm text-blue-600 dark:text-blue-400 mt-1 ml-6">
+                  {multiOcrTasks.size > 0
+                    ? '辨識結果將自動建立對應的費用明細行'
+                    : '辨識結果將自動填入表單'}
+                </p>
+                {/* 多附件處理狀態列表 */}
+                {multiOcrTasks.size > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {Array.from(multiOcrTasks.entries()).map(([fileIndex, task]) => {
+                      const file = attachments[fileIndex];
+                      return (
+                        <div
+                          key={fileIndex}
+                          className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400"
+                        >
+                          {task.status === 'processing' && (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          )}
+                          {task.status === 'completed' && (
+                            <Check className="h-3 w-3 text-green-600" />
+                          )}
+                          {task.status === 'error' && (
+                            <X className="h-3 w-3 text-red-600" />
+                          )}
+                          <span className="truncate flex-1">
+                            {file?.name || task.fileName}
+                          </span>
+                          <span className="text-blue-500">
+                            {task.status === 'processing' && '處理中...'}
+                            {task.status === 'completed' && '已完成'}
+                            {task.status === 'error' && '失敗'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             </div>
           </div>
         </CardContent>
       </Card>
-      )}
 
-      {/* OCR 識別結果已移至表身的 OCR明細欄位中，每個 expense line 都有自己的 OCR 資料 */}
-
-      {/* File Upload and Preview - Side by Side Layout */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            {/* 標題行 */}
-            <div className="flex items-center gap-4">
-              <div className="w-1/3">
-                <Label className="text-sm font-semibold">附件（選填）</Label>
-              </div>
-              <div className="w-2/3">
-                <Label className="text-sm font-semibold">檔案預覽</Label>
-              </div>
-            </div>
-            
-            {/* 內容區域 */}
-            <div className="flex gap-4">
-              {/* 左側：上傳區域 (1/3 寬度) */}
-              <div className="w-1/3 space-y-2 flex flex-col">
+          {/* Right: Upload Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle>附件上傳（選填）</CardTitle>
+            </CardHeader>
+            <CardContent>
+            <div className="space-y-2">
+              {/* 上傳區域 */}
+              <div className="space-y-2 flex flex-col">
               <div
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
@@ -3188,236 +3377,11 @@ export default function OCRExpensePage() {
                   )}
                 </div>
               </div>
-            
-            {/* 右側：檔案預覽區域 (2/3 寬度) */}
-            <div className="w-2/3 flex flex-col gap-4">
-              {/* File Preview */}
-              <div className="space-y-2 flex-shrink-0">
-              <div
-                ref={previewRef}
-                className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 overflow-hidden relative"
-                style={{ minHeight: '262px', height: '262px' }}
-              >
-                {previewImage ? (
-                  <div className="relative w-full h-full" style={{ minHeight: '321px', height: '321px' }}>
-                    {/* 檢查當前檔案類型 */}
-                    {(() => {
-                      const currentFileType = previewFileTypes[previewImageIndex] || '';
-                      const isPdf = currentFileType === 'application/pdf';
-                      const isImage = currentFileType.startsWith('image/');
-                      
-                      return (
-                        <>
-                          {/* Zoom Controls - 僅圖片顯示 */}
-                          {isImage && (
-                            <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-lg p-1 border border-gray-200 dark:border-gray-700">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleZoomOut}
-                                disabled={zoom <= 0.5}
-                                className="h-7 w-7 p-0"
-                              >
-                                <ZoomOut className="h-4 w-4" />
-                              </Button>
-                              <span className="px-2 py-1 text-sm font-medium flex items-center text-gray-700 dark:text-gray-300">
-                                {Math.round(zoom * 100)}%
-                              </span>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleZoomIn}
-                                disabled={zoom >= 3}
-                                className="h-7 w-7 p-0"
-                              >
-                                <ZoomIn className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleResetZoom}
-                                className="h-7 w-7 p-0"
-                              >
-                                <RotateCcw className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
-
-                          {/* Navigation Arrows */}
-                          {previewImages.length > 1 && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handlePreviousImage}
-                                className="absolute left-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
-                              >
-                                <ChevronLeft className="h-5 w-5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleNextImage}
-                                className="absolute right-4 top-1/2 transform -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700"
-                              >
-                                <ChevronRight className="h-5 w-5" />
-                              </Button>
-                            </>
-                          )}
-
-                          {/* File Container */}
-                          {isPdf ? (
-                            <div className="w-full h-full flex items-center justify-center overflow-hidden">
-                              <iframe
-                                src={previewImage}
-                                className="w-full h-full border-0"
-                                style={{ minHeight: '321px', height: '321px' }}
-                                title="PDF 預覽"
-                              />
-                            </div>
-                          ) : isImage ? (
-                            <div
-                              className="w-full h-full flex items-center justify-center overflow-hidden cursor-move"
-                              onMouseDown={handleMouseDown}
-                              onMouseMove={handleMouseMove}
-                              onMouseUp={handleMouseUp}
-                              onMouseLeave={handleMouseUp}
-                              style={{
-                                minHeight: '214px',
-                                height: '214px',
-                              }}
-                            >
-                              <img
-                                src={previewImage}
-                                alt="收據預覽"
-                                className="max-w-full max-h-full object-contain select-none"
-                                style={{
-                                  transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,
-                                  transition: isDragging ? 'none' : 'transform 0.1s ease-out',
-                                  cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default',
-                                }}
-                                draggable={false}
-                              />
-                            </div>
-                          ) : null}
-
-                          {/* File Counter */}
-                          {previewImages.length > 1 && (
-                            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/50 text-white px-3 py-1 rounded-full text-xs">
-                              {previewImageIndex + 1} / {previewImages.length}
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full gap-3" style={{ minHeight: '262px', height: '321px' }}>
-                    <Image className="h-16 w-16 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
-                    <p className="text-gray-400 dark:text-gray-500 text-center text-sm">檔案預覽</p>
-                  </div>
-                )}
-              </div>
-              </div>
-              
-              {/* AI OCR Button */}
-              <Button
-              onClick={handleAIOCR}
-              disabled={!previewImage || ocrProcessing || multiOcrTasks.size > 0}
-              className="w-full text-white flex-shrink-0"
-              style={{ backgroundColor: '#1a5490' }}
-              onMouseEnter={(e) => {
-                if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
-                  e.currentTarget.style.backgroundColor = '#174880';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!ocrProcessing && multiOcrTasks.size === 0 && previewImage) {
-                  e.currentTarget.style.backgroundColor = '#1a5490';
-                }
-              }}
-            >
-              {ocrProcessing || multiOcrTasks.size > 0 ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {multiOcrTasks.size > 0 
-                    ? `處理中 (${Array.from(multiOcrTasks.values()).filter(t => t.status === 'completed').length}/${multiOcrTasks.size})`
-                    : '等待 OCR 辨識結果...'}
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  AI OCR 識別
-                </>
-              )}
-            </Button>
-            
-              {/* OCR 處理中的載入提示 */}
-              {(ocrProcessing || multiOcrTasks.size > 0) && (
-                <div className="mt-0 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg w-full flex-shrink-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>
-                      {multiOcrTasks.size > 0
-                        ? `正在處理 ${multiOcrTasks.size} 個附件的 OCR 辨識，請稍候...`
-                        : '正在處理 OCR 辨識，請稍候...'}
-                    </span>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCancelOCR}
-                    className="h-7 px-3 text-sm border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-800"
-                  >
-                    <X className="h-3 w-3 mr-1" />
-                    取消
-                  </Button>
-                </div>
-                <p className="text-sm text-blue-600 dark:text-blue-400 mt-1 ml-6">
-                  {multiOcrTasks.size > 0
-                    ? '辨識結果將自動建立對應的費用明細行'
-                    : '辨識結果將自動填入表單'}
-                </p>
-                {/* 多附件處理狀態列表 */}
-                {multiOcrTasks.size > 0 && (
-                  <div className="mt-3 space-y-1">
-                    {Array.from(multiOcrTasks.entries()).map(([fileIndex, task]) => {
-                      const file = attachments[fileIndex];
-                      return (
-                        <div
-                          key={fileIndex}
-                          className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400"
-                        >
-                          {task.status === 'processing' && (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          )}
-                          {task.status === 'completed' && (
-                            <Check className="h-3 w-3 text-green-600" />
-                          )}
-                          {task.status === 'error' && (
-                            <X className="h-3 w-3 text-red-600" />
-                          )}
-                          <span className="truncate flex-1">
-                            {file?.name || task.fileName}
-                          </span>
-                          <span className="text-blue-500">
-                            {task.status === 'processing' && '處理中...'}
-                            {task.status === 'completed' && '已完成'}
-                            {task.status === 'error' && '失敗'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
             </div>
-          </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Expense Report Lines (表身) - 參考 NetSuite 標準 */}
       {!loadingData && (
@@ -4521,15 +4485,69 @@ export default function OCRExpensePage() {
                           ) : (
                             <Input
                               type="text"
+                              data-field="grossAmt"
                               value={(() => {
-                                if (!line.grossAmt || parseFloat(line.grossAmt) === 0) return '';
+                                const fieldKey = `grossAmt-${index}`;
+                                const isEditing = editingAmountFields.has(fieldKey);
+                                if (isEditing || !line.grossAmt || parseFloat(line.grossAmt) === 0) {
+                                  return line.grossAmt || '';
+                                }
                                 const currency = line.currency || formData.receiptCurrency || 'TWD';
                                 const actualCurrency = formOptions.currencies.find(c => c.symbol === currency || c.name === currency)?.symbol || currency;
                                 return formatAmountDisplay(line.grossAmt, actualCurrency);
                               })()}
-                              readOnly
-                              className="h-7 text-sm text-right bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                              onChange={(e) => {
+                                // 只允許輸入數字和小數點
+                                const inputValue = e.target.value.replace(/[^\d.]/g, '');
+                                const parts = inputValue.split('.');
+                                // 限制小數點後最多 2 位
+                                const cleanedValue = parts.length > 1 
+                                  ? `${parts[0]}.${parts[1].slice(0, 2)}`
+                                  : parts[0];
+                                
+                                const fieldKey = `grossAmt-${index}`;
+                                setEditingAmountFields(prev => new Set(prev).add(fieldKey));
+                                
+                                const parsedValue = parseFloat(cleanedValue) || 0;
+                                const newLines = [...expenseLines];
+                                
+                                // 更新總金額
+                                newLines[index].grossAmt = cleanedValue;
+                                
+                                // 如果總金額改變，需要重新計算金額或稅額
+                                // 優先保持金額不變，調整稅額
+                                const currentAmount = parseFloat(newLines[index].amount || '0') || 0;
+                                const newTaxAmt = Math.max(0, parsedValue - currentAmount).toFixed(2);
+                                newLines[index].taxAmt = newTaxAmt;
+                                
+                                setExpenseLines(newLines);
+                              }}
+                              onFocus={(e) => {
+                                const fieldKey = `grossAmt-${index}`;
+                                setEditingAmountFields(prev => new Set(prev).add(fieldKey));
+                                // 移除格式化，顯示原始數值
+                                const rawValue = expenseLines[index].grossAmt || '';
+                                e.currentTarget.value = rawValue;
+                              }}
+                              onBlur={(e) => {
+                                const fieldKey = `grossAmt-${index}`;
+                                setEditingAmountFields(prev => {
+                                  const newSet = new Set(prev);
+                                  newSet.delete(fieldKey);
+                                  return newSet;
+                                });
+                                // 確保總金額 = 金額 + 稅額
+                                const newLines = [...expenseLines];
+                                const grossAmt = parseFloat(newLines[index].grossAmt || '0') || 0;
+                                const amount = parseFloat(newLines[index].amount || '0') || 0;
+                                const taxAmt = Math.max(0, grossAmt - amount);
+                                newLines[index].taxAmt = taxAmt.toFixed(2);
+                                newLines[index].grossAmt = grossAmt.toFixed(2);
+                                setExpenseLines(newLines);
+                              }}
+                              className="h-7 text-sm text-right"
                               placeholder="0"
+                              title="總金額 = 金額 + 稅額"
                             />
                           )}
                         </TableCell>

@@ -172,10 +172,10 @@ export async function PUT(
       );
     }
 
-    // 只能編輯草稿或待審核的報支
-    if (existingReview.review_status !== 'draft' && existingReview.review_status !== 'pending') {
+    // 只能編輯草稿、待審核或已拒絕的報支（允許重新提交被拒絕的報告）
+    if (existingReview.review_status !== 'draft' && existingReview.review_status !== 'pending' && existingReview.review_status !== 'rejected') {
       return NextResponse.json(
-        { error: '只能編輯草稿或待審核的報支項目' },
+        { error: '只能編輯草稿、待審核或已拒絕的報支項目' },
         { status: 400 }
       );
     }
@@ -229,10 +229,18 @@ export async function PUT(
       updated_at: new Date().toISOString(),
     };
     
-    // 如果提供了 reviewStatus，更新狀態（允許從 draft 改為 pending）
+    // 如果提供了 reviewStatus，更新狀態（允許從 draft 或 rejected 改為 pending）
     if (reviewStatus) {
-      const status = reviewStatus === 'pending' ? 'pending' : 'draft';
-      updateData.review_status = status;
+      if (reviewStatus === 'pending') {
+        // 允許從 draft 或 rejected 改為 pending（重新提交）
+        if (existingReview.review_status === 'draft' || existingReview.review_status === 'rejected') {
+          updateData.review_status = 'pending';
+        }
+        // 如果原本是 pending，保持 pending（不變更）
+      } else {
+        // 其他情況改為 draft
+        updateData.review_status = 'draft';
+      }
     }
     
     const { error: updateHeaderError } = await supabase
@@ -516,34 +524,8 @@ export async function PUT(
       );
     }
 
-    // 5. 計算總金額（加總所有 lines 的 gross_amt）
-    const receiptAmount = linesToInsert.reduce((sum, line) => {
-      return sum + (line.gross_amt || 0);
-    }, 0);
-
-    // 取得主要幣別（使用第一筆 line 的 currency）
-    const receiptCurrency = linesToInsert.length > 0 ? (linesToInsert[0].currency || 'TWD') : 'TWD';
-
-    // 6. 更新表頭的 receipt_amount 和 receipt_currency
-    const { error: updateAmountError } = await supabase
-      .from('expense_reviews')
-      .update({
-        receipt_amount: receiptAmount,
-        receipt_currency: receiptCurrency,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', expenseReviewId);
-
-    if (updateAmountError) {
-      console.error('更新表頭金額錯誤:', updateAmountError);
-      return NextResponse.json(
-        { 
-          error: '更新表頭金額失敗',
-          message: updateAmountError.message || '未知錯誤',
-        },
-        { status: 500 }
-      );
-    }
+    // 5. 注意：receipt_amount 和 receipt_currency 欄位已從 expense_reviews 表移除
+    // 總金額現在只從 expense_lines 的 gross_amt 加總計算，不需要儲存在表頭
 
     // 7. 重新取得更新後的表頭資料
     const { data: updatedHeader, error: headerError } = await supabase
@@ -723,10 +705,10 @@ export async function PATCH(
       );
     }
 
-    // 只能提交草稿狀態的報支
-    if (existingReview.review_status !== 'draft') {
+    // 只能提交草稿或已拒絕狀態的報支（允許重新提交）
+    if (existingReview.review_status !== 'draft' && existingReview.review_status !== 'rejected') {
       return NextResponse.json(
-        { error: '只能提交草稿狀態的報支項目' },
+        { error: '只能提交草稿或已拒絕狀態的報支項目' },
         { status: 400 }
       );
     }
