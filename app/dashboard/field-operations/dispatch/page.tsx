@@ -50,6 +50,7 @@ interface TechnicianLocation {
   longitude: number;
   status: 'online' | 'offline';
   currentWorkOrder?: string;
+  avatar?: string; // 技術人員頭像 URL
 }
 
 export default function DispatchPage() {
