@@ -223,23 +223,107 @@ export function TransformModal({
                       MIN - 最小值
                     </Label>
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="CONCAT" id="concat" />
+                    <Label htmlFor="concat" className="text-xs font-normal">
+                      CONCAT - 字符串拼接
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="JS_EXPRESSION" id="js_expression" />
+                    <Label htmlFor="js_expression" className="text-xs font-normal">
+                      JS EXPRESSION - JavaScript 表達式
+                    </Label>
+                  </div>
                 </RadioGroup>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="groupBy" className="text-xs">
-                  群組欄位（可選）
-                </Label>
-                <Input
-                  id="groupBy"
-                  placeholder="例如：customer_id"
-                  value={config.groupBy || ''}
-                  onChange={(e) =>
-                    setConfig({ ...config, groupBy: e.target.value })
-                  }
-                  className="text-xs"
-                />
-              </div>
+              {/* CONCAT 配置 */}
+              {config.aggregateFunction === 'CONCAT' && (
+                <div className="space-y-2">
+                  <Label htmlFor="separator" className="text-xs">
+                    分隔符（可選）
+                  </Label>
+                  <Input
+                    id="separator"
+                    placeholder="例如：, 或 - 或空格"
+                    value={config.separator || ''}
+                    onChange={(e) =>
+                      setConfig({ ...config, separator: e.target.value })
+                    }
+                    className="text-xs"
+                  />
+                  <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs">
+                    <p className="text-blue-800">
+                      <strong>範例：</strong> 拼接 first_name + last_name
+                      <br />
+                      分隔符：<code> </code>（空格）→ 結果：<code>John Doe</code>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* JS EXPRESSION 配置 */}
+              {config.aggregateFunction === 'JS_EXPRESSION' && (
+                <div className="space-y-2">
+                  <Label htmlFor="jsExpression" className="text-xs">
+                    JavaScript 表達式
+                  </Label>
+                  <Textarea
+                    id="jsExpression"
+                    placeholder="例如：field.substring(0, 3)&#10;或：new Date(field).getFullYear()&#10;或：field.toUpperCase()"
+                    value={config.jsExpression || ''}
+                    onChange={(e) =>
+                      setConfig({ ...config, jsExpression: e.target.value })
+                    }
+                    rows={4}
+                    className="text-xs font-mono"
+                  />
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs space-y-2">
+                    <p className="text-amber-800 font-semibold">常用範例：</p>
+                    <div className="grid grid-cols-2 gap-2 text-amber-800">
+                      <div>
+                        <code className="text-[10px]">field.substring(0, 3)</code>
+                        <br />
+                        <span className="text-[10px]">取前三個字</span>
+                      </div>
+                      <div>
+                        <code className="text-[10px]">field.toUpperCase()</code>
+                        <br />
+                        <span className="text-[10px]">轉大寫</span>
+                      </div>
+                      <div>
+                        <code className="text-[10px]">field.replace(/[^0-9]/g, '')</code>
+                        <br />
+                        <span className="text-[10px]">只保留數字</span>
+                      </div>
+                      <div>
+                        <code className="text-[10px]">new Date(field).getFullYear()</code>
+                        <br />
+                        <span className="text-[10px]">取年份</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 群組欄位 */}
+              {config.aggregateFunction !== 'CONCAT' && config.aggregateFunction !== 'JS_EXPRESSION' && (
+                <div className="space-y-2">
+                  <Label htmlFor="groupBy" className="text-xs">
+                    群組欄位（可選）
+                  </Label>
+                  <Input
+                    id="groupBy"
+                    placeholder="例如：customer_id"
+                    value={config.groupBy || ''}
+                    onChange={(e) =>
+                      setConfig({ ...config, groupBy: e.target.value })
+                    }
+                    className="text-xs"
+                  />
+                </div>
+              )}
             </div>
           </TabsContent>
 

@@ -79,6 +79,13 @@
   opacity: 0.6;
 }
 
+/* Ctrl 多選狀態 */
+.ns-field-item.selected {
+  background: #E3F2FD !important;
+  border-left: 3px solid #2196F3 !important;
+  box-shadow: 0 0 8px rgba(33, 150, 243, 0.3);
+}
+
 .ns-field-item.dragging {
   opacity: 0.5;
 }

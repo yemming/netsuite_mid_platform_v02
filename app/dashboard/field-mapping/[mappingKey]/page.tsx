@@ -62,6 +62,7 @@ export default function FieldMappingDetailPage() {
   const [draggedItem, setDraggedItem] = useState<{ type: 'netsuite' | 'supabase'; data: any } | null>(null);
   const [insertIndicator, setInsertIndicator] = useState<{ mappingId: string; position: 'before' | 'after' } | null>(null);
   const [hoverCompleteMappingId, setHoverCompleteMappingId] = useState<string | null>(null);
+  const [selectedFields, setSelectedFields] = useState<string[]>([]); // Ctrl 多選
 
   /**
    * 載入資料
@@ -301,33 +302,66 @@ export default function FieldMappingDetailPage() {
 
     // Case 1: 拖入 NetSuite 欄位 → 創建半成品映射（等待右側）
     if (netsuiteField) {
-      const nsField = netsuiteFields.find((f) => f.name === netsuiteField);
-      if (!nsField) return;
-
-      // 檢查是否已存在
-      if (mappings.some((m) => m.netsuiteField === netsuiteField)) {
-        showAlert('error', `欄位 ${netsuiteField} 已經映射過了`);
-        return;
-      }
-
-      const newMapping: MappingRule = {
-        id: `${Date.now()}_${Math.random()}`,
-        netsuiteField: nsField.name,
-        supabaseColumn: '', // 空的，等待右側補完
-        netsuiteType: nsField.type || 'text',
-        supabaseType: '',
-        transform: { type: 'direct' },
-        isActive: false, // 未完成的映射設為 inactive
-      };
-
-      // 在指定位置插入
-      const newMappings = [...mappings];
-      newMappings.splice(insertPosition, 0, newMapping);
-      setMappings(newMappings);
+      const isMultiple = e.dataTransfer.getData('isMultiple') === 'true';
       
-      setNetsuiteFields(
-        netsuiteFields.map((f) => (f.name === netsuiteField ? { ...f, isMapped: true } : f))
-      );
+      if (isMultiple) {
+        // Ctrl + 拖曳：多個字段（聚合）
+        const fields = netsuiteField.split(',').map(f => f.trim());
+        
+        const newMapping: MappingRule = {
+          id: `${Date.now()}_${Math.random()}`,
+          netsuiteField: fields.join(', '), // 多個字段用逗號分隔
+          supabaseColumn: '', // 空的，等待右側補完
+          netsuiteType: 'aggregate',
+          supabaseType: '',
+          transform: { type: 'aggregate' }, // 聚合類型
+          isActive: false,
+        };
+
+        // 在指定位置插入
+        const newMappings = [...mappings];
+        newMappings.splice(insertPosition, 0, newMapping);
+        setMappings(newMappings);
+        
+        // 標記所有字段為已映射
+        setNetsuiteFields(
+          netsuiteFields.map((f) => 
+            fields.includes(f.name) ? { ...f, isMapped: true } : f
+          )
+        );
+        
+        // 清空多選狀態
+        setSelectedFields([]);
+      } else {
+        // 普通拖曳：單個字段
+        const nsField = netsuiteFields.find((f) => f.name === netsuiteField);
+        if (!nsField) return;
+
+        // 檢查是否已存在
+        if (mappings.some((m) => m.netsuiteField === netsuiteField)) {
+          showAlert('error', `欄位 ${netsuiteField} 已經映射過了`);
+          return;
+        }
+
+        const newMapping: MappingRule = {
+          id: `${Date.now()}_${Math.random()}`,
+          netsuiteField: nsField.name,
+          supabaseColumn: '', // 空的，等待右側補完
+          netsuiteType: nsField.type || 'text',
+          supabaseType: '',
+          transform: { type: 'direct' },
+          isActive: false, // 未完成的映射設為 inactive
+        };
+
+        // 在指定位置插入
+        const newMappings = [...mappings];
+        newMappings.splice(insertPosition, 0, newMapping);
+        setMappings(newMappings);
+        
+        setNetsuiteFields(
+          netsuiteFields.map((f) => (f.name === netsuiteField ? { ...f, isMapped: true } : f))
+        );
+      }
       // 不顯示提示，避免頁面跳動
       return;
     }
@@ -495,17 +529,46 @@ export default function FieldMappingDetailPage() {
                   netsuiteFields.map((field) => (
                     <div
                       key={field.name}
-                      className={`ns-field-item ${field.isMapped ? 'disabled' : ''}`}
+                      className={`ns-field-item ${field.isMapped ? 'disabled' : ''} ${
+                        selectedFields.includes(field.name) ? 'selected' : ''
+                      }`}
                       draggable={!field.isMapped}
                       onDragStart={(e) => {
                         if (!field.isMapped) {
-                          e.dataTransfer.setData('netsuiteField', field.name);
-                          e.dataTransfer.setData('netsuiteType', field.type || 'text');
+                          // 檢查是否按下 Ctrl 鍵
+                          if (e.ctrlKey || e.metaKey) {
+                            // Ctrl + 拖曳：多選模式
+                            if (!selectedFields.includes(field.name)) {
+                              setSelectedFields([...selectedFields, field.name]);
+                            }
+                            // 傳遞多個字段（用逗號分隔）
+                            const allFields = [...selectedFields, field.name].filter((f, i, arr) => arr.indexOf(f) === i);
+                            e.dataTransfer.setData('netsuiteField', allFields.join(','));
+                            e.dataTransfer.setData('netsuiteType', 'aggregate');
+                            e.dataTransfer.setData('isMultiple', 'true');
+                          } else {
+                            // 普通拖曳：單個字段
+                            setSelectedFields([]); // 清空多選
+                            e.dataTransfer.setData('netsuiteField', field.name);
+                            e.dataTransfer.setData('netsuiteType', field.type || 'text');
+                          }
                         }
                       }}
-                      onClick={() => {
+                      onClick={(e) => {
                         if (!field.isMapped) {
-                          // 點擊自動在最下面排隊
+                          // Ctrl + 點擊：多選模式
+                          if (e.ctrlKey || e.metaKey) {
+                            if (selectedFields.includes(field.name)) {
+                              // 取消選中
+                              setSelectedFields(selectedFields.filter(f => f !== field.name));
+                            } else {
+                              // 加入選中
+                              setSelectedFields([...selectedFields, field.name]);
+                            }
+                            return;
+                          }
+                          
+                          // 普通點擊：自動在最下面排隊
                           const newMapping: MappingRule = {
                             id: `mapping-${Date.now()}-${Math.random()}`,
                             netsuiteField: field.name,
@@ -657,12 +720,29 @@ export default function FieldMappingDetailPage() {
                       <div className="ns-mapping-cell">
                         {mapping.netsuiteField ? (
                           <>
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-xs">{mapping.netsuiteField}</span>
-                              {mapping.netsuiteType && (
-                                <span className={`ns-type-badge ${mapping.netsuiteType}`}>{mapping.netsuiteType}</span>
-                              )}
-                            </div>
+                            {mapping.netsuiteField.includes(',') ? (
+                              // 多個字段（聚合）
+                              <div className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-semibold">AGGREGATE</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {mapping.netsuiteField.split(',').map((field, idx) => (
+                                    <span key={idx} className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">
+                                      {field.trim()}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              // 單個字段
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-medium text-xs">{mapping.netsuiteField}</span>
+                                {mapping.netsuiteType && mapping.netsuiteType !== 'aggregate' && (
+                                  <span className={`ns-type-badge ${mapping.netsuiteType}`}>{mapping.netsuiteType}</span>
+                                )}
+                              </div>
+                            )}
                           </>
                         ) : (
                           <div className="flex items-center gap-2 text-gray-400 text-xs italic">
@@ -671,8 +751,8 @@ export default function FieldMappingDetailPage() {
                         )}
                       </div>
 
-                      {/* 智慧箭頭 */}
-                      <div className="flex items-center justify-center">
+                      {/* 智慧箭頭 + 轉換規則顯示 */}
+                      <div className="flex flex-col items-center justify-center gap-0.5">
                         <button
                           className={`ns-arrow-button ${mapping.transform.type !== 'direct' ? 'has-transform' : ''}`}
                           onClick={() => {
@@ -686,6 +766,33 @@ export default function FieldMappingDetailPage() {
                         >
                           <ArrowLeftRight className="ns-arrow-icon" size={12} />
                         </button>
+                        {/* 顯示轉換規則類型 */}
+                        {mapping.transform.type !== 'direct' && mapping.isActive && (
+                          <div className="text-[9px] text-center">
+                            {mapping.transform.type === 'aggregate' && mapping.transform.config?.aggregateFunction === 'CONCAT' && (
+                              <span className="px-1 py-0.5 bg-green-100 text-green-700 rounded">CONCAT</span>
+                            )}
+                            {mapping.transform.type === 'aggregate' && mapping.transform.config?.aggregateFunction === 'JS_EXPRESSION' && (
+                              <span className="px-1 py-0.5 bg-orange-100 text-orange-700 rounded">JS</span>
+                            )}
+                            {mapping.transform.type === 'aggregate' && 
+                              mapping.transform.config?.aggregateFunction !== 'CONCAT' && 
+                              mapping.transform.config?.aggregateFunction !== 'JS_EXPRESSION' && (
+                              <span className="px-1 py-0.5 bg-purple-100 text-purple-700 rounded">
+                                {mapping.transform.config?.aggregateFunction || 'AGG'}
+                              </span>
+                            )}
+                            {mapping.transform.type === 'default' && (
+                              <span className="px-1 py-0.5 bg-blue-100 text-blue-700 rounded">DEF</span>
+                            )}
+                            {mapping.transform.type === 'vlookup' && (
+                              <span className="px-1 py-0.5 bg-yellow-100 text-yellow-700 rounded">VLOOKUP</span>
+                            )}
+                            {mapping.transform.type === 'expression' && (
+                              <span className="px-1 py-0.5 bg-red-100 text-red-700 rounded">SQL</span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Supabase 欄位 */}
