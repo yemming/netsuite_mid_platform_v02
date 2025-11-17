@@ -643,6 +643,9 @@ export default function FieldMappingDetailPage() {
                       draggable={!field.isMapped}
                       onDragStart={(e) => {
                         if (!field.isMapped) {
+                          // 設置拖拽效果，允許在按住 Ctrl 時拖拽
+                          e.dataTransfer.effectAllowed = 'copyMove';
+                          
                           // 檢查是否按下 Ctrl 鍵
                           if (e.ctrlKey || e.metaKey) {
                             // Ctrl + 拖曳：多選模式
@@ -800,6 +803,7 @@ export default function FieldMappingDetailPage() {
                           className="ns-insert-gap"
                           onDragOver={(e) => {
                             e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move'; // 允許在按住 Ctrl 時放下
                             e.currentTarget.classList.add('drag-over');
                           }}
                           onDragLeave={(e) => {
@@ -832,6 +836,7 @@ export default function FieldMappingDetailPage() {
                           }}
                           onDragOver={(e) => {
                             e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move'; // 允許在按住 Ctrl 時放下
                             
                             const netsuiteField = e.dataTransfer.types.includes('netsuiteField');
                             
@@ -1096,6 +1101,8 @@ export default function FieldMappingDetailPage() {
                         draggable={!isMapped}
                         onDragStart={(e) => {
                           if (!isMapped) {
+                            // 設置拖拽效果，允許在按住 Ctrl 時拖拽
+                            e.dataTransfer.effectAllowed = 'copyMove';
                             e.dataTransfer.setData('supabaseColumn', column.name);
                             e.dataTransfer.setData('supabaseType', column.type);
                           }
