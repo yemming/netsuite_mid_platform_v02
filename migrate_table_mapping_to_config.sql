@@ -5,7 +5,8 @@
 -- ============================================
 
 -- 清除現有資料（如果有的話）
-TRUNCATE TABLE table_mapping_config;
+-- 注意：field_mapping_config 有外鍵引用此表，需要使用 CASCADE
+TRUNCATE TABLE field_mapping_config, table_mapping_config CASCADE;
 
 -- 插入所有表映射配置
 -- 注意：sync_order 是根據優先級和依賴關係設定的

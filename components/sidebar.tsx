@@ -54,7 +54,8 @@ import {
   QrCode,
   Monitor,
   Grid3x3,
-  TrendingUp
+  TrendingUp,
+  Upload
 } from 'lucide-react'
 
 interface MenuItem {
@@ -80,6 +81,12 @@ const mainNavigation: MenuItem[] = [
     name: 'SuiteQL 查詢',
     href: '/dashboard/query',
     icon: Search,
+  },
+  {
+    name: 'ETL 視覺化匯入',
+    href: '/dashboard/etl-import',
+    icon: Upload,
+    badge: 'NEW'
   },
 ]
 
@@ -593,6 +600,22 @@ const privatePages: MenuItem[] = [
     ],
   },
   {
+    name: 'NetSuite 資料備份',
+    icon: Database,
+    children: [
+      {
+        name: '欄位映射管理',
+        href: '/dashboard/field-mapping',
+        icon: Share2,
+      },
+      {
+        name: 'n8n 同步管理',
+        href: '/dashboard/n8n-sync',
+        icon: ArrowRightLeft,
+      },
+    ],
+  },
+  {
     name: 'Next.JS工具箱',
     icon: Wrench,
     children: [
@@ -750,8 +773,8 @@ export default function Sidebar() {
         {/* Sidebar Content */}
         <div className="flex flex-col h-full overflow-hidden">
           {/* Top Section - User & Workspace - Sticky to match header */}
-          <div className="sticky top-[6px] z-50 bg-card">
-            <div className="flex items-center gap-1 px-6 h-[38px] border-b border-border">
+          <div className="sticky top-[6px] z-50 bg-white dark:bg-background">
+            <div className="flex items-center gap-1 px-6 h-[38px]">
             <div className="flex-shrink-0" style={{ width: '30px', height: '30px', marginLeft: '-16px' }}>
               {/* 亮色模式：綠色 logo */}
               <img

@@ -1,0 +1,574 @@
+/* NetSuite Import Assistant 風格樣式 */
+
+:root {
+  --ns-blue-dark: #2D4466;
+  --ns-blue-light: #E0E6F0;
+  --ns-blue-header: #F0F2F5;
+  --ns-text-dark: #333333;
+  --ns-text-light: #666666;
+  --ns-border: #CCCCCC;
+  --ns-bg-white: #FFFFFF;
+  --ns-bg-gray: #F8F8F8;
+  --ns-arrow-blue: #4A90E2;
+  --ns-green: #2ECC71;
+  --ns-red: #E74C3C;
+}
+
+/* NetSuite 字體設定 */
+.ns-font {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  color: var(--ns-text-dark);
+  line-height: 1.5;
+}
+
+/* NetSuite Header */
+.ns-header {
+  background: linear-gradient(to bottom, var(--ns-blue-light), var(--ns-blue-header));
+  border-bottom: 1px solid var(--ns-border);
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--ns-text-dark);
+  font-size: 13px;
+  flex-shrink: 0; /* 固定不縮小，確保三欄等高 */
+}
+
+/* NetSuite 面板 */
+.ns-panel {
+  background: var(--ns-bg-white);
+  border: 1px solid var(--ns-border);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* 確保面板填滿父容器，三欄等高 */
+  min-height: 0; /* 確保可以正確滾動 */
+}
+
+/* NetSuite 欄位項目 */
+.ns-field-item {
+  padding: 0 10px; /* 只保留左右 padding，移除上下 padding */
+  border-bottom: 1px solid #EEEEEE;
+  cursor: move;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px; /* 字體放大一階 */
+  height: 30px; /* 跟中間一樣 30px */
+  min-height: 30px;
+  max-height: 30px;
+  box-sizing: border-box;
+}
+
+.ns-field-item:not(.disabled) {
+  cursor: pointer; /* 顯示可點擊 */
+}
+
+.ns-field-item:hover:not(.disabled) {
+  background: #E3F2FD; /* 淡藍色背景 */
+  border-left: 3px solid #2196F3; /* 藍色左邊框 */
+  transform: translateX(2px); /* 微微向右移動 */
+  transition: all 0.15s ease;
+}
+
+.ns-field-item.disabled {
+  color: #999999;
+  cursor: not-allowed;
+  background: #F8F8F8;
+  opacity: 0.6;
+}
+
+.ns-field-item.dragging {
+  opacity: 0.5;
+}
+
+/* NetSuite 圖示 */
+.ns-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.ns-icon.field {
+  color: #8B9DC3;
+}
+
+.ns-icon.mapped {
+  color: var(--ns-green);
+}
+
+.ns-icon.warning {
+  color: #F39C12;
+}
+
+/* NetSuite 映射行（表格式） */
+.ns-mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 1fr 40px;
+  gap: 0; /* 移除 gap，改用邊框分隔 */
+  padding: 0;
+  border-bottom: 1px solid #D5D5D5; /* NetSuite 的灰色分隔線 */
+  align-items: center; /* 垂直置中 */
+  transition: all 0.2s ease;
+  height: 30px; /* 保持原來的 30px */
+  min-height: 30px;
+  max-height: 30px;
+  box-sizing: border-box;
+}
+
+.ns-mapping-row:hover {
+  background: #F9F9F9;
+}
+
+/* 插入提示 - 在行的上方插入 */
+.ns-mapping-row.insert-before {
+  border-top: 3px solid #2196F3 !important;
+  box-shadow: 0 -3px 8px rgba(33, 150, 243, 0.3);
+  transition: all 0.15s ease;
+}
+
+/* 插入提示 - 在行的下方插入 */
+.ns-mapping-row.insert-after {
+  border-bottom: 3px solid #2196F3 !important;
+  box-shadow: 0 3px 8px rgba(33, 150, 243, 0.3);
+  transition: all 0.15s ease;
+}
+
+/* 未完成的映射（等待拖入） */
+.ns-mapping-row.incomplete {
+  background: #FFFBF0; /* 淡黃色背景 */
+  border-left: 3px solid #FFA500; /* 橙色左邊框標記 */
+}
+
+/* 拖拽懸停在未完成的映射上（準備補完） */
+.ns-mapping-row.incomplete.hover-complete {
+  background: #E3F2FD !important; /* 淡藍色背景 */
+  border: 2px solid #2196F3 !important; /* 藍色邊框 */
+  border-left: 3px solid #2196F3 !important; /* 保持左邊框但改成藍色 */
+  box-shadow: 0 0 12px rgba(33, 150, 243, 0.4); /* 藍色外發光 */
+  transform: scale(1.02); /* 微微放大 */
+  transition: all 0.15s ease;
+}
+
+.ns-mapping-row.incomplete:hover {
+  background: #FFF8E1;
+  border-color: #FF8C00;
+}
+
+/* 每個格子 */
+.ns-mapping-row > div {
+  border-right: 1px solid #E5E5E5; /* 垂直分隔線 */
+  padding: 0 10px; /* 只保留左右 padding，移除上下 padding */
+  display: flex;
+  align-items: center;
+  height: 100%; /* 填滿父容器高度 */
+  box-sizing: border-box;
+}
+
+.ns-mapping-row > div:last-child {
+  border-right: none; /* 最後一格不需要右邊框 */
+}
+
+/* 淡入動畫 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.05s ease-out; /* 超快：0.05s */
+}
+
+/* 滑下動畫 */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.15s ease-out; /* 快兩倍：0.3s → 0.15s */
+}
+
+.ns-mapping-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0; /* 確保沒有額外 padding */
+  font-size: 13px; /* 字體放大一階 */
+  color: var(--ns-text-dark);
+  width: 100%; /* 填滿格子 */
+  height: 100%; /* 填滿父容器 */
+  box-sizing: border-box;
+}
+
+.ns-mapping-cell code {
+  background: #F0F2F5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+/* NetSuite 智慧箭頭（小長方形按鈕） */
+.ns-arrow-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 16px;
+  background: transparent;
+  border: 1px solid #D5D5D5;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.ns-arrow-button:hover:not(:disabled) {
+  background: var(--ns-bg-light);
+  border-color: var(--ns-arrow-blue);
+}
+
+.ns-arrow-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.ns-arrow-button.has-transform {
+  background: var(--ns-blue-light);
+  border-color: var(--ns-arrow-blue);
+}
+
+.ns-arrow-icon {
+  color: #888888;
+  transition: color 0.2s;
+}
+
+.ns-arrow-button:hover:not(:disabled) .ns-arrow-icon {
+  color: var(--ns-arrow-blue);
+}
+
+.ns-arrow-button.has-transform .ns-arrow-icon {
+  color: var(--ns-arrow-blue);
+}
+
+/* NetSuite 刪除按鈕 */
+.ns-delete-button {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.2s;
+  color: var(--ns-text-light);
+}
+
+.ns-delete-button:hover {
+  background: #FFE6E6;
+  color: var(--ns-red);
+}
+
+/* NetSuite 拖放區域 */
+.ns-drop-zone {
+  min-height: 60px;
+  border: 2px dashed var(--ns-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--ns-text-light);
+  font-size: 12px;
+  transition: all 0.2s;
+  background: var(--ns-bg-gray);
+}
+
+.ns-drop-zone.drag-over {
+  border-color: var(--ns-arrow-blue);
+  background: #F0F8FF;
+  color: var(--ns-arrow-blue);
+}
+
+/* NetSuite 型別徽章 */
+.ns-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px; /* 字體放大一階 */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ns-type-badge.text {
+  background: #E8F5E9;
+  color: #2E7D32;
+}
+
+.ns-type-badge.integer,
+.ns-type-badge.numeric {
+  background: #E3F2FD;
+  color: #1565C0;
+}
+
+.ns-type-badge.boolean {
+  background: #F3E5F5;
+  color: #6A1B9A;
+}
+
+.ns-type-badge.date,
+.ns-type-badge.timestamp {
+  background: #FFF3E0;
+  color: #E65100;
+}
+
+/* NetSuite 步驟指示器 */
+.ns-steps {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  background: var(--ns-bg-white);
+  border-bottom: 2px solid var(--ns-border);
+}
+
+.ns-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ns-text-light);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ns-step-number {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #EEEEEE;
+  color: var(--ns-text-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ns-step.active {
+  color: var(--ns-arrow-blue);
+}
+
+.ns-step.active .ns-step-number {
+  background: var(--ns-arrow-blue);
+  color: white;
+}
+
+.ns-step.completed .ns-step-number {
+  background: var(--ns-green);
+  color: white;
+}
+
+/* NetSuite 三欄佈局 */
+.ns-three-column {
+  display: grid;
+  grid-template-columns: 240px minmax(650px, 750px) 240px; /* 左右更窄（240px），中間更寬 */
+  gap: 16px;
+  height: calc(100vh - 250px); /* 給更多空間給標題和提示 */
+  padding: 16px;
+  justify-content: center;
+  max-height: calc(100vh - 250px); /* 確保不會超出視窗 */
+  align-items: stretch; /* 確保子元素等高 */
+}
+
+.ns-column {
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* 所有欄位都是 100% 高度 */
+  overflow: hidden;
+  min-height: 0; /* 確保可以正確滾動 */
+}
+
+.ns-column-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0; /* 重要：讓 flex child 可以正確滾動 */
+}
+
+/* 捲軸樣式（更細緻，更像 NetSuite） */
+.ns-column-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ns-column-body::-webkit-scrollbar-track {
+  background: #F5F5F5;
+  border-left: 1px solid #E0E0E0;
+}
+
+.ns-column-body::-webkit-scrollbar-thumb {
+  background: #CCCCCC;
+  border-radius: 5px;
+  border: 2px solid #F5F5F5;
+}
+
+.ns-column-body::-webkit-scrollbar-thumb:hover {
+  background: #999999;
+}
+
+.ns-column-body::-webkit-scrollbar-thumb:active {
+  background: #777777;
+}
+
+/* NetSuite 空狀態（表格式空行） */
+.ns-empty-state {
+  padding: 24px;
+  text-align: center;
+  color: var(--ns-text-light);
+  border-bottom: 1px solid #E5E5E5;
+}
+
+/* 插入間隙（映射之間的可拖入區域） */
+.ns-insert-gap {
+  height: 4px;
+  background: transparent;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.ns-insert-gap:hover {
+  height: 32px;
+  background: #F0F8FF;
+}
+
+.ns-insert-gap.drag-over {
+  height: 45px;
+  background: #E3F2FD !important;
+  border-top: 3px solid #2196F3;
+  border-bottom: 3px solid #2196F3;
+  box-shadow: 0 0 8px rgba(33, 150, 243, 0.3);
+  transition: all 0.15s ease;
+}
+
+.ns-insert-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ns-insert-gap:hover .ns-insert-hint,
+.ns-insert-gap.drag-over .ns-insert-hint {
+  opacity: 1;
+}
+
+/* Drop Zone 空白行（預留區域） */
+.ns-drop-placeholder {
+  display: grid;
+  grid-template-columns: 1fr 80px 1fr 40px;
+  gap: 0;
+  height: 30px; /* 跟中間一樣 30px */
+  min-height: 30px;
+  max-height: 30px;
+  border-bottom: 1px solid #E5E5E5;
+  background: #FAFAFA;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.ns-drop-placeholder:hover {
+  background: #F0F8FF;
+  border-color: #B8D4F1;
+}
+
+.ns-drop-placeholder.drag-over {
+  background: #E3F2FD !important;
+  border: 2px solid #2196F3 !important;
+  border-left: none;
+  border-right: none;
+  box-shadow: 0 0 0 2px #2196F3;
+  transform: scale(1.01);
+  transition: all 0.15s ease;
+}
+
+/* 空白格子 */
+.ns-drop-placeholder > div {
+  border-right: 1px solid #E5E5E5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #BBBBBB;
+  font-size: 12px; /* 字體放大一階 */
+  padding: 0 12px; /* 只保留左右 padding */
+  height: 100%; /* 填滿父容器高度 */
+  box-sizing: border-box;
+}
+
+.ns-drop-placeholder > div:last-child {
+  border-right: none;
+}
+
+.ns-empty-state-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  color: #CCCCCC;
+}
+
+.ns-empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ns-text-dark);
+  margin-bottom: 8px;
+}
+
+.ns-empty-state-description {
+  font-size: 12px;
+  color: var(--ns-text-light);
+}
+
+/* NetSuite 統計資訊 */
+.ns-stats {
+  display: flex;
+  gap: 24px;
+  padding: 12px 16px;
+  background: var(--ns-bg-gray);
+  border-top: 1px solid var(--ns-border);
+  font-size: 12px;
+  color: var(--ns-text-light);
+  flex-shrink: 0; /* 固定不縮小，確保三欄等高 */
+}
+
+.ns-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ns-stat-value {
+  font-weight: 600;
+  color: var(--ns-text-dark);
+}
+

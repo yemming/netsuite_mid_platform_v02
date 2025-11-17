@@ -133,9 +133,9 @@ export default function DashboardLayout({
       <Sidebar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-background">
+      <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-background">
         {/* Top Navbar - Fixed header aligned with sidebar */}
-        <nav className="sticky top-[6px] z-50 bg-muted/50 border-b border-border">
+        <nav className="sticky top-[6px] z-50 bg-white dark:bg-background">
           <div className="flex items-center gap-2 px-6 h-[38px] justify-end">
             <div className="flex items-center gap-1 flex-shrink-0">
               <ThemeToggle />

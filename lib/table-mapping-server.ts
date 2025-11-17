@@ -30,6 +30,7 @@ export async function loadTableMappingsFromDB(): Promise<TableMapping[] | null> 
     }
     
     // 轉換為 TableMapping 格式
+    // 注意：我們需要保留 mapping_key 以便在 API 中使用
     return data.map((row: any) => ({
       tableName: row.supabase_table_name,
       label: row.label,
@@ -41,7 +42,9 @@ export async function loadTableMappingsFromDB(): Promise<TableMapping[] | null> 
       netsuiteTable: row.netsuite_table,
       dependsOn: row.depends_on || [],
       syncOrder: row.sync_order,
-    }));
+      // 保留 mapping_key 以便在 API 中使用（雖然不在 TableMapping 介面中，但我們可以擴展）
+      mappingKey: row.mapping_key,
+    } as TableMapping & { mappingKey?: string }));
   } catch (error) {
     console.warn('無法從資料庫讀取表映射配置，使用 fallback:', error);
     return null;

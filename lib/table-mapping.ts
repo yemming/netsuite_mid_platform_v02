@@ -196,10 +196,13 @@ export const TABLE_MAPPING: Record<string, TableMapping> = {
  * 
  * 注意：此函數會嘗試從資料庫讀取，但如果在客戶端或 build 時執行，會自動 fallback
  */
-export async function getAllTableMappings(): Promise<TableMapping[]> {
-  // 客戶端直接返回 hard code 配置
+export async function getAllTableMappings(): Promise<(TableMapping & { mappingKey?: string })[]> {
+  // 客戶端直接返回 hard code 配置（加上 mappingKey）
   if (typeof window !== 'undefined') {
-    return Object.values(TABLE_MAPPING);
+    return Object.entries(TABLE_MAPPING).map(([key, mapping]) => ({
+      ...mapping,
+      mappingKey: key, // 使用 key 作為 mapping_key
+    }));
   }
   
   try {
@@ -215,8 +218,11 @@ export async function getAllTableMappings(): Promise<TableMapping[]> {
     // 不輸出錯誤，因為這是預期的行為
   }
   
-  // Fallback 到 hard code 配置
-  return Object.values(TABLE_MAPPING);
+  // Fallback 到 hard code 配置（加上 mappingKey）
+  return Object.entries(TABLE_MAPPING).map(([key, mapping]) => ({
+    ...mapping,
+    mappingKey: key, // 使用 key 作為 mapping_key
+  }));
 }
 
 /**
