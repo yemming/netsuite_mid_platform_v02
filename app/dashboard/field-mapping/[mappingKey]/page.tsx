@@ -46,7 +46,7 @@ export default function FieldMappingDetailPage() {
 
   // 表資訊
   const [tableInfo, setTableInfo] = useState<{ label: string; supabaseTable: string; netsuiteTable?: string } | null>(null);
-
+  
   // 欄位列表
   const [netsuiteFields, setNetsuiteFields] = useState<NetSuiteField[]>([]);
   const [supabaseColumns, setSupabaseColumns] = useState<SupabaseColumn[]>([]);
@@ -78,7 +78,7 @@ export default function FieldMappingDetailPage() {
       const tableResponse = await fetch('/api/table-mapping');
       const tableResult = await tableResponse.json();
       const currentTable = tableResult.data?.mappings?.find((t: any) => t.mapping_key === mappingKey);
-
+      
       if (currentTable) {
         setTableInfo({
           label: currentTable.label,
@@ -90,7 +90,7 @@ export default function FieldMappingDetailPage() {
       // 2. 載入 NetSuite 欄位
       const nsResponse = await fetch(`/api/field-mapping/netsuite-fields?mappingKey=${mappingKey}`);
       const nsResult = await nsResponse.json();
-
+      
       if (nsResult.success && nsResult.data?.fields) {
         setNetsuiteFields(
           nsResult.data.fields.map((f: any) => ({
@@ -243,8 +243,8 @@ export default function FieldMappingDetailPage() {
       const savePromises = mappings.map(async (mapping) => {
         const payload = {
           mappingKey,
-          netsuiteFieldName: mapping.netsuiteField,
-          supabaseColumnName: mapping.supabaseColumn,
+              netsuiteFieldName: mapping.netsuiteField,
+              supabaseColumnName: mapping.supabaseColumn,
           supabaseColumnType: mapping.supabaseType,
           transformationRule: mapping.transform,
           isCustomField: netsuiteFields.find((f) => f.name === mapping.netsuiteField)?.isCustom || false,
@@ -456,7 +456,7 @@ export default function FieldMappingDetailPage() {
   };
 
   if (loading) {
-    return (
+  return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
       </div>
@@ -468,18 +468,18 @@ export default function FieldMappingDetailPage() {
       {/* NetSuite 風格的 Header */}
       <div className="bg-white border-b-2 border-gray-300 shadow-sm">
         <div className="max-w-[1600px] mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" onClick={() => router.back()}>
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                返回
-              </Button>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            返回
+          </Button>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Field Mapping</h1>
                 <p className="text-sm text-gray-600 mt-1">
                   {tableInfo?.label || mappingKey} ({mappings.length} 個映射)
                 </p>
-              </div>
+        </div>
             </div>
 
             <div className="flex items-center gap-3">
@@ -489,8 +489,8 @@ export default function FieldMappingDetailPage() {
                 onClick={() => window.open('https://system.netsuite.com/help/helpcenter/en_US/srbrowser/Browser2023_2/schema/record/subsidiary.html', '_blank')}
               >
                 <HelpCircle className="h-4 w-4 mr-2" />
-                Get help with creating Field Mapping
-              </Button>
+            Get help with creating Field Mapping
+          </Button>
 
               <Button onClick={handleSave} disabled={saving || mappings.length === 0} size="sm">
                 {saving ? (
@@ -501,12 +501,12 @@ export default function FieldMappingDetailPage() {
                 ) : (
                   <>
                     <Save className="h-4 w-4 mr-2" />
-                    儲存 ({mappings.length})
+            儲存 ({mappings.length})
                   </>
                 )}
-              </Button>
-            </div>
-          </div>
+          </Button>
+        </div>
+      </div>
 
           {/* Alert - 已移除，避免頁面跳動 */}
         </div>
@@ -546,6 +546,32 @@ export default function FieldMappingDetailPage() {
                             e.dataTransfer.setData('netsuiteField', allFields.join(','));
                             e.dataTransfer.setData('netsuiteType', 'aggregate');
                             e.dataTransfer.setData('isMultiple', 'true');
+                            
+                            // 創建自定義拖拽預覽（顯示多選的字段）
+                            const dragPreview = document.createElement('div');
+                            dragPreview.style.cssText = `
+                              position: absolute;
+                              top: -9999px;
+                              padding: 8px 12px;
+                              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                              color: white;
+                              border-radius: 6px;
+                              font-size: 12px;
+                              font-weight: 600;
+                              box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                              z-index: 9999;
+                            `;
+                            dragPreview.innerHTML = `
+                              <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="background: rgba(255,255,255,0.3); padding: 2px 6px; border-radius: 3px;">
+                                  ${allFields.length} 個欄位
+                                </span>
+                                <span>${allFields.slice(0, 3).join(', ')}${allFields.length > 3 ? '...' : ''}</span>
+                              </div>
+                            `;
+                            document.body.appendChild(dragPreview);
+                            e.dataTransfer.setDragImage(dragPreview, 0, 0);
+                            setTimeout(() => document.body.removeChild(dragPreview), 0);
                           } else {
                             // 普通拖曳：單個字段
                             setSelectedFields([]); // 清空多選
@@ -613,11 +639,11 @@ export default function FieldMappingDetailPage() {
                   <div className="ns-stat">
                     <span>總欄位：</span>
                     <span className="ns-stat-value">{netsuiteFields.length}</span>
-                  </div>
+            </div>
                   <div className="ns-stat">
                     <span>已映射：</span>
                     <span className="ns-stat-value">{netsuiteFields.filter((f) => f.isMapped).length}</span>
-                  </div>
+              </div>
                 </div>
               )}
             </div>
@@ -629,7 +655,7 @@ export default function FieldMappingDetailPage() {
               <div className="ns-header">Field Mapping ({mappings.length})</div>
 
               <div className="ns-column-body">
-                {mappings.length === 0 ? (
+              {mappings.length === 0 ? (
                   <div className="ns-empty-state">
                     <div className="ns-empty-state-icon">
                       <ArrowLeft size={64} strokeWidth={1} style={{ transform: 'rotate(180deg)' }} />
@@ -638,8 +664,8 @@ export default function FieldMappingDetailPage() {
                     <div className="ns-empty-state-description">
                       從左側或右側拖曳欄位到下方空白行
                     </div>
-                  </div>
-                ) : (
+                </div>
+              ) : (
                   <>
                     {mappings.map((mapping, index) => (
                       <React.Fragment key={mapping.id}>
@@ -722,15 +748,23 @@ export default function FieldMappingDetailPage() {
                           <>
                             {mapping.netsuiteField.includes(',') ? (
                               // 多個字段（聚合）
-                              <div className="flex flex-col gap-0.5">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-semibold">AGGREGATE</span>
+                              <div className="flex flex-col gap-1 w-full">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 rounded font-semibold">
+                                    AGGREGATE
+                                  </span>
+                                  <span className="text-[10px] text-gray-500">
+                                    ({mapping.netsuiteField.split(',').length} 個欄位)
+                                  </span>
                                 </div>
-                                <div className="flex flex-wrap gap-1">
+                                <div className="flex flex-col gap-0.5">
                                   {mapping.netsuiteField.split(',').map((field, idx) => (
-                                    <span key={idx} className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">
-                                      {field.trim()}
-                                    </span>
+                                    <div key={idx} className="flex items-center gap-1.5">
+                                      <span className="text-[10px] text-gray-400">{idx + 1}.</span>
+                                      <span className="text-[11px] px-2 py-0.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded font-medium border border-blue-200">
+                                        {field.trim()}
+                                      </span>
+                                    </div>
                                   ))}
                                 </div>
                               </div>
@@ -740,8 +774,8 @@ export default function FieldMappingDetailPage() {
                                 <span className="font-medium text-xs">{mapping.netsuiteField}</span>
                                 {mapping.netsuiteType && mapping.netsuiteType !== 'aggregate' && (
                                   <span className={`ns-type-badge ${mapping.netsuiteType}`}>{mapping.netsuiteType}</span>
-                                )}
-                              </div>
+              )}
+            </div>
                             )}
                           </>
                         ) : (
@@ -749,7 +783,7 @@ export default function FieldMappingDetailPage() {
                             <span>← 拖入左側欄位</span>
                           </div>
                         )}
-                      </div>
+          </div>
 
                       {/* 智慧箭頭 + 轉換規則顯示 */}
                       <div className="flex flex-col items-center justify-center gap-0.5">
@@ -791,9 +825,9 @@ export default function FieldMappingDetailPage() {
                             {mapping.transform.type === 'expression' && (
                               <span className="px-1 py-0.5 bg-red-100 text-red-700 rounded">SQL</span>
                             )}
-                          </div>
+            </div>
                         )}
-                      </div>
+              </div>
 
                       {/* Supabase 欄位 */}
                       <div className="ns-mapping-cell">
@@ -828,7 +862,7 @@ export default function FieldMappingDetailPage() {
                   // 底部只保留一個空白插入行
                   const insertPosition = mappings.length + index;
                   
-                  return (
+                    return (
                     <div
                       key={`placeholder-${index}`}
                       className="ns-drop-placeholder"
@@ -856,9 +890,9 @@ export default function FieldMappingDetailPage() {
                       </div>
                       <div></div>
                     </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
 
               {/* 統計資訊 */}
               {mappings.length > 0 && (
@@ -866,12 +900,12 @@ export default function FieldMappingDetailPage() {
                   <div className="ns-stat">
                     <span>總映射數：</span>
                     <span className="ns-stat-value">{mappings.length}</span>
-                  </div>
+            </div>
                   <div className="ns-stat">
                     <span>有轉換規則：</span>
                     <span className="ns-stat-value">{mappings.filter((m) => m.transform.type !== 'direct').length}</span>
-                  </div>
-                </div>
+          </div>
+        </div>
               )}
             </div>
           </div>
@@ -904,7 +938,7 @@ export default function FieldMappingDetailPage() {
                             e.dataTransfer.setData('supabaseType', column.type);
                           }
                         }}
-                        onClick={() => {
+              onClick={() => {
                           if (!isMapped) {
                             // 點擊自動在最下面排隊
                             const newMapping: MappingRule = {
