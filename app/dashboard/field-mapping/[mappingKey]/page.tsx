@@ -62,6 +62,7 @@ export default function FieldMappingDetailPage() {
   const [draggedItem, setDraggedItem] = useState<{ type: 'netsuite' | 'supabase'; data: any } | null>(null);
   const [insertIndicator, setInsertIndicator] = useState<{ mappingId: string; position: 'before' | 'after' } | null>(null);
   const [hoverCompleteMappingId, setHoverCompleteMappingId] = useState<string | null>(null);
+  const [hoverAddAggregateMappingId, setHoverAddAggregateMappingId] = useState<string | null>(null); // 拖拽到聚合映射
   const [selectedFields, setSelectedFields] = useState<string[]>([]); // Ctrl 多選
 
   /**
@@ -335,6 +336,63 @@ export default function FieldMappingDetailPage() {
         )
       );
     }
+  };
+
+  /**
+   * 添加字段到已存在的聚合映射
+   */
+  const handleAddToAggregate = (e: React.DragEvent, mappingId: string) => {
+    const netsuiteField = e.dataTransfer.getData('netsuiteField');
+    if (!netsuiteField) return false; // 只支援添加 NetSuite 字段
+
+    const mapping = mappings.find(m => m.id === mappingId);
+    if (!mapping) return false;
+
+    // 檢查是否是多選（已經是聚合的多個字段）
+    const isMultiple = e.dataTransfer.getData('isMultiple') === 'true';
+    const newFields = netsuiteField.split(',').map(f => f.trim());
+
+    // 獲取現有字段
+    const existingFields = mapping.netsuiteField 
+      ? mapping.netsuiteField.split(',').map(f => f.trim()).filter(f => f)
+      : [];
+
+    // 合併字段，去重
+    const allFields = [...existingFields, ...newFields].filter((f, i, arr) => arr.indexOf(f) === i);
+
+    // 如果只有一個字段，不是聚合
+    if (allFields.length === 1) {
+      const updatedMapping = {
+        ...mapping,
+        netsuiteField: allFields[0],
+        netsuiteType: netsuiteFields.find(f => f.name === allFields[0])?.type || 'text',
+        transform: { type: 'direct' as const },
+        isActive: mapping.supabaseColumn ? true : false, // 如果有目標欄位就是完成的
+      };
+      setMappings(mappings.map(m => m.id === mappingId ? updatedMapping : m));
+    } else {
+      // 多個字段，保持或轉為聚合
+      const updatedMapping = {
+        ...mapping,
+        netsuiteField: allFields.join(', '),
+        netsuiteType: 'aggregate',
+        transform: { type: 'aggregate' as const },
+        isActive: mapping.supabaseColumn ? true : false,
+      };
+      setMappings(mappings.map(m => m.id === mappingId ? updatedMapping : m));
+    }
+
+    // 標記新增字段為已映射
+    setNetsuiteFields(
+      netsuiteFields.map(f => 
+        newFields.includes(f.name) ? { ...f, isMapped: true } : f
+      )
+    );
+
+    // 清空多選狀態
+    setSelectedFields([]);
+
+    return true; // 表示已處理
   };
 
   /**
@@ -765,6 +823,8 @@ export default function FieldMappingDetailPage() {
                             insertIndicator?.mappingId === mapping.id && insertIndicator.position === 'after' ? 'insert-after' : ''
                           } ${
                             hoverCompleteMappingId === mapping.id ? 'hover-complete' : ''
+                          } ${
+                            hoverAddAggregateMappingId === mapping.id ? 'hover-add-aggregate' : ''
                           }`}
                           style={{ 
                             animationDelay: index < 10 ? `${index * 0.01}s` : '0s', // 前10行有微小延迟，新增的立刻出現
@@ -772,14 +832,27 @@ export default function FieldMappingDetailPage() {
                           }}
                           onDragOver={(e) => {
                             e.preventDefault();
+                            
+                            const netsuiteField = e.dataTransfer.types.includes('netsuiteField');
+                            
+                            // 檢查是否拖拽到聚合映射（準備添加字段）
+                            if (netsuiteField && (mapping.netsuiteField?.includes(',') || mapping.netsuiteType === 'aggregate')) {
+                              setInsertIndicator(null);
+                              setHoverCompleteMappingId(null);
+                              setHoverAddAggregateMappingId(mapping.id);
+                              return;
+                            }
+                            
                             // 如果是未完成的映射，顯示藍色框框（補完映射提示）
                             if (!mapping.isActive) {
                               setInsertIndicator(null);
+                              setHoverAddAggregateMappingId(null);
                               setHoverCompleteMappingId(mapping.id);
                               return;
                             }
                             // 否則計算插入位置
                             setHoverCompleteMappingId(null);
+                            setHoverAddAggregateMappingId(null);
                             const rect = e.currentTarget.getBoundingClientRect();
                             const y = e.clientY - rect.top;
                             const position = y < rect.height / 2 ? 'before' : 'after';
@@ -792,12 +865,23 @@ export default function FieldMappingDetailPage() {
                             if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
                               setInsertIndicator(null);
                               setHoverCompleteMappingId(null);
+                              setHoverAddAggregateMappingId(null);
                             }
                           }}
                           onDrop={(e) => {
                             e.preventDefault();
                             setInsertIndicator(null);
                             setHoverCompleteMappingId(null);
+                            setHoverAddAggregateMappingId(null);
+                            
+                            const netsuiteField = e.dataTransfer.getData('netsuiteField');
+                            
+                            // 檢查是否要添加到聚合映射
+                            if (netsuiteField && (mapping.netsuiteField?.includes(',') || mapping.netsuiteType === 'aggregate')) {
+                              // 拖拽 NetSuite 字段到聚合映射 → 添加到聚合列表
+                              const added = handleAddToAggregate(e, mapping.id);
+                              if (added) return; // 已處理，不繼續
+                            }
                             
                             // 如果是未完成的映射，嘗試補完
                             if (!mapping.isActive) {

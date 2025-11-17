@@ -161,6 +161,16 @@
   border-color: #FF8C00;
 }
 
+/* 拖拽到聚合映射時的效果（準備添加到聚合列表） */
+.ns-mapping-row.hover-add-aggregate {
+  background: linear-gradient(90deg, #F3E5F5 0%, #E1BEE7 100%) !important;
+  border: 2px solid #9C27B0 !important;
+  border-left: 3px solid #9C27B0 !important;
+  box-shadow: 0 0 12px rgba(156, 39, 176, 0.3);
+  transform: scale(1.01);
+  transition: all 0.15s ease;
+}
+
 /* 每個格子 */
 .ns-mapping-row > div {
   border-right: 1px solid #E5E5E5; /* 垂直分隔線 */
