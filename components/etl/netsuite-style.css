@@ -54,7 +54,7 @@
   display: flex;
   align-items: center;
   gap: 4px; /* 減少間距 */
-  font-size: 13px; /* 放大一階 */
+  font-size: 14px; /* 再放大一階 */
   height: 28px; /* 減少高度 */
   min-height: 28px;
   max-height: 28px;
@@ -222,7 +222,7 @@
   align-items: flex-start; /* 改為靠上對齊，支持多行內容 */
   gap: 4px; /* 減少間距 */
   padding: 0; /* 確保沒有額外 padding */
-  font-size: 13px; /* 放大一階 */
+  font-size: 14px; /* 再放大一階 */
   color: var(--ns-text-dark);
   width: 100%; /* 填滿格子 */
   min-height: 28px; /* 減少最小高度 */
@@ -327,7 +327,7 @@
   align-items: center;
   padding: 1px 4px; /* 減少 padding */
   border-radius: 8px; /* 減少圓角 */
-  font-size: 10px; /* 放大一階 */
+  font-size: 11px; /* 再放大一階 */
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.2px; /* 減少字間距 */
@@ -535,7 +535,7 @@
   align-items: center;
   justify-content: center;
   color: #BBBBBB;
-  font-size: 12px; /* 放大一階 */
+  font-size: 13px; /* 再放大一階 */
   padding: 0 8px; /* 減少 padding */
   height: 100%; /* 填滿父容器高度 */
   box-sizing: border-box;
@@ -571,7 +571,7 @@
   padding: 8px 12px; /* 減少內邊距 */
   background: var(--ns-bg-gray);
   border-top: 1px solid var(--ns-border);
-  font-size: 12px; /* 放大一階 */
+  font-size: 13px; /* 再放大一階 */
   color: var(--ns-text-light);
   flex-shrink: 0; /* 固定不縮小，確保三欄等高 */
 }
