@@ -55,7 +55,6 @@ import {
   Monitor,
   Grid3x3,
   TrendingUp,
-  Upload
 } from 'lucide-react'
 
 interface MenuItem {
@@ -81,12 +80,6 @@ const mainNavigation: MenuItem[] = [
     name: 'SuiteQL 查詢',
     href: '/dashboard/query',
     icon: Search,
-  },
-  {
-    name: 'ETL 視覺化匯入',
-    href: '/dashboard/etl-import',
-    icon: Upload,
-    badge: 'NEW'
   },
 ]
 
@@ -603,6 +596,11 @@ const privatePages: MenuItem[] = [
     name: 'NetSuite 資料備份',
     icon: Database,
     children: [
+      {
+        name: '欄位映射設計',
+        href: '/dashboard/field-mapping/design',
+        icon: Settings,
+      },
       {
         name: '欄位映射管理',
         href: '/dashboard/field-mapping',

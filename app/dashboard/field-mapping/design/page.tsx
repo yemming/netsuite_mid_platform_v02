@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Loader2, Search, Database, ArrowRight, Settings } from 'lucide-react';
+import { Loader2, Search, Database, Settings } from 'lucide-react';
 
 interface TableMapping {
   mapping_key: string;
@@ -18,7 +18,7 @@ interface TableMapping {
   sync_order: number;
 }
 
-export default function FieldMappingPage() {
+export default function FieldMappingDesignListPage() {
   const router = useRouter();
   const [tables, setTables] = useState<TableMapping[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,9 +70,9 @@ export default function FieldMappingPage() {
     <div className="container mx-auto py-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">欄位映射管理</h1>
+          <h1 className="text-3xl font-bold">欄位映射設計</h1>
           <p className="text-muted-foreground mt-2">
-            選擇 NetSuite 表來設定欄位映射關係
+            選擇 NetSuite 表來設計欄位映射關係
           </p>
         </div>
         <Button onClick={loadTables} variant="outline" disabled={loading}>
@@ -149,43 +149,13 @@ export default function FieldMappingPage() {
                       {table.supabase_table_name}
                     </code>
                   </div>
-                  <div className="flex items-center justify-between pt-2 border-t">
-                    <span className="text-xs text-muted-foreground">
-                      {table.is_enabled ? '已啟用' : '已停用'}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        router.push(`/dashboard/field-mapping/${table.mapping_key}`);
-                      }}
-                    >
-                      設定映射
-                      <ArrowRight className="ml-1 h-3 w-3" />
-                    </Button>
-                  </div>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
-
-      {/* 統計資訊 */}
-      {!loading && tables.length > 0 && (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>共 {tables.length} 個表</span>
-              <span>
-                已啟用: {tables.filter((t) => t.is_enabled).length} / 已停用:{' '}
-                {tables.filter((t) => !t.is_enabled).length}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
+
