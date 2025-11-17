@@ -547,30 +547,48 @@ export default function FieldMappingDetailPage() {
                             e.dataTransfer.setData('netsuiteType', 'aggregate');
                             e.dataTransfer.setData('isMultiple', 'true');
                             
-                            // 創建自定義拖拽預覽（顯示多選的字段）
+                            // 創建自定義拖拽預覽（扑克牌层叠效果）
                             const dragPreview = document.createElement('div');
                             dragPreview.style.cssText = `
                               position: absolute;
                               top: -9999px;
-                              padding: 8px 12px;
-                              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                              color: white;
-                              border-radius: 6px;
-                              font-size: 12px;
-                              font-weight: 600;
-                              box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                              left: -9999px;
                               z-index: 9999;
                             `;
+                            
+                            // 创建层叠的卡片效果（最多显示前5张）
+                            const cardsToShow = allFields.slice(0, 5);
+                            const cardHTML = cardsToShow.map((fieldName, idx) => {
+                              const offset = idx * 3; // 每张卡片偏移 3px
+                              const opacity = 1 - (idx * 0.1); // 越后面的卡片越透明
+                              return `
+                                <div style="
+                                  position: absolute;
+                                  top: ${offset}px;
+                                  left: ${offset}px;
+                                  padding: 8px 16px;
+                                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                  color: white;
+                                  border-radius: 6px;
+                                  font-size: 13px;
+                                  font-weight: 600;
+                                  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                                  white-space: nowrap;
+                                  opacity: ${opacity};
+                                  border: 2px solid rgba(255,255,255,0.3);
+                                ">
+                                  ${idx === 0 ? `<span style="background: rgba(255,255,255,0.3); padding: 2px 6px; border-radius: 3px; margin-right: 8px; font-size: 11px;">${allFields.length} 個</span>` : ''}${fieldName}
+                                </div>
+                              `;
+                            }).join('');
+                            
                             dragPreview.innerHTML = `
-                              <div style="display: flex; align-items: center; gap: 8px;">
-                                <span style="background: rgba(255,255,255,0.3); padding: 2px 6px; border-radius: 3px;">
-                                  ${allFields.length} 個欄位
-                                </span>
-                                <span>${allFields.slice(0, 3).join(', ')}${allFields.length > 3 ? '...' : ''}</span>
+                              <div style="position: relative; width: 250px; height: ${60 + cardsToShow.length * 3}px;">
+                                ${cardHTML}
                               </div>
                             `;
                             document.body.appendChild(dragPreview);
-                            e.dataTransfer.setDragImage(dragPreview, 0, 0);
+                            e.dataTransfer.setDragImage(dragPreview, 20, 20);
                             setTimeout(() => document.body.removeChild(dragPreview), 0);
                           } else {
                             // 普通拖曳：單個字段
