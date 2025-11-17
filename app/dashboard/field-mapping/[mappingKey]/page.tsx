@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ArrowLeft, Save, Loader2, AlertCircle, CheckCircle2, HelpCircle, X, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, AlertCircle, CheckCircle2, HelpCircle, X, ArrowLeftRight, Settings } from 'lucide-react';
 import '@/components/etl/netsuite-style.css';
 
 // 導入我們的 NetSuite 風格元件（但適配 Field Mapping 場景）
@@ -64,6 +64,40 @@ export default function FieldMappingDetailPage() {
   const [hoverCompleteMappingId, setHoverCompleteMappingId] = useState<string | null>(null);
   const [hoverAddAggregateMappingId, setHoverAddAggregateMappingId] = useState<string | null>(null); // 拖拽到聚合映射
   const [selectedFields, setSelectedFields] = useState<string[]>([]); // Ctrl 多選
+
+  /**
+   * 重新計算所有欄位的 isMapped 狀態（基於當前所有映射）
+   */
+  const recalculateAllFieldMappedStatus = (mappingList: MappingRule[]) => {
+    // 收集所有已映射的欄位名稱（包括 AGGREGATE 中的欄位）
+    const mappedFieldNames = new Set<string>();
+    
+    mappingList.forEach(m => {
+      if (m.netsuiteField.includes(',')) {
+        // AGGREGATE 映射：分割多個欄位
+        m.netsuiteField.split(',').forEach(f => {
+          const trimmedField = f.trim();
+          if (trimmedField) {
+            mappedFieldNames.add(trimmedField);
+          }
+        });
+      } else {
+        // 單一欄位映射
+        const trimmedField = m.netsuiteField.trim();
+        if (trimmedField) {
+          mappedFieldNames.add(trimmedField);
+        }
+      }
+    });
+    
+    // 更新所有欄位的 isMapped 狀態
+    setNetsuiteFields(prevFields =>
+      prevFields.map(f => ({
+        ...f,
+        isMapped: mappedFieldNames.has(f.name)
+      }))
+    );
+  };
 
   /**
    * 載入資料
@@ -153,13 +187,8 @@ export default function FieldMappingDetailPage() {
 
         setMappings(existingMappings);
 
-        // 標記已映射的欄位
-        setNetsuiteFields((fields) =>
-          fields.map((f) => ({
-            ...f,
-            isMapped: existingMappings.some((m: MappingRule) => m.netsuiteField === f.name),
-          }))
-        );
+        // 使用統一的函數來重新計算所有欄位的映射狀態
+        recalculateAllFieldMappedStatus(existingMappings);
       }
 
       // 移除這行，避免在 render 時 setState
@@ -214,16 +243,18 @@ export default function FieldMappingDetailPage() {
     const mapping = mappings.find((m) => m.id === id);
     if (!mapping) return;
 
-    setMappings(mappings.filter((m) => m.id !== id));
+    // 刪除映射
+    const updatedMappings = mappings.filter((m) => m.id !== id);
+    setMappings(updatedMappings);
 
-    // 取消已映射標記
-    setNetsuiteFields(
-      netsuiteFields.map((f) =>
-        f.name === mapping.netsuiteField ? { ...f, isMapped: false } : f
-      )
-    );
+    // 重新計算所有欄位的映射狀態（這樣可以正確處理 AGGREGATE 映射中的多個欄位）
+    recalculateAllFieldMappedStatus(updatedMappings);
 
-    showAlert('info', `已刪除映射：${mapping.netsuiteField}`);
+    // 顯示提示訊息
+    const fieldNames = mapping.netsuiteField.includes(',') 
+      ? mapping.netsuiteField.split(',').map(f => f.trim()).join(', ')
+      : mapping.netsuiteField;
+    showAlert('info', `已刪除映射：${fieldNames}`);
   };
 
   /**
@@ -300,13 +331,14 @@ export default function FieldMappingDetailPage() {
 
     if (newFields.length === 0) {
       // 所有字段都移除了，刪除整個映射
-      setMappings(mappings.filter(m => m.id !== mappingId));
-      // 取消所有字段的映射狀態
-      setNetsuiteFields(
-        netsuiteFields.map(f => 
-          fields.includes(f.name) ? { ...f, isMapped: false } : f
-        )
-      );
+      const updatedMappings = mappings.filter(m => m.id !== mappingId);
+      setMappings(updatedMappings);
+      
+      // 重新計算所有欄位的映射狀態
+      recalculateAllFieldMappedStatus(updatedMappings);
+      
+      // 從 selectedFields 中移除這些欄位
+      setSelectedFields(selectedFields.filter(f => !fields.includes(f)));
     } else if (newFields.length === 1) {
       // 只剩一個字段，轉換為普通映射
       const updatedMapping = {
@@ -315,26 +347,28 @@ export default function FieldMappingDetailPage() {
         netsuiteType: netsuiteFields.find(f => f.name === newFields[0])?.type || 'text',
         transform: { type: 'direct' as const },
       };
-      setMappings(mappings.map(m => m.id === mappingId ? updatedMapping : m));
-      // 取消被移除字段的映射狀態
-      setNetsuiteFields(
-        netsuiteFields.map(f => 
-          f.name === fieldToRemove ? { ...f, isMapped: false } : f
-        )
-      );
+      const updatedMappings = mappings.map(m => m.id === mappingId ? updatedMapping : m);
+      setMappings(updatedMappings);
+      
+      // 重新計算所有欄位的映射狀態
+      recalculateAllFieldMappedStatus(updatedMappings);
+      
+      // 從 selectedFields 中移除該欄位
+      setSelectedFields(selectedFields.filter(f => f !== fieldToRemove));
     } else {
       // 還有多個字段，更新聚合映射
       const updatedMapping = {
         ...mapping,
         netsuiteField: newFields.join(', '),
       };
-      setMappings(mappings.map(m => m.id === mappingId ? updatedMapping : m));
-      // 取消被移除字段的映射狀態
-      setNetsuiteFields(
-        netsuiteFields.map(f => 
-          f.name === fieldToRemove ? { ...f, isMapped: false } : f
-        )
-      );
+      const updatedMappings = mappings.map(m => m.id === mappingId ? updatedMapping : m);
+      setMappings(updatedMappings);
+      
+      // 重新計算所有欄位的映射狀態
+      recalculateAllFieldMappedStatus(updatedMappings);
+      
+      // 從 selectedFields 中移除該欄位
+      setSelectedFields(selectedFields.filter(f => f !== fieldToRemove));
     }
   };
 
@@ -575,7 +609,7 @@ export default function FieldMappingDetailPage() {
     <div className="min-h-screen bg-gray-50 ns-font">
       {/* NetSuite 風格的 Header */}
       <div className="bg-white border-b-2 border-gray-300 shadow-sm">
-        <div className="max-w-[1600px] mx-auto px-4 py-2">
+        <div className="max-w-[1000px] mx-auto px-4 py-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="sm" onClick={() => router.back()}>
@@ -621,7 +655,7 @@ export default function FieldMappingDetailPage() {
       </div>
 
       {/* NetSuite 風格的三欄式佈局 */}
-      <div className="max-w-[1600px] mx-auto p-2">
+      <div className="max-w-[1000px] mx-auto p-2">
         <div className="ns-three-column">
           {/* 左欄：NetSuite Fields */}
           <div className="ns-column">
@@ -815,7 +849,7 @@ export default function FieldMappingDetailPage() {
                           }}
                         >
                           <div className="ns-insert-hint">
-                            <span className="text-gray-300 text-xs">← 拖入此處插入新映射 →</span>
+                            <span className="text-gray-300 text-[10px]">← 拖入此處插入新映射 →</span>
                           </div>
                         </div>
                         
@@ -905,7 +939,7 @@ export default function FieldMappingDetailPage() {
                           <>
                             {mapping.netsuiteField.includes(',') ? (
                               // 多個字段（聚合）
-                              <div className="flex flex-col gap-1 w-full">
+                              <div className="flex flex-col gap-0.5 w-full py-0.5">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 rounded font-semibold">
                                     AGGREGATE
@@ -918,17 +952,17 @@ export default function FieldMappingDetailPage() {
                                   {mapping.netsuiteField.split(',').map((field, idx) => (
                                     <div key={idx} className="flex items-center gap-1.5 group">
                                       <span className="text-[10px] text-gray-400">{idx + 1}.</span>
-                                      <span className="text-[11px] px-2 py-0.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded font-medium border border-blue-200 flex items-center gap-1">
+                                      <span className="text-[10px] px-1.5 py-0.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded font-medium border border-blue-200 flex items-center gap-1">
                                         {field.trim()}
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleRemoveFieldFromAggregate(mapping.id, field.trim());
                                           }}
-                                          className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100 rounded p-0.5"
+                                          className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100 rounded flex items-center justify-center w-4 h-4 min-w-4 min-h-4 p-0"
                                           title="移除此欄位"
                                         >
-                                          <X size={10} className="text-red-600" />
+                                          <X size={8} className="text-red-600" />
                                         </button>
                                       </span>
                                     </div>
@@ -953,7 +987,7 @@ export default function FieldMappingDetailPage() {
           </div>
 
                       {/* 智慧箭頭 + 轉換規則顯示 */}
-                      <div className="flex flex-col items-center justify-center gap-0.5">
+                      <div className="flex items-center justify-center relative" style={{ width: '100%', height: '100%' }}>
                         <button
                           className={`ns-arrow-button ${mapping.transform.type !== 'direct' ? 'has-transform' : ''}`}
                           onClick={() => {
@@ -969,7 +1003,7 @@ export default function FieldMappingDetailPage() {
                         </button>
                         {/* 顯示轉換規則類型 */}
                         {mapping.transform.type !== 'direct' && mapping.isActive && (
-                          <div className="text-[9px] text-center">
+                          <div className="text-[9px] text-center absolute" style={{ bottom: '-12px', left: '50%', transform: 'translateX(-50%)', width: '100%' }}>
                             {mapping.transform.type === 'aggregate' && mapping.transform.config?.aggregateFunction === 'CONCAT' && (
                               <span className="px-1 py-0.5 bg-green-100 text-green-700 rounded">CONCAT</span>
                             )}
@@ -1015,7 +1049,7 @@ export default function FieldMappingDetailPage() {
                       {/* 刪除按鈕 */}
                       <div>
                         <button className="ns-delete-button" onClick={() => handleRemoveMapping(mapping.id)} title="刪除映射">
-                          <X size={16} />
+                          <X size={14} />
                         </button>
                       </div>
                     </div>
@@ -1050,7 +1084,9 @@ export default function FieldMappingDetailPage() {
                         <ArrowLeft size={14} className="text-gray-400" />
                         <span className="text-gray-400 text-xs">拖入左側欄位</span>
                       </div>
-                      <div>{index === 0 ? '⟷' : ''}</div>
+                      <div className="flex items-center justify-center" style={{ width: '100%', height: '100%' }}>
+                        {/* 空白區域，不顯示齒輪圖案 */}
+                      </div>
                       <div className="flex items-center justify-center gap-1">
                         <span className="text-gray-400 text-xs">拖入右側欄位</span>
                         <ArrowLeft size={14} className="text-gray-400" style={{ transform: 'rotate(180deg)' }} />

@@ -47,7 +47,7 @@
 
 /* NetSuite 欄位項目 */
 .ns-field-item {
-  padding: 0 8px; /* 減少左右 padding */
+  padding: 2px 8px; /* 減少垂直 padding */
   border-bottom: 1px solid #EEEEEE;
   cursor: move;
   transition: background-color 0.2s;
@@ -55,9 +55,10 @@
   align-items: center;
   gap: 4px; /* 減少間距 */
   font-size: 14px; /* 再放大一階 */
-  height: 28px; /* 減少高度 */
-  min-height: 28px;
-  max-height: 28px;
+  height: 22px; /* 調小行高 */
+  min-height: 22px;
+  max-height: 22px;
+  line-height: 1.2; /* 調整行高，讓內容更舒適 */
   box-sizing: border-box;
 }
 
@@ -112,13 +113,13 @@
 /* NetSuite 映射行（表格式） */
 .ns-mapping-row {
   display: grid;
-  grid-template-columns: 1fr 80px 1fr 40px;
+  grid-template-columns: 1fr 50px 1fr 28px; /* 進一步縮小，讓欄位更精實 */
   gap: 0; /* 移除 gap，改用邊框分隔 */
   padding: 0;
   border-bottom: 1px solid #D5D5D5; /* NetSuite 的灰色分隔線 */
-  align-items: center; /* 垂直置中 */
+  align-items: flex-start; /* 改為頂部對齊，讓 AGGREGATE 可以擴展 */
   transition: all 0.2s ease;
-  min-height: 24px; /* 再縮小行高 */
+  min-height: 22px; /* 最小行高 */
   box-sizing: border-box;
 }
 
@@ -174,11 +175,20 @@
 /* 每個格子 */
 .ns-mapping-row > div {
   border-right: 1px solid #E5E5E5; /* 垂直分隔線 */
-  padding: 3px 8px; /* 再減少垂直 padding */
+  padding: 2px 8px; /* 減少垂直 padding */
   display: flex;
-  align-items: center;
-  min-height: 24px; /* 再縮小高度 */
+  align-items: flex-start; /* 改為頂部對齊，讓 AGGREGATE 可以擴展 */
+  line-height: 1.2; /* 調整行高，讓內容更舒適 */
+  min-height: 22px; /* 最小高度 */
   box-sizing: border-box;
+}
+
+/* 中間列（箭頭區域）特別處理 */
+.ns-mapping-row > div:nth-child(2) {
+  padding: 2px 8px !important; /* 統一 padding，與其他列一致 */
+  display: flex !important;
+  align-items: center !important; /* 多行時垂直置中對齊 */
+  justify-content: center !important;
 }
 
 .ns-mapping-row > div:last-child {
@@ -219,13 +229,14 @@
 
 .ns-mapping-cell {
   display: flex;
-  align-items: flex-start; /* 改為靠上對齊，支持多行內容 */
+  align-items: flex-start; /* 改為頂部對齊，讓 AGGREGATE 可以擴展 */
   gap: 4px; /* 減少間距 */
   padding: 0; /* 確保沒有額外 padding */
   font-size: 14px; /* 再放大一階 */
+  line-height: 1.2; /* 調整行高，讓內容更舒適 */
   color: var(--ns-text-dark);
   width: 100%; /* 填滿格子 */
-  min-height: 24px; /* 再縮小最小高度 */
+  min-height: 22px; /* 最小高度，讓 AGGREGATE 可以擴展 */
   box-sizing: border-box;
 }
 
@@ -242,14 +253,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 16px;
+  width: 20px; /* 調大一號 */
+  height: 16px; /* 調大一號 */
+  min-height: 16px;
+  max-height: 16px;
   background: transparent;
   border: 1px solid #D5D5D5;
   border-radius: 2px;
   cursor: pointer;
   transition: all 0.2s;
   padding: 0;
+  box-sizing: border-box;
+  margin: 0; /* 移除所有 margin，讓父容器控制對齊 */
 }
 
 .ns-arrow-button:hover:not(:disabled) {
@@ -267,23 +282,47 @@
   border-color: var(--ns-arrow-blue);
 }
 
+.ns-arrow-button.has-transform .ns-arrow-icon {
+  color: #2196F3; /* 有轉換規則時使用更深的藍色 */
+}
+
 .ns-arrow-icon {
-  color: #888888;
+  color: #4A90E2; /* 藍色箭頭圖示 */
   transition: color 0.2s;
+  width: 12px; /* 調大一號 */
+  height: 12px;
+  flex-shrink: 0;
+}
+
+/* 中間箭頭區域容器 - 確保不超出行高 */
+.ns-mapping-row > div:nth-child(2),
+.ns-drop-placeholder > div:nth-child(2) {
+  min-height: 22px !important; /* 最小高度，讓 AGGREGATE 可以擴展 */
+  overflow: visible !important; /* 改為 visible，避免圖示被裁切 */
+  align-items: center !important; /* 多行時垂直置中對齊 */
+}
+
+/* 確保中間列內的 flex 容器也受限並置中 */
+.ns-mapping-row > div:nth-child(2) > div,
+.ns-drop-placeholder > div:nth-child(2) > div {
+  min-height: 22px !important; /* 最小高度，讓 AGGREGATE 可以擴展 */
+  overflow: visible !important; /* 改為 visible，避免圖示被裁切 */
+  display: flex !important;
+  align-items: center !important; /* 多行時垂直置中對齊 */
+  justify-content: center !important; /* 水平置中 */
+  padding: 0 !important; /* 移除所有 padding，統一對齊 */
+  height: 100% !important; /* 確保容器填滿父元素高度 */
 }
 
 .ns-arrow-button:hover:not(:disabled) .ns-arrow-icon {
-  color: var(--ns-arrow-blue);
+  color: #1976D2; /* hover 時使用更深的藍色 */
 }
 
-.ns-arrow-button.has-transform .ns-arrow-icon {
-  color: var(--ns-arrow-blue);
-}
 
 /* NetSuite 刪除按鈕 */
 .ns-delete-button {
-  width: 24px;
-  height: 24px;
+  width: 20px; /* 縮小刪除按鈕 */
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -405,10 +444,10 @@
 /* NetSuite 三欄佈局 */
 .ns-three-column {
   display: grid;
-  grid-template-columns: 240px minmax(650px, 750px) 240px; /* 左右更窄（240px），中間更寬 */
-  gap: 12px; /* 減少間距 */
+  grid-template-columns: 200px minmax(500px, 600px) 200px; /* 縮小左右欄位和中間欄位，更緊湊 */
+  gap: 8px; /* 減少間距 */
   height: calc(100vh - 180px); /* 減少頂部空間，更緊湊 */
-  padding: 8px; /* 減少內邊距 */
+  padding: 4px; /* 減少內邊距 */
   justify-content: center;
   max-height: calc(100vh - 180px); /* 確保不會超出視窗 */
   align-items: stretch; /* 確保子元素等高 */
@@ -502,15 +541,16 @@
 /* Drop Zone 空白行（預留區域） */
 .ns-drop-placeholder {
   display: grid;
-  grid-template-columns: 1fr 80px 1fr 40px;
+  grid-template-columns: 1fr 50px 1fr 28px; /* 與映射行一致的寬度 */
   gap: 0;
-  height: 24px; /* 再縮小高度 */
-  min-height: 24px;
-  max-height: 24px;
+  height: 22px; /* 調小行高 */
+  min-height: 22px;
+  max-height: 22px;
   border-bottom: 1px solid #E5E5E5;
   background: #FAFAFA;
   transition: all 0.2s ease;
   box-sizing: border-box;
+  align-items: center; /* 確保內容垂直置中 */
 }
 
 .ns-drop-placeholder:hover {
@@ -535,9 +575,11 @@
   align-items: center;
   justify-content: center;
   color: #BBBBBB;
-  font-size: 13px; /* 再放大一階 */
-  padding: 0 8px; /* 減少 padding */
-  height: 100%; /* 填滿父容器高度 */
+  font-size: 13px; /* 恢復正常字體大小 */
+  padding: 2px 8px; /* 減少 padding */
+  height: 22px; /* 調小行高 */
+  min-height: 22px;
+  max-height: 22px;
   box-sizing: border-box;
 }
 
