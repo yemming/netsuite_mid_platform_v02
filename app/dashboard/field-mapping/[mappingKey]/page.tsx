@@ -288,6 +288,56 @@ export default function FieldMappingDetailPage() {
   };
 
   /**
+   * 從聚合映射中移除單個字段
+   */
+  const handleRemoveFieldFromAggregate = (mappingId: string, fieldToRemove: string) => {
+    const mapping = mappings.find(m => m.id === mappingId);
+    if (!mapping || !mapping.netsuiteField.includes(',')) return;
+
+    const fields = mapping.netsuiteField.split(',').map(f => f.trim());
+    const newFields = fields.filter(f => f !== fieldToRemove);
+
+    if (newFields.length === 0) {
+      // 所有字段都移除了，刪除整個映射
+      setMappings(mappings.filter(m => m.id !== mappingId));
+      // 取消所有字段的映射狀態
+      setNetsuiteFields(
+        netsuiteFields.map(f => 
+          fields.includes(f.name) ? { ...f, isMapped: false } : f
+        )
+      );
+    } else if (newFields.length === 1) {
+      // 只剩一個字段，轉換為普通映射
+      const updatedMapping = {
+        ...mapping,
+        netsuiteField: newFields[0],
+        netsuiteType: netsuiteFields.find(f => f.name === newFields[0])?.type || 'text',
+        transform: { type: 'direct' as const },
+      };
+      setMappings(mappings.map(m => m.id === mappingId ? updatedMapping : m));
+      // 取消被移除字段的映射狀態
+      setNetsuiteFields(
+        netsuiteFields.map(f => 
+          f.name === fieldToRemove ? { ...f, isMapped: false } : f
+        )
+      );
+    } else {
+      // 還有多個字段，更新聚合映射
+      const updatedMapping = {
+        ...mapping,
+        netsuiteField: newFields.join(', '),
+      };
+      setMappings(mappings.map(m => m.id === mappingId ? updatedMapping : m));
+      // 取消被移除字段的映射狀態
+      setNetsuiteFields(
+        netsuiteFields.map(f => 
+          f.name === fieldToRemove ? { ...f, isMapped: false } : f
+        )
+      );
+    }
+  };
+
+  /**
    * 拖拽處理：Drop 到中欄的空白行（創建半成品映射）
    * @param e - 拖曳事件
    * @param insertPosition - 插入位置（在現有映射中的索引）
@@ -777,10 +827,20 @@ export default function FieldMappingDetailPage() {
                                 </div>
                                 <div className="flex flex-col gap-0.5">
                                   {mapping.netsuiteField.split(',').map((field, idx) => (
-                                    <div key={idx} className="flex items-center gap-1.5">
+                                    <div key={idx} className="flex items-center gap-1.5 group">
                                       <span className="text-[10px] text-gray-400">{idx + 1}.</span>
-                                      <span className="text-[11px] px-2 py-0.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded font-medium border border-blue-200">
+                                      <span className="text-[11px] px-2 py-0.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded font-medium border border-blue-200 flex items-center gap-1">
                                         {field.trim()}
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRemoveFieldFromAggregate(mapping.id, field.trim());
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100 rounded p-0.5"
+                                          title="移除此欄位"
+                                        >
+                                          <X size={10} className="text-red-600" />
+                                        </button>
                                       </span>
                                     </div>
                                   ))}
