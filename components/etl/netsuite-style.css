@@ -26,7 +26,7 @@
 .ns-header {
   background: linear-gradient(to bottom, var(--ns-blue-light), var(--ns-blue-header));
   border-bottom: 1px solid var(--ns-border);
-  padding: 12px 16px;
+  padding: 8px 12px; /* 減少內邊距 */
   font-weight: 600;
   color: var(--ns-text-dark);
   font-size: 13px;
@@ -47,17 +47,17 @@
 
 /* NetSuite 欄位項目 */
 .ns-field-item {
-  padding: 0 10px; /* 只保留左右 padding，移除上下 padding */
+  padding: 0 8px; /* 減少左右 padding */
   border-bottom: 1px solid #EEEEEE;
   cursor: move;
   transition: background-color 0.2s;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px; /* 字體放大一階 */
-  height: 30px; /* 跟中間一樣 30px */
-  min-height: 30px;
-  max-height: 30px;
+  gap: 4px; /* 減少間距 */
+  font-size: 12px; /* 減少字體大小 */
+  height: 28px; /* 減少高度 */
+  min-height: 28px;
+  max-height: 28px;
   box-sizing: border-box;
 }
 
@@ -118,7 +118,7 @@
   border-bottom: 1px solid #D5D5D5; /* NetSuite 的灰色分隔線 */
   align-items: center; /* 垂直置中 */
   transition: all 0.2s ease;
-  min-height: 30px; /* 最小高度，支持多行內容（聚合字段） */
+  min-height: 28px; /* 減少最小高度，與左右對齊 */
   box-sizing: border-box;
 }
 
@@ -174,10 +174,10 @@
 /* 每個格子 */
 .ns-mapping-row > div {
   border-right: 1px solid #E5E5E5; /* 垂直分隔線 */
-  padding: 6px 10px; /* 增加垂直 padding，支持多行內容 */
+  padding: 4px 8px; /* 減少 padding */
   display: flex;
   align-items: center;
-  min-height: 30px; /* 最小高度，支持多行內容自動撐開 */
+  min-height: 28px; /* 減少最小高度 */
   box-sizing: border-box;
 }
 
@@ -220,12 +220,12 @@
 .ns-mapping-cell {
   display: flex;
   align-items: flex-start; /* 改為靠上對齊，支持多行內容 */
-  gap: 6px;
+  gap: 4px; /* 減少間距 */
   padding: 0; /* 確保沒有額外 padding */
-  font-size: 13px; /* 字體放大一階 */
+  font-size: 12px; /* 減少字體大小 */
   color: var(--ns-text-dark);
   width: 100%; /* 填滿格子 */
-  min-height: 30px; /* 最小高度 */
+  min-height: 28px; /* 減少最小高度 */
   box-sizing: border-box;
 }
 
@@ -325,12 +325,12 @@
 .ns-type-badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 6px;
-  border-radius: 10px;
-  font-size: 10px; /* 字體放大一階 */
+  padding: 1px 4px; /* 減少 padding */
+  border-radius: 8px; /* 減少圓角 */
+  font-size: 9px; /* 減少字體大小 */
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px; /* 減少字間距 */
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -406,11 +406,11 @@
 .ns-three-column {
   display: grid;
   grid-template-columns: 240px minmax(650px, 750px) 240px; /* 左右更窄（240px），中間更寬 */
-  gap: 16px;
-  height: calc(100vh - 250px); /* 給更多空間給標題和提示 */
-  padding: 16px;
+  gap: 12px; /* 減少間距 */
+  height: calc(100vh - 180px); /* 減少頂部空間，更緊湊 */
+  padding: 8px; /* 減少內邊距 */
   justify-content: center;
-  max-height: calc(100vh - 250px); /* 確保不會超出視窗 */
+  max-height: calc(100vh - 180px); /* 確保不會超出視窗 */
   align-items: stretch; /* 確保子元素等高 */
 }
 
@@ -504,9 +504,9 @@
   display: grid;
   grid-template-columns: 1fr 80px 1fr 40px;
   gap: 0;
-  height: 30px; /* 跟中間一樣 30px */
-  min-height: 30px;
-  max-height: 30px;
+  height: 28px; /* 減少高度 */
+  min-height: 28px;
+  max-height: 28px;
   border-bottom: 1px solid #E5E5E5;
   background: #FAFAFA;
   transition: all 0.2s ease;
@@ -535,8 +535,8 @@
   align-items: center;
   justify-content: center;
   color: #BBBBBB;
-  font-size: 12px; /* 字體放大一階 */
-  padding: 0 12px; /* 只保留左右 padding */
+  font-size: 11px; /* 減少字體大小 */
+  padding: 0 8px; /* 減少 padding */
   height: 100%; /* 填滿父容器高度 */
   box-sizing: border-box;
 }
@@ -567,11 +567,11 @@
 /* NetSuite 統計資訊 */
 .ns-stats {
   display: flex;
-  gap: 24px;
-  padding: 12px 16px;
+  gap: 16px; /* 減少間距 */
+  padding: 8px 12px; /* 減少內邊距 */
   background: var(--ns-bg-gray);
   border-top: 1px solid var(--ns-border);
-  font-size: 12px;
+  font-size: 11px; /* 減少字體大小 */
   color: var(--ns-text-light);
   flex-shrink: 0; /* 固定不縮小，確保三欄等高 */
 }

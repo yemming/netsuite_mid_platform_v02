@@ -575,7 +575,7 @@ export default function FieldMappingDetailPage() {
     <div className="min-h-screen bg-gray-50 ns-font">
       {/* NetSuite 風格的 Header */}
       <div className="bg-white border-b-2 border-gray-300 shadow-sm">
-        <div className="max-w-[1600px] mx-auto px-6 py-4">
+        <div className="max-w-[1600px] mx-auto px-4 py-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="sm" onClick={() => router.back()}>
@@ -583,8 +583,8 @@ export default function FieldMappingDetailPage() {
             返回
           </Button>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Field Mapping</h1>
-                <p className="text-sm text-gray-600 mt-1">
+                <h1 className="text-xl font-bold text-gray-900">Field Mapping</h1>
+                <p className="text-xs text-gray-600">
                   {tableInfo?.label || mappingKey} ({mappings.length} 個映射)
                 </p>
         </div>
@@ -621,7 +621,7 @@ export default function FieldMappingDetailPage() {
       </div>
 
       {/* NetSuite 風格的三欄式佈局 */}
-      <div className="max-w-[1600px] mx-auto p-6">
+      <div className="max-w-[1600px] mx-auto p-2">
         <div className="ns-three-column">
           {/* 左欄：NetSuite Fields */}
           <div className="ns-column">
@@ -1163,7 +1163,7 @@ export default function FieldMappingDetailPage() {
         </div>
 
         {/* 快速操作提示 */}
-        <div className="mt-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 shadow-sm">
+        <div className="mt-2 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3 shadow-sm">
           <h3 className="font-semibold text-blue-900 mb-3 text-sm flex items-center gap-2">
             💡 使用提示
           </h3>
