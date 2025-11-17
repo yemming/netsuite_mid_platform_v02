@@ -118,7 +118,7 @@
   border-bottom: 1px solid #D5D5D5; /* NetSuite 的灰色分隔線 */
   align-items: center; /* 垂直置中 */
   transition: all 0.2s ease;
-  min-height: 28px; /* 減少最小高度，與左右對齊 */
+  min-height: 24px; /* 再縮小行高 */
   box-sizing: border-box;
 }
 
@@ -174,10 +174,10 @@
 /* 每個格子 */
 .ns-mapping-row > div {
   border-right: 1px solid #E5E5E5; /* 垂直分隔線 */
-  padding: 4px 8px; /* 減少 padding */
+  padding: 3px 8px; /* 再減少垂直 padding */
   display: flex;
   align-items: center;
-  min-height: 28px; /* 減少最小高度 */
+  min-height: 24px; /* 再縮小高度 */
   box-sizing: border-box;
 }
 
@@ -225,7 +225,7 @@
   font-size: 14px; /* 再放大一階 */
   color: var(--ns-text-dark);
   width: 100%; /* 填滿格子 */
-  min-height: 28px; /* 減少最小高度 */
+  min-height: 24px; /* 再縮小最小高度 */
   box-sizing: border-box;
 }
 
@@ -504,9 +504,9 @@
   display: grid;
   grid-template-columns: 1fr 80px 1fr 40px;
   gap: 0;
-  height: 28px; /* 減少高度 */
-  min-height: 28px;
-  max-height: 28px;
+  height: 24px; /* 再縮小高度 */
+  min-height: 24px;
+  max-height: 24px;
   border-bottom: 1px solid #E5E5E5;
   background: #FAFAFA;
   transition: all 0.2s ease;
