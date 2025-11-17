@@ -65,6 +65,83 @@ export default function FieldMappingDetailPage() {
   const [hoverAddAggregateMappingId, setHoverAddAggregateMappingId] = useState<string | null>(null); // 拖拽到聚合映射
   const [selectedFields, setSelectedFields] = useState<string[]>([]); // Ctrl 多選
 
+  // 欄位寬度調整狀態
+  const [columnWidths, setColumnWidths] = useState(() => {
+    // 從 localStorage 讀取保存的寬度，如果沒有則使用預設值
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`field-mapping-widths-${mappingKey}`);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {
+          // 如果解析失敗，使用預設值
+        }
+      }
+    }
+    return { left: 200, middle: 600, right: 200 };
+  });
+  const [isResizing, setIsResizing] = useState<{ type: 'left' | 'right' | null }>({ type: null });
+
+  // 保存欄位寬度到 localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`field-mapping-widths-${mappingKey}`, JSON.stringify(columnWidths));
+    }
+  }, [columnWidths, mappingKey]);
+
+  // 處理欄位寬度調整
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizing.type === null) return;
+
+      const container = document.querySelector('.ns-three-column-container') as HTMLElement;
+      if (!container) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const containerLeft = containerRect.left;
+      const containerWidth = containerRect.width;
+
+      if (isResizing.type === 'left') {
+        // 調整左欄和中間欄的寬度
+        const newLeftWidth = Math.max(150, Math.min(400, e.clientX - containerLeft));
+        const newMiddleWidth = columnWidths.middle + (columnWidths.left - newLeftWidth);
+        setColumnWidths({
+          left: newLeftWidth,
+          middle: Math.max(300, newMiddleWidth),
+          right: columnWidths.right,
+        });
+      } else if (isResizing.type === 'right') {
+        // 調整中間欄和右欄的寬度
+        const relativeX = e.clientX - containerLeft;
+        const newRightWidth = Math.max(150, Math.min(400, containerWidth - relativeX));
+        const newMiddleWidth = columnWidths.middle + (columnWidths.right - newRightWidth);
+        setColumnWidths({
+          left: columnWidths.left,
+          middle: Math.max(300, newMiddleWidth),
+          right: newRightWidth,
+        });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing({ type: null });
+    };
+
+    if (isResizing.type !== null) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [isResizing, columnWidths]);
+
   /**
    * 重新計算所有欄位的 isMapped 狀態（基於當前所有映射）
    */
@@ -625,15 +702,6 @@ export default function FieldMappingDetailPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => window.open('https://system.netsuite.com/help/helpcenter/en_US/srbrowser/Browser2023_2/schema/record/subsidiary.html', '_blank')}
-              >
-                <HelpCircle className="h-4 w-4 mr-2" />
-            Get help with creating Field Mapping
-          </Button>
-
               <Button onClick={handleSave} disabled={saving || mappings.length === 0} size="sm">
                 {saving ? (
                   <>
@@ -656,11 +724,11 @@ export default function FieldMappingDetailPage() {
 
       {/* NetSuite 風格的三欄式佈局 */}
       <div className="max-w-[1000px] mx-auto p-2">
-        <div className="ns-three-column">
+        <div className="ns-three-column-container" style={{ display: 'flex', gap: '2px', height: 'calc(100vh - 180px)', maxHeight: 'calc(100vh - 180px)' }}>
           {/* 左欄：NetSuite Fields */}
-          <div className="ns-column">
+          <div className="ns-column" style={{ width: `${columnWidths.left}px`, minWidth: '150px', maxWidth: '400px', flexShrink: 0 }}>
             <div className="ns-panel">
-              <div className="ns-header">NetSuite Fields ({netsuiteFields.length})</div>
+              <div className="ns-header">NetSuite Fields</div>
 
               <div className="ns-column-body">
                 {netsuiteFields.length === 0 ? (
@@ -785,7 +853,7 @@ export default function FieldMappingDetailPage() {
                       }}
                     >
                       <div className="flex-1 flex items-center gap-1.5">
-                        <span className="font-medium text-xs">{field.name}</span>
+                        <span className="font-medium text-sm">{field.name}</span>
                         <span className={`ns-type-badge ${field.type || 'text'}`}>{field.type || 'text'}</span>
                         {field.isCustom && (
                           <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">Custom</span>
@@ -812,10 +880,26 @@ export default function FieldMappingDetailPage() {
             </div>
           </div>
 
+          {/* 左側分隔線 */}
+          <div
+            className="ns-column-resizer"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsResizing({ type: 'left' });
+            }}
+            style={{
+              width: '4px',
+              cursor: 'col-resize',
+              backgroundColor: isResizing.type === 'left' ? '#4A90E2' : 'transparent',
+              flexShrink: 0,
+              transition: 'background-color 0.2s',
+            }}
+          />
+
           {/* 中欄：Mapping Canvas */}
-          <div className="ns-column">
+          <div className="ns-column" style={{ width: `${columnWidths.middle}px`, minWidth: '300px', flex: '1 1 auto', flexShrink: 1 }}>
             <div className="ns-panel">
-              <div className="ns-header">Field Mapping ({mappings.length})</div>
+              <div className="ns-header">Field Mapping</div>
 
               <div className="ns-column-body">
               {mappings.length === 0 ? (
@@ -972,7 +1056,7 @@ export default function FieldMappingDetailPage() {
                             ) : (
                               // 單個字段
                               <div className="flex items-center gap-1.5">
-                                <span className="font-medium text-xs">{mapping.netsuiteField}</span>
+                                <span className="font-medium text-sm">{mapping.netsuiteField}</span>
                                 {mapping.netsuiteType && mapping.netsuiteType !== 'aggregate' && (
                                   <span className={`ns-type-badge ${mapping.netsuiteType}`}>{mapping.netsuiteType}</span>
               )}
@@ -1035,7 +1119,7 @@ export default function FieldMappingDetailPage() {
                         {mapping.supabaseColumn ? (
                           <>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-xs">{mapping.supabaseColumn}</span>
+                              <span className="font-medium text-sm">{mapping.supabaseColumn}</span>
                               <span className={`ns-type-badge ${mapping.supabaseType}`}>{mapping.supabaseType}</span>
                             </div>
                           </>
@@ -1113,11 +1197,27 @@ export default function FieldMappingDetailPage() {
             </div>
           </div>
 
+          {/* 右側分隔線 */}
+          <div
+            className="ns-column-resizer"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsResizing({ type: 'right' });
+            }}
+            style={{
+              width: '4px',
+              cursor: 'col-resize',
+              backgroundColor: isResizing.type === 'right' ? '#4A90E2' : 'transparent',
+              flexShrink: 0,
+              transition: 'background-color 0.2s',
+            }}
+          />
+
           {/* 右欄：Supabase Columns */}
-          <div className="ns-column">
+          <div className="ns-column" style={{ width: `${columnWidths.right}px`, minWidth: '150px', maxWidth: '400px', flexShrink: 0 }}>
             <div className="ns-panel">
               <div className="ns-header">
-                {tableInfo?.supabaseTable || 'Supabase'} Fields ({supabaseColumns.length})
+                {tableInfo?.supabaseTable || 'Supabase'} Fields
               </div>
 
               <div className="ns-column-body">
@@ -1171,7 +1271,8 @@ export default function FieldMappingDetailPage() {
                         }}
                       >
                         <div className="flex-1 flex items-center gap-1.5">
-                          <span className="font-medium text-xs">{column.name}</span>
+                          {!column.nullable && <span className="text-red-600 font-bold text-xs">*</span>}
+                          <span className="font-medium text-sm">{column.name}</span>
                           <span className={`ns-type-badge ${column.type}`}>{column.type}</span>
                           {column.nullable && <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">Nullable</span>}
                         </div>

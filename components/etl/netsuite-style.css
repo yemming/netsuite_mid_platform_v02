@@ -31,6 +31,7 @@
   color: var(--ns-text-dark);
   font-size: 13px;
   flex-shrink: 0; /* 固定不縮小，確保三欄等高 */
+  text-align: center; /* 文字置中對齊 */
 }
 
 /* NetSuite 面板 */
@@ -54,7 +55,7 @@
   display: flex;
   align-items: center;
   gap: 4px; /* 減少間距 */
-  font-size: 14px; /* 再放大一階 */
+  font-size: 15px; /* 調大一號 */
   height: 22px; /* 調小行高 */
   min-height: 22px;
   max-height: 22px;
@@ -232,7 +233,7 @@
   align-items: flex-start; /* 改為頂部對齊，讓 AGGREGATE 可以擴展 */
   gap: 4px; /* 減少間距 */
   padding: 0; /* 確保沒有額外 padding */
-  font-size: 14px; /* 再放大一階 */
+  font-size: 15px; /* 調大一號 */
   line-height: 1.2; /* 調整行高，讓內容更舒適 */
   color: var(--ns-text-dark);
   width: 100%; /* 填滿格子 */
@@ -366,7 +367,7 @@
   align-items: center;
   padding: 1px 4px; /* 減少 padding */
   border-radius: 8px; /* 減少圓角 */
-  font-size: 11px; /* 再放大一階 */
+  font-size: 8px; /* 再調小一號 */
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.2px; /* 減少字間距 */
@@ -453,6 +454,17 @@
   align-items: stretch; /* 確保子元素等高 */
 }
 
+/* 欄位寬度調整分隔線 */
+.ns-column-resizer {
+  position: relative;
+  user-select: none;
+}
+
+.ns-column-resizer:hover {
+  background-color: #4A90E2 !important;
+  opacity: 0.5;
+}
+
 .ns-column {
   display: flex;
   flex-direction: column;
@@ -531,6 +543,14 @@
   height: 100%;
   opacity: 0;
   transition: opacity 0.2s ease;
+  text-align: center;
+  width: 100%;
+}
+
+.ns-insert-hint span {
+  text-align: center;
+  display: block;
+  width: 100%;
 }
 
 .ns-insert-gap:hover .ns-insert-hint,
@@ -616,6 +636,7 @@
   font-size: 13px; /* 再放大一階 */
   color: var(--ns-text-light);
   flex-shrink: 0; /* 固定不縮小，確保三欄等高 */
+  justify-content: center; /* 內容置中對齊 */
 }
 
 .ns-stat {
