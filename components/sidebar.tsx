@@ -54,6 +54,7 @@ import {
   Monitor,
   Grid3x3,
   TrendingUp,
+  Mail,
 } from 'lucide-react'
 
 interface MenuItem {
@@ -79,6 +80,11 @@ const mainNavigation: MenuItem[] = [
     name: 'SuiteQL 查詢',
     href: '/dashboard/query',
     icon: Search,
+  },
+  {
+    name: 'NetSuite催款Email',
+    href: '/dashboard/nextjs-toolbox/netsuite-collection-email',
+    icon: Mail,
   },
 ]
 
