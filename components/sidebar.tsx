@@ -777,20 +777,20 @@ export default function Sidebar() {
               {/* 亮色模式：綠色 logo */}
               <img
                 src="/OC_Logo_Green.png"
-                alt="ICARUS交易管理系統 Logo"
+                alt="NetSuite交易管理系統 Logo"
                 className="w-full h-full object-contain dark:hidden"
                 style={{ width: '30px', height: '30px' }}
               />
               {/* 暗色模式：紅色 logo */}
               <img
                 src="/OC_Logo_Red.png"
-                alt="ICARUS交易管理系統 Logo"
+                alt="NetSuite交易管理系統 Logo"
                 className="w-full h-full object-contain hidden dark:block"
                 style={{ width: '48px', height: '48px', marginTop: '-8px' }}
               />
             </div>
             <span className="text-lg font-bold text-foreground truncate flex-1" style={{ marginLeft: '3px' }}>
-              ICARUS交易管理系統
+              NetSuite交易管理系統
             </span>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button 
