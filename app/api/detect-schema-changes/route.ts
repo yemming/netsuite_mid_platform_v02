@@ -59,7 +59,12 @@ export async function POST(request: Request) {
     console.log('[detect-schema-changes] 客戶端初始化完成');
 
     // 1. 取得表映射配置
-    let tableMapping;
+    let tableMapping: {
+      id?: string;
+      mapping_key?: string;
+      netsuite_table?: string;
+      [key: string]: any;
+    } | null = null;
     let recordType = inputRecordType;
     
     if (mappingKey) {
