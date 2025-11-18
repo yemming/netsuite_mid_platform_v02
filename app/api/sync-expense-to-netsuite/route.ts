@@ -452,6 +452,7 @@ export async function POST(request: Request) {
       departmentId: number | null;
       classId: number | null;
       locationId: number | null;
+      taxCodeId: number | null;
     }> = [];
 
     // 為每個 line 查詢 NetSuite IDs
@@ -463,6 +464,7 @@ export async function POST(request: Request) {
         departmentId: null,
         classId: null,
         locationId: null,
+        taxCodeId: null,
       };
 
       // Category
@@ -554,6 +556,27 @@ export async function POST(request: Request) {
             })
         );
       }
+
+      // Tax Code (可選，但如果有稅額則建議提供)
+      if (line.tax_code) {
+        lineQueries.push(
+          supabase
+            .from('ns_tax_codes') // ⚠️ 修正：使用正確的表名 ns_tax_codes（不是 ns_taxitem）
+            .select('netsuite_internal_id, is_inactive')
+            .eq('name', line.tax_code) // 使用 name 欄位（對應 NetSuite 的 itemid 或顯示名稱）
+            .eq('is_inactive', false) // 只查詢啟用的稅碼
+            .maybeSingle()
+            .then(({ data: taxCode }) => {
+              if (taxCode && !taxCode.is_inactive) {
+                lineNetSuiteData[i].taxCodeId = taxCode.netsuite_internal_id;
+              } else {
+                lineNetSuiteData[i].taxCodeId = null;
+                // 記錄警告（無論開發或生產環境都記錄，因為這會影響稅額計算）
+                console.warn(`[Sync Expense] 第 ${i + 1} 筆明細的稅碼 "${line.tax_code}" 找不到對應的 NetSuite ID 或該稅碼已停用`);
+              }
+            })
+        );
+      }
     }
 
     // 等待所有 line 的查詢完成
@@ -616,9 +639,34 @@ export async function POST(request: Request) {
       const item: any = {
         expensedate: line.date || review.expense_date,
         category: { id: String(lineData.categoryId) },
-        amount: parseFloat(String(line.amount)), // 使用未稅金額，不是總金額
+        amount: parseFloat(String(line.amount)), // 使用未稅金額
         currency: { id: String(lineData.currencyId) },
       };
+
+      // 稅金相關欄位 ⚠️ 重要：確保稅額正確傳遞到 NetSuite
+      // 注意：NetSuite API 使用小寫格式，且 taxcode 是直接字串 ID（不是 object）
+      // ⚠️ 關鍵：必須先設定 taxcode，NetSuite 才會接受其他稅金欄位
+      if (lineData.taxCodeId) {
+        // taxcode 是直接字串 ID，不是 { id: "..." } 格式
+        item.taxcode = String(lineData.taxCodeId);
+        
+        // 如果有稅額，加入 tax1amt（小寫）
+        if (line.tax_amt && parseFloat(String(line.tax_amt)) > 0) {
+          item.tax1amt = parseFloat(String(line.tax_amt));
+        }
+        
+        // 如果有稅率，提供百分比字串格式（例如 "5.0%"）
+        if (line.tax_rate && parseFloat(String(line.tax_rate)) > 0) {
+          // NetSuite 使用百分比字串格式，需要一位小數（例如 "5.0%" 不是 "5%"）
+          const taxRateValue = parseFloat(String(line.tax_rate));
+          item.taxrate1 = `${taxRateValue.toFixed(1)}%`;
+        }
+        
+        // ⚠️ 重要：NetSuite 需要 grossamt（總金額，小寫）
+        if (line.gross_amt && parseFloat(String(line.gross_amt)) > 0) {
+          item.grossamt = parseFloat(String(line.gross_amt));
+        }
+      }
 
       // 可選欄位
       if (line.memo) {
@@ -654,10 +702,19 @@ export async function POST(request: Request) {
       expenseReportPayload.memo = `${expenseReportPayload.memo || ''}\n發票號碼: ${firstLineInvoiceNumber}`.trim();
     }
 
-    // 計算總金額（從所有 expense_lines 加總）
+    // 計算總金額和稅金總和（從所有 expense_lines 加總）
     const totalAmount = expenseLines.reduce((sum, line) => {
       return sum + (parseFloat(String(line.gross_amt)) || 0);
     }, 0);
+    
+    const totalTaxAmount = expenseLines.reduce((sum, line) => {
+      return sum + (parseFloat(String(line.tax_amt)) || 0);
+    }, 0);
+    
+    // ⚠️ 重要：NetSuite 表頭需要稅金總和
+    if (totalTaxAmount > 0) {
+      expenseReportPayload.tax1amt = totalTaxAmount;
+    }
 
     // Debug: 只在開發環境記錄（減少生產環境的日誌輸出）
     if (process.env.NODE_ENV === 'development') {
@@ -669,10 +726,21 @@ export async function POST(request: Request) {
         expenseCategoryId,
         totalAmount,
         linesCount: expenseLines.length,
-        items: expenseItems.map(item => ({
+        items: expenseItems.map((item, idx) => ({
+          lineNumber: idx + 1,
           category: item.category.id,
           currency: item.currency.id,
           amount: item.amount,
+          taxcode: item.taxcode || null,
+          tax1amt: item.tax1amt || null,
+          taxrate1: item.taxrate1 || null,
+          grossamt: item.grossamt || null,
+          originalLine: {
+            tax_code: expenseLines[idx]?.tax_code,
+            tax_amt: expenseLines[idx]?.tax_amt,
+            tax_rate: expenseLines[idx]?.tax_rate,
+            gross_amt: expenseLines[idx]?.gross_amt,
+          },
         })),
         customFields: {
           custbody_es_number: expenseReportPayload.custbody_es_number,
@@ -731,21 +799,51 @@ export async function POST(request: Request) {
                  console.warn(`[Sync Expense] 查詢記錄後仍無法取得 tranId，記錄內容:`, JSON.stringify(createdRecord).substring(0, 200));
                }
                
-               // 驗證自訂欄位是否寫入
+               // 驗證自訂欄位和稅金欄位是否寫入
                if (createdRecord) {
                  const esNumber = createdRecord.custbody_es_number || createdRecord.custbodyesnumber;
                  const esLink = createdRecord.custbody_es_link || createdRecord.custbodyeslink;
                  
-                 console.log(`[Sync Expense] 自訂欄位驗證:`, {
+                 // 檢查 expense items 中的稅金欄位
+                 let expenseItems = null;
+                 if (createdRecord.expense) {
+                   if (Array.isArray(createdRecord.expense)) {
+                     expenseItems = createdRecord.expense;
+                   } else if (createdRecord.expense.items && Array.isArray(createdRecord.expense.items)) {
+                     expenseItems = createdRecord.expense.items;
+                   }
+                 }
+                 
+                 console.log(`[Sync Expense] 自訂欄位和稅金欄位驗證:`, {
                    custbody_es_number: esNumber || '未寫入',
                    custbody_es_link: esLink || '未寫入',
                    sent_es_number: expenseReportPayload.custbody_es_number,
                    sent_es_link: expenseReportPayload.custbody_es_link,
+                   expenseItemsCount: expenseItems ? expenseItems.length : 0,
+                   expenseItemsTaxInfo: expenseItems ? expenseItems.map((item: any, idx: number) => ({
+                     lineNumber: idx + 1,
+                     amount: item.amount,
+                     taxcode: item.taxcode || '未設定',
+                     tax1amt: item.tax1amt || '未設定',
+                     taxrate1: item.taxrate1 || '未設定',
+                     grossamt: item.grossamt || '未設定',
+                     allTaxFields: Object.keys(item).filter(key => key.toLowerCase().includes('tax') || key.toLowerCase().includes('gross')),
+                   })) : null,
                    allCustomFields: Object.keys(createdRecord).filter(key => key.includes('custbody')),
                  });
                  
                  if (!esLink && expenseReportPayload.custbody_es_link) {
                    console.warn(`[Sync Expense] ⚠️ custbody_es_link 未寫入 NetSuite！可能原因：1) 欄位 ID 錯誤 2) 欄位類型不匹配 3) 欄位沒有寫入權限`);
+                 }
+                 
+                 // 檢查稅金欄位是否寫入
+                 if (expenseItems && expenseItems.length > 0) {
+                   const hasTaxInfo = expenseItems.some((item: any) => 
+                     item.taxcode && item.tax1amt
+                   );
+                   if (!hasTaxInfo && expenseReportPayload.expense?.items?.some((item: any) => item.taxcode || item.tax1amt)) {
+                     console.warn(`[Sync Expense] ⚠️ 稅金欄位未寫入 NetSuite！可能原因：1) 欄位名稱錯誤 2) 稅碼 ID 無效 3) NetSuite 設定問題`);
+                   }
                  }
                }
              } catch (queryError: any) {

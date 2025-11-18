@@ -244,8 +244,8 @@ export function validateTransformedRecord(
   const errors: string[] = [];
 
   // 檢查必填欄位
-  fieldMappings.forEach((mapping) => {
-    if (mapping.is_required && (record[mapping.supabase_column_name] === null || record[mapping.supabase_column_name] === undefined)) {
+  fieldMappings.forEach((mapping: any) => {
+    if ((mapping as any).is_required && (record[mapping.supabase_column_name] === null || record[mapping.supabase_column_name] === undefined)) {
       errors.push(`必填欄位 ${mapping.supabase_column_name} 為空`);
     }
   });

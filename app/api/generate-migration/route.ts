@@ -92,7 +92,7 @@ export async function POST(request: Request) {
         const columnType = mapSupabaseType(mapping.supabase_column_type);
         
         // 檢查是否為可空欄位（預設為可空，除非明確標記為必填）
-        const nullable = mapping.is_required ? 'NOT NULL' : 'NULL';
+        const nullable = (mapping as any).is_required ? 'NOT NULL' : 'NULL';
 
         alterStatements.push(
           `ADD COLUMN IF NOT EXISTS ${columnName} ${columnType} ${nullable}`

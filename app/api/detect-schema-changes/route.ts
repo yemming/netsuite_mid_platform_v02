@@ -85,11 +85,11 @@ export async function POST(request: Request) {
       }
 
       tableMapping = mappingData;
-      recordType = recordType || tableMapping.netsuite_table;
+      recordType = recordType || tableMapping?.netsuite_table;
       console.log('[detect-schema-changes] 取得表映射配置:', {
         mappingKey,
         recordType,
-        netsuiteTable: tableMapping.netsuite_table,
+        netsuiteTable: tableMapping?.netsuite_table,
       });
     }
 

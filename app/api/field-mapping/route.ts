@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 
     const supabase = await createClient();
 
-    let query = supabase
+    let query: any = supabase
       .from('field_mapping_config')
       .select(`
         *,
@@ -32,17 +32,20 @@ export async function GET(request: Request) {
           supabase_table_name,
           netsuite_table
         )
-      `)
-      .order('netsuite_field_name', { ascending: true });
+      `);
 
     if (fieldId) {
       query = query.eq('id', fieldId).single();
-    } else if (mappingKey) {
-      query = query.eq('mapping_key', mappingKey);
-    }
+    } else {
+      if (mappingKey) {
+        query = query.eq('mapping_key', mappingKey);
+      }
 
-    if (!includeInactive) {
-      query = query.eq('is_active', true);
+      if (!includeInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      query = query.order('netsuite_field_name', { ascending: true });
     }
 
     const { data, error } = await query;
