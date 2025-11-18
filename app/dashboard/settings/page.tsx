@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Database, RefreshCw, CheckCircle2, XCircle, AlertCircle, Clock } from 'lucide-react';
+import { Settings, Database, RefreshCw, CheckCircle2, XCircle, AlertCircle, Clock, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface TableSyncStatus {
   tableName: string;
@@ -42,10 +44,25 @@ const TABLE_CONFIG = [
   { name: 'ns_ship_methods', label: '運送方式', api: '/api/sync-ship-methods', priority: '🟢 低' },
 ];
 
+interface SystemSetting {
+  id: string;
+  setting_key: string;
+  setting_value: string | null;
+  description: string | null;
+  setting_type: string;
+  is_sensitive: boolean;
+}
+
 export default function SettingsPage() {
   const [tableStatuses, setTableStatuses] = useState<TableSyncStatus[]>([]);
   const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [syncActions, setSyncActions] = useState<Record<string, SyncAction>>({});
+  
+  // 系統設定相關 state
+  const [systemSettings, setSystemSettings] = useState<SystemSetting[]>([]);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [savingSettings, setSavingSettings] = useState<Record<string, boolean>>({});
+  const [settingValues, setSettingValues] = useState<Record<string, string>>({});
 
   // 載入所有表的同步狀態
   const loadSyncStatuses = async () => {
@@ -73,8 +90,76 @@ export default function SettingsPage() {
     }
   };
 
+  // 載入系統設定
+  const loadSystemSettings = async () => {
+    setLoadingSettings(true);
+    try {
+      const response = await fetch('/api/system-settings');
+      const data = await response.json();
+      
+      console.log('系統設定 API 回應:', data);
+      
+      if (data.success && data.data) {
+        setSystemSettings(data.data);
+        // 初始化設定值
+        const values: Record<string, string> = {};
+        data.data.forEach((setting: SystemSetting) => {
+          values[setting.setting_key] = setting.setting_value || '';
+        });
+        setSettingValues(values);
+      } else if (data.error) {
+        console.error('載入系統設定錯誤:', data.error);
+        alert(`載入設定失敗: ${data.error}${data.details ? '\n' + data.details : ''}`);
+      }
+    } catch (error: any) {
+      console.error('載入系統設定錯誤:', error);
+      alert(`載入設定失敗: ${error.message}`);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  // 更新系統設定
+  const handleSaveSetting = async (key: string) => {
+    setSavingSettings(prev => ({ ...prev, [key]: true }));
+    try {
+      const response = await fetch('/api/system-settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key,
+          value: settingValues[key] || '',
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // 更新本地狀態
+        setSystemSettings(prev => 
+          prev.map(setting => 
+            setting.setting_key === key
+              ? { ...setting, setting_value: settingValues[key] || null }
+              : setting
+          )
+        );
+        alert('設定已儲存');
+      } else {
+        alert(`儲存失敗: ${data.error}`);
+      }
+    } catch (error: any) {
+      console.error('儲存設定錯誤:', error);
+      alert(`儲存失敗: ${error.message}`);
+    } finally {
+      setSavingSettings(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
   useEffect(() => {
     loadSyncStatuses();
+    loadSystemSettings();
   }, []);
 
   // 同步單個表
@@ -358,6 +443,104 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* 系統設定 */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Settings className="h-5 w-5 text-[#28363F] dark:text-[#5a7885]" />
+                <div>
+                  <CardTitle>系統設定</CardTitle>
+                  <CardDescription className="mt-1">
+                    管理系統各種設定值
+                  </CardDescription>
+                </div>
+              </div>
+              <Button
+                onClick={loadSystemSettings}
+                disabled={loadingSettings}
+                variant="outline"
+                size="sm"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${loadingSettings ? 'animate-spin' : ''}`} />
+                重新整理
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {loadingSettings ? (
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-muted-foreground">載入中...</span>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {systemSettings.length > 0 ? (
+                  systemSettings.map((setting) => (
+                    <div key={setting.id} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor={setting.setting_key} className="text-sm font-medium">
+                          {setting.setting_key}
+                        </Label>
+                        <Button
+                          onClick={() => handleSaveSetting(setting.setting_key)}
+                          disabled={savingSettings[setting.setting_key]}
+                          size="sm"
+                          variant="outline"
+                          className="bg-[#28363F] hover:bg-[#354a56] text-white border-[#28363F]"
+                        >
+                          {savingSettings[setting.setting_key] ? (
+                            <>
+                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                              儲存中
+                            </>
+                          ) : (
+                            <>
+                              <Save className="h-3 w-3 mr-1" />
+                              儲存
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      {setting.description && (
+                        <p className="text-xs text-muted-foreground">{setting.description}</p>
+                      )}
+                      <Input
+                        id={setting.setting_key}
+                        type={setting.setting_type === 'url' ? 'url' : 'text'}
+                        value={settingValues[setting.setting_key] || ''}
+                        onChange={(e) => setSettingValues(prev => ({
+                          ...prev,
+                          [setting.setting_key]: e.target.value,
+                        }))}
+                        placeholder={`請輸入 ${setting.setting_key}`}
+                        className="w-full"
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <div className="space-y-4">
+                    <div className="text-center py-8 text-muted-foreground">
+                      目前沒有系統設定
+                    </div>
+                    <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                          <p className="font-medium mb-1">尚未建立系統設定表</p>
+                          <p className="text-xs">
+                            請在 Supabase Dashboard → SQL Editor 執行 <code className="bg-yellow-100 dark:bg-yellow-900 px-1 rounded">create_system_settings_table.sql</code> 來建立資料表
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -886,9 +886,13 @@ export default function Sidebar() {
 
           {/* Bottom Bar */}
           <div className="flex items-center justify-between px-3 py-2 border-t border-border">
-            <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
+            <Link 
+              href="/dashboard/settings"
+              className="p-1.5 rounded-md hover:bg-accent transition-colors"
+              title="設定"
+            >
               <Cog className="w-4 h-4 text-foreground" />
-            </button>
+            </Link>
             <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
               <Send className="w-4 h-4 text-foreground" />
             </button>

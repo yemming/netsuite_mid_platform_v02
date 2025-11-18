@@ -4,8 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { RichTextEditor } from '@/components/ui/rich-text-editor';
-import { Mail, Upload, FileText, Loader2, Copy, Check, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Mail, Upload, FileText, Loader2, Copy, Check, AlertCircle } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
 // OCR 回傳的 JSON 格式（根據實際回傳調整）
@@ -35,6 +34,8 @@ interface OCRResult {
   is_overdue?: boolean;
   overdue_warning_msg?: string;
   overdue_msg?: string;
+  // Email 主旨
+  email_subject?: string;
   // 匯率資訊
   exchange_rate_source?: string;
   rate_source?: string;
@@ -67,10 +68,10 @@ export default function NetSuiteCollectionEmailPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [emailContent, setEmailContent] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedSubject, setCopiedSubject] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showRawJson, setShowRawJson] = useState(false);
-  const [rawJson, setRawJson] = useState<string>('');
   const [tableImageUrl, setTableImageUrl] = useState<string>('');
   const tableRef = useRef<HTMLDivElement>(null);
 
@@ -92,6 +93,7 @@ export default function NetSuiteCollectionEmailPage() {
       setError(null);
       setOcrResult(null);
       setEmailContent('');
+      setEmailSubject('');
     }
   };
 
@@ -134,9 +136,6 @@ export default function NetSuiteCollectionEmailPage() {
       
       console.log('前端接收到的資料:', result);
       
-      // 儲存原始 JSON 用於調試
-      setRawJson(JSON.stringify(result, null, 2));
-      
       // 標準化欄位名稱（支援新格式、扁平化和巢狀格式）
       const normalizedResult: OCRResult = {
         ...result,
@@ -162,6 +161,11 @@ export default function NetSuiteCollectionEmailPage() {
       console.log('解析後的結果:', normalizedResult);
       
       setOcrResult(normalizedResult);
+      
+      // 設定 Email 主旨
+      if (normalizedResult.email_subject) {
+        setEmailSubject(normalizedResult.email_subject);
+      }
       
       // 等待一下讓表格渲染完成，然後生成 Email 內容
       setTimeout(async () => {
@@ -269,7 +273,7 @@ export default function NetSuiteCollectionEmailPage() {
   </tr>
   <tr>
     <td style="border: 1px solid #000; padding: 8px; background-color: #e8f5e9; font-weight: 500; text-align: center;">80%美金貨款</td>
-    <td colspan="1" rowspan="1" style="border: 1px solid #000; padding: 8px; background-color: #ffffff; color: #d32f2f; font-weight: 700; text-align: right;">USD ${formatNumber(paymentAmountUSD, 2)}</td>
+    <td colspan="1" rowspan="1" style="border: 1px solid #000; padding: 8px; background-color: #ffffff; color: #d32f2f; font-weight: 700; text-align: right;"><strong>USD ${formatNumber(paymentAmountUSD, 2)}</strong></td>
     <td style="border: 1px solid #000; padding: 8px; background-color: #ffffff; text-align: center;">B金額</td>
     <td style="border: 1px solid #000; padding: 8px; background-color: #ffffff; font-weight: 500; text-align: right;">NTD ${formatInteger(paymentAmountNTD)}</td>
   </tr>
@@ -277,7 +281,7 @@ export default function NetSuiteCollectionEmailPage() {
     <td style="border: 1px solid #000; padding: 8px; background-color: #e8f5e9; font-weight: 500; text-align: center;">20%外人稅</td>
     <td style="border: 1px solid #000; padding: 8px; background-color: #ffffff; text-align: right;">USD ${formatNumber(taxAmountUSD, 2)}</td>
     <td style="border: 1px solid #000; padding: 8px; background-color: #ffffff; text-align: center;">C金額</td>
-    <td colspan="1" rowspan="1" style="border: 1px solid #000; padding: 8px; background-color: #ffffff; color: #d32f2f; font-weight: 700; text-align: right;">NTD ${formatInteger(taxAmountNTD)}</td>
+    <td colspan="1" rowspan="1" style="border: 1px solid #000; padding: 8px; background-color: #ffffff; color: #d32f2f; font-weight: 700; text-align: right;"><strong>NTD ${formatInteger(taxAmountNTD)}</strong></td>
   </tr>
 </table>`;
 
@@ -288,8 +292,17 @@ export default function NetSuiteCollectionEmailPage() {
     // 生成 Email 內容（根據用戶提供的樣板格式）
     const email = `<div style="font-family: 'Microsoft YaHei', '微軟雅黑', 'PingFang TC', 'Helvetica Neue', Arial, sans-serif; line-height: 1.8; color: #333333; max-width: 800px; margin: 0 auto; padding: 20px;">
   <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 1.8;">
-    請參考附件為這次 NetSuite 訂閱費用的發票（Invoice #${invoiceNumber}），總金額為 USD ${formatNumber(totalAmountUSD, 2)}，付款截止日為 ${dueDate}。此金額包含 20% 的非居民扣繳稅款（外人稅）。因 NetSuite 交易皆由 Oracle 新加坡分公司負責，為方便作業，懇請協助將此筆款項分兩筆支付：<strong>80% 的貨款金額（USD ${formatNumber(paymentAmountUSD, 2)}）</strong>：請透過電匯方式支付至 Oracle 新加坡銀行帳戶。匯款資訊已詳列於發票底部。<strong>20% 的非居民扣繳稅款（USD ${formatNumber(taxAmountUSD, 2)}，約合台幣 ${formatInteger(taxAmountNTD)}）</strong>：請逕行繳納至當地的稅務機關。
+    請參考附件為這次 NetSuite 訂閱費用的發票 <strong style="font-weight: bold;">Invoice#${invoiceNumber}</strong>，總金額為 <strong style="font-weight: bold;">USD${formatNumber(totalAmountUSD, 2)}</strong>，付款截止日為${dueDate}。此金額包含20%的非居民扣繳稅款（外人稅）。因 NetSuite 交易皆由 Oracle 新加坡分公司負責，為方便作業，懇請協助將此筆款項分兩筆支付：
   </p>
+  
+  <ol style="margin: 0 0 20px 0; padding-left: 20px; font-size: 16px; line-height: 1.8;">
+    <li style="margin-bottom: 10px;">
+      80%的貨款金額（USD${formatNumber(paymentAmountUSD, 2)}）：請透過電匯方式支付至 Oracle 新加坡銀行帳戶。匯款資訊已詳列於發票底部。
+    </li>
+    <li style="margin-bottom: 10px;">
+      20%的非居民扣繳稅款（USD${formatNumber(taxAmountUSD, 2)}，約合台幣${formatInteger(taxAmountNTD)}）：請逕行繳納至當地的稅務機關。
+    </li>
+  </ol>
   
   <div style="margin: 20px 0;">
     ${tableHTML}
@@ -316,6 +329,19 @@ export default function NetSuiteCollectionEmailPage() {
     setEmailContent(email);
     if (tableImage) {
       setTableImageUrl(tableImage);
+    }
+  };
+
+  // 複製 Email 主旨
+  const handleCopySubject = async () => {
+    if (!emailSubject) return;
+
+    try {
+      await navigator.clipboard.writeText(emailSubject);
+      setCopiedSubject(true);
+      setTimeout(() => setCopiedSubject(false), 2000);
+    } catch (err) {
+      setError('複製主旨失敗，請手動複製');
     }
   };
 
@@ -406,217 +432,73 @@ export default function NetSuiteCollectionEmailPage() {
             )}
           </div>
 
-          {/* OCR 結果顯示 */}
-          {ocrResult && (
+          {/* 隱藏的表格（用於生成圖片） */}
+          {ocrResult && ((ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd) || ocrResult.amountDue) && (
+            <div 
+              ref={tableRef} 
+              className="absolute left-[-9999px] w-[800px]"
+              style={{ position: 'absolute', left: '-9999px', width: '800px' }}
+            >
+              <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#ffffff', border: '1px solid #000', fontSize: '14px', fontFamily: 'Arial, sans-serif' }}>
+                <tbody>
+                  <tr>
+                    <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#f0f0f0' }}>參考匯率</th>
+                    <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#f0f0f0' }}>{formatNumber(ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE, 2)}</th>
+                    <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#f0f0f0' }}>帳單金額</th>
+                    <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#e3f2fd' }}>申報金額</th>
+                  </tr>
+                  <tr>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#e8f5e9', fontSize: '14px', fontWeight: '500', textAlign: 'center' }}>總金額</td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'right' }}>USD {formatNumber(ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0, 2)}</td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'center' }}>A金額</td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', fontWeight: '500', textAlign: 'right' }}>NTD {formatInteger(ocrResult.amount_a_twd || ocrResult.amount_a_total_twd || ocrResult.financials?.amount_a_twd || ocrResult.financials?.amount_a_total_twd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#e8f5e9', fontSize: '14px', fontWeight: '500', textAlign: 'center' }}>80%美金貨款</td>
+                    <td colSpan={1} rowSpan={1} style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', color: '#d32f2f', fontWeight: '700', fontSize: '14px', textAlign: 'right' }}><strong>USD {formatNumber(ocrResult.split_80_usd || ocrResult.split_80_percent_usd || ocrResult.financials?.split_80_percent_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.8, 2)}</strong></td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'center' }}>B金額</td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', fontWeight: '500', textAlign: 'right' }}>NTD {formatInteger(ocrResult.amount_b_twd || ocrResult.amount_b_80_percent_twd || ocrResult.financials?.amount_b_twd || ocrResult.financials?.amount_b_80_percent_twd || (ocrResult.split_80_usd || ocrResult.split_80_percent_usd || ocrResult.financials?.split_80_percent_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.8) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#e8f5e9', fontSize: '14px', fontWeight: '500', textAlign: 'center' }}>20%外人稅</td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'right' }}>USD {formatNumber(ocrResult.split_20_usd || ocrResult.split_20_percent_tax_usd || ocrResult.financials?.split_20_percent_tax_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.2, 2)}</td>
+                    <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'center' }}>C金額</td>
+                    <td colSpan={1} rowSpan={1} style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', color: '#d32f2f', fontWeight: '700', fontSize: '14px', textAlign: 'right' }}><strong>NTD {formatInteger(ocrResult.amount_c_twd || ocrResult.amount_c_20_percent_twd || ocrResult.financials?.amount_c_twd || ocrResult.financials?.amount_c_20_percent_twd || (ocrResult.split_20_usd || ocrResult.split_20_percent_tax_usd || ocrResult.financials?.split_20_percent_tax_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.2) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Email 主旨區域 */}
+          {emailSubject && (
             <Card className="dark:bg-gray-800 dark:border-gray-700">
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg dark:text-white">OCR 解析結果</CardTitle>
+                  <CardTitle className="text-lg dark:text-white">Email 主旨</CardTitle>
                   <Button
-                    onClick={() => setShowRawJson(!showRawJson)}
-                    variant="ghost"
+                    onClick={handleCopySubject}
+                    variant="outline"
                     size="sm"
                     className="gap-2"
                   >
-                    {showRawJson ? (
+                    {copiedSubject ? (
                       <>
-                        <EyeOff className="h-4 w-4" />
-                        隱藏原始 JSON
+                        <Check className="h-4 w-4" />
+                        已複製
                       </>
                     ) : (
                       <>
-                        <Eye className="h-4 w-4" />
-                        顯示原始 JSON
+                        <Copy className="h-4 w-4" />
+                        複製主旨
                       </>
                     )}
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                {/* 原始 JSON 顯示（用於調試） */}
-                {showRawJson && rawJson && (
-                  <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700">
-                    <pre className="text-xs overflow-x-auto text-gray-800 dark:text-gray-200">
-                      {rawJson}
-                    </pre>
-                  </div>
-                )}
-
-                {/* 驗證資訊顯示 */}
-                {(ocrResult.validation_errors?.length || ocrResult.validation_warnings?.length) && (
-                  <div className="mb-4 space-y-2">
-                    {ocrResult.validation_errors && ocrResult.validation_errors.length > 0 && (
-                      <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                        <div className="flex items-center gap-2 mb-2">
-                          <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                          <span className="text-sm font-medium text-red-700 dark:text-red-400">驗證錯誤</span>
-                        </div>
-                        <ul className="list-disc list-inside text-xs text-red-600 dark:text-red-400 space-y-1">
-                          {ocrResult.validation_errors.map((error, index) => (
-                            <li key={index}>{error}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {ocrResult.validation_warnings && ocrResult.validation_warnings.length > 0 && (
-                      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
-                        <div className="flex items-center gap-2 mb-2">
-                          <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-                          <span className="text-sm font-medium text-yellow-700 dark:text-yellow-400">驗證警告</span>
-                        </div>
-                        <ul className="list-disc list-inside text-xs text-yellow-600 dark:text-yellow-400 space-y-1">
-                          {ocrResult.validation_warnings.map((warning, index) => (
-                            <li key={index}>{warning}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {ocrResult.quality_grade && (
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
-                        品質等級: <span className="font-medium">{ocrResult.quality_grade}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                <div className="space-y-2 text-sm">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <span className="text-gray-600 dark:text-gray-400">Invoice 編號:</span>
-                      <span className="ml-2 font-medium dark:text-white">
-                        {ocrResult.invoiceNumber || ocrResult.invoice_number || '未識別'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600 dark:text-gray-400">總金額:</span>
-                      <span className="ml-2 font-medium dark:text-white">
-                        USD {(ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0).toFixed(2)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600 dark:text-gray-400">付款截止日:</span>
-                      <span className="ml-2 font-medium dark:text-white">
-                        {ocrResult.dueDate || ocrResult.due_date || '未識別'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600 dark:text-gray-400">匯率:</span>
-                      <span className="ml-2 font-medium dark:text-white">
-                        {ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE}
-                        {(ocrResult.rate_source || ocrResult.exchange_rate_source) && (
-                          <span className="ml-1 text-xs text-gray-500">
-                            ({ocrResult.rate_source || ocrResult.exchange_rate_source})
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {/* 隱藏的表格（用於生成圖片） */}
-                  {((ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd) || ocrResult.amountDue) && (
-                    <div 
-                      ref={tableRef} 
-                      className="absolute left-[-9999px] w-[800px]"
-                      style={{ position: 'absolute', left: '-9999px', width: '800px' }}
-                    >
-                      <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: '#ffffff', border: '1px solid #000', fontSize: '14px', fontFamily: 'Arial, sans-serif' }}>
-                        <tbody>
-                          <tr>
-                            <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#f0f0f0' }}>參考匯率</th>
-                            <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#f0f0f0' }}>{formatNumber(ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE, 2)}</th>
-                            <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#f0f0f0' }}>帳單金額</th>
-                            <th style={{ border: '1px solid #000', padding: '10px', textAlign: 'center', fontWeight: '600', fontSize: '14px', backgroundColor: '#e3f2fd' }}>申報金額</th>
-                          </tr>
-                          <tr>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#e8f5e9', fontSize: '14px', fontWeight: '500', textAlign: 'center' }}>總金額</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'right' }}>USD {formatNumber(ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0, 2)}</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'center' }}>A金額</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', fontWeight: '500', textAlign: 'right' }}>NTD {formatInteger(ocrResult.amount_a_twd || ocrResult.amount_a_total_twd || ocrResult.financials?.amount_a_twd || ocrResult.financials?.amount_a_total_twd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}</td>
-                          </tr>
-                          <tr>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#e8f5e9', fontSize: '14px', fontWeight: '500', textAlign: 'center' }}>80%美金貨款</td>
-                            <td colSpan={1} rowSpan={1} style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', color: '#d32f2f', fontWeight: '700', fontSize: '14px', textAlign: 'right' }}>USD {formatNumber(ocrResult.split_80_usd || ocrResult.split_80_percent_usd || ocrResult.financials?.split_80_percent_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.8, 2)}</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'center' }}>B金額</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', fontWeight: '500', textAlign: 'right' }}>NTD {formatInteger(ocrResult.amount_b_twd || ocrResult.amount_b_80_percent_twd || ocrResult.financials?.amount_b_twd || ocrResult.financials?.amount_b_80_percent_twd || (ocrResult.split_80_usd || ocrResult.split_80_percent_usd || ocrResult.financials?.split_80_percent_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.8) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}</td>
-                          </tr>
-                          <tr>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#e8f5e9', fontSize: '14px', fontWeight: '500', textAlign: 'center' }}>20%外人稅</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'right' }}>USD {formatNumber(ocrResult.split_20_usd || ocrResult.split_20_percent_tax_usd || ocrResult.financials?.split_20_percent_tax_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.2, 2)}</td>
-                            <td style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', fontSize: '14px', textAlign: 'center' }}>C金額</td>
-                            <td colSpan={1} rowSpan={1} style={{ border: '1px solid #000', padding: '10px', backgroundColor: '#ffffff', color: '#d32f2f', fontWeight: '700', fontSize: '14px', textAlign: 'right' }}>NTD {formatInteger(ocrResult.amount_c_twd || ocrResult.amount_c_20_percent_twd || ocrResult.financials?.amount_c_twd || ocrResult.financials?.amount_c_20_percent_twd || (ocrResult.split_20_usd || ocrResult.split_20_percent_tax_usd || ocrResult.financials?.split_20_percent_tax_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.2) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* 顯示用的表格 */}
-                  {((ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd) || ocrResult.amountDue) && (
-                    <div className="mt-4 overflow-x-auto">
-                      <table className="w-full border-collapse text-sm">
-                        <thead>
-                          <tr className="bg-gray-100 dark:bg-gray-700">
-                            <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-left font-medium dark:text-white">
-                              參考匯率
-                            </th>
-                            <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-left font-medium dark:text-white">
-                              {formatNumber(ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE, 2)}
-                            </th>
-                            <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-center font-medium dark:text-white">
-                              帳單金額
-                            </th>
-                            <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-center font-medium dark:text-white bg-blue-100 dark:bg-blue-900/30">
-                              申報金額
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 bg-green-50 dark:bg-green-900/20 dark:text-white text-center">
-                              總金額
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-right">
-                              USD {formatNumber(ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0, 2)}
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-center">
-                              A金額
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-right">
-                              NTD {formatInteger(ocrResult.amount_a_twd || ocrResult.amount_a_total_twd || ocrResult.financials?.amount_a_twd || ocrResult.financials?.amount_a_total_twd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 bg-green-50 dark:bg-green-900/20 dark:text-white text-center">
-                              80%美金貨款
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-red-600 dark:text-red-400 font-bold text-right">
-                              USD {formatNumber(ocrResult.split_80_usd || ocrResult.split_80_percent_usd || ocrResult.financials?.split_80_percent_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.8, 2)}
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-center">
-                              B金額
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-right">
-                              NTD {formatInteger(ocrResult.amount_b_twd || ocrResult.amount_b_80_percent_twd || ocrResult.financials?.amount_b_twd || ocrResult.financials?.amount_b_80_percent_twd || (ocrResult.split_80_usd || ocrResult.split_80_percent_usd || ocrResult.financials?.split_80_percent_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.8) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 bg-green-50 dark:bg-green-900/20 dark:text-white text-center">
-                              20%外人稅
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-right">
-                              USD {formatNumber(ocrResult.split_20_usd || ocrResult.split_20_percent_tax_usd || ocrResult.financials?.split_20_percent_tax_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.2, 2)}
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 dark:text-white text-center">
-                              C金額
-                            </td>
-                            <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-red-600 dark:text-red-400 font-bold text-right">
-                              NTD {formatInteger(ocrResult.amount_c_twd || ocrResult.amount_c_20_percent_twd || ocrResult.financials?.amount_c_twd || ocrResult.financials?.amount_c_20_percent_twd || (ocrResult.split_20_usd || ocrResult.split_20_percent_tax_usd || ocrResult.financials?.split_20_percent_tax_usd || (ocrResult.total_usd || ocrResult.total_amount_usd || ocrResult.financials?.total_amount_usd || ocrResult.amountDue || 0) * 0.2) * (ocrResult.exchangeRate || ocrResult.exchange_rate || DEFAULT_EXCHANGE_RATE))}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700">
+                  <p className="text-base font-medium dark:text-white">{emailSubject}</p>
                 </div>
               </CardContent>
             </Card>
@@ -627,7 +509,7 @@ export default function NetSuiteCollectionEmailPage() {
             <Card className="dark:bg-gray-800 dark:border-gray-700">
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg dark:text-white">生成的 Email 內容</CardTitle>
+                  <CardTitle className="text-lg dark:text-white">生成的 Email 內容預覽</CardTitle>
                   <Button
                     onClick={handleCopy}
                     variant="outline"
@@ -642,19 +524,21 @@ export default function NetSuiteCollectionEmailPage() {
                     ) : (
                       <>
                         <Copy className="h-4 w-4" />
-                        複製內容
+                        複製 HTML
                       </>
                     )}
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                <RichTextEditor
-                  value={emailContent}
-                  onChange={setEmailContent}
-                  placeholder="Email 內容將顯示在這裡..."
-                  className="min-h-[300px]"
-                />
+                <div className="border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden bg-white">
+                  <iframe
+                    srcDoc={emailContent}
+                    className="w-full min-h-[600px] border-0"
+                    title="Email 預覽"
+                    sandbox="allow-same-origin"
+                  />
+                </div>
               </CardContent>
             </Card>
           )}

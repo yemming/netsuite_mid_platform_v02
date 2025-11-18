@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/utils/supabase/server';
 
 /**
  * NetSuite 催款 Email OCR 處理 API
@@ -26,13 +27,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 從資料庫取得 N8N Webhook URL
+    const supabase = await createClient();
+    const { data: setting, error: settingError } = await supabase
+      .from('system_settings')
+      .select('setting_value')
+      .eq('setting_key', 'n8n_webhook_url_ocr')
+      .single();
+
+    if (settingError || !setting?.setting_value) {
+      console.error('取得 N8N Webhook URL 設定錯誤:', settingError);
+      return NextResponse.json(
+        { error: '無法取得 N8N Webhook URL 設定，請檢查系統設定' },
+        { status: 500 }
+      );
+    }
+
+    const webhookUrl = setting.setting_value;
+
     // 建立新的 FormData 轉發到 webhook
     // 統一使用 'data' 作為欄位名稱（Edit 和 Online 模式都使用 data）
     const webhookFormData = new FormData();
     webhookFormData.append('data', file);
-
-    // 呼叫 webhook (online 模式)
-    const webhookUrl = 'https://yemming-n8n.zeabur.app/webhook/4a25ebee-21a3-46bf-a2db-7f704424b317';
     
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -102,6 +118,8 @@ export async function POST(request: NextRequest) {
             amount_b_80_percent_twd: firstItem.amount_b_twd,
             split_20_percent_tax_usd: firstItem.split_20_usd,
             amount_c_20_percent_twd: firstItem.amount_c_twd,
+            // Email 主旨
+            email_subject: firstItem.email_subject || '',
           };
         } else {
           // 如果沒有 success 欄位，直接使用
