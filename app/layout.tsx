@@ -11,12 +11,16 @@ export const metadata: Metadata = {
   description: 'NetSuite AI Solution Platform with Next.js, Supabase, N8n Integration',
   icons: {
     icon: [
-      { url: '/icon.png', type: 'image/png' },
-      { url: '/OC_Logo_Green.png', type: 'image/png', sizes: '192x192' },
-      { url: '/OC_Logo_Green.png', type: 'image/png', sizes: '512x512' },
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.png', type: 'image/png', sizes: '512x512' },
+      { url: '/icon-192x192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon-512x512.png', type: 'image/png', sizes: '512x512' },
     ],
     apple: [
-      { url: '/apple-icon.png', type: 'image/png' },
+      { url: '/apple-icon.png', type: 'image/png', sizes: '180x180' },
+    ],
+    shortcut: [
+      { url: '/favicon.ico' },
     ],
   },
   manifest: '/manifest.json',

@@ -20,7 +20,6 @@ import {
   Share2,
   Bell,
   Send,
-  HelpCircle,
   Receipt,
   Cog,
   Store,
@@ -890,9 +889,13 @@ export default function Sidebar() {
             <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
               <Share2 className="w-4 h-4 text-foreground" />
             </button>
-            <button className="p-1.5 rounded-md hover:bg-accent transition-colors">
-              <HelpCircle className="w-4 h-4 text-foreground" />
-            </button>
+            <Link 
+              href="/dashboard/dev/runtime-logs"
+              className="p-1.5 rounded-md hover:bg-accent transition-colors"
+              title="Runtime Logs"
+            >
+              <Terminal className="w-4 h-4 text-foreground" />
+            </Link>
           </div>
         </div>
       </div>
