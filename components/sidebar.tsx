@@ -86,6 +86,16 @@ const mainNavigation: MenuItem[] = [
     href: '/dashboard/nextjs-toolbox/netsuite-collection-email',
     icon: Mail,
   },
+  {
+    name: 'NetSuite Invoice 列印',
+    href: '/dashboard/nextjs-toolbox/netsuite-invoice-print',
+    icon: FileText,
+  },
+  {
+    name: 'PDF 樣式編輯',
+    href: '/dashboard/nextjs-toolbox/pdf-template-editor',
+    icon: FileText,
+  },
 ]
 
 const privatePages: MenuItem[] = [
