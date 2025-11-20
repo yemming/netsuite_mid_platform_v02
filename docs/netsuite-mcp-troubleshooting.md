@@ -271,3 +271,5 @@ cat ~/.cursor/mcp.json | jq '.'
 
 
 
+
+

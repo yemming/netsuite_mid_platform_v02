@@ -21,6 +21,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import jsPDF from 'jspdf';
 import { Designer } from '@pdfme/ui';
 import { generate } from '@pdfme/generator';
@@ -53,7 +60,6 @@ export default function PDFTemplateDesignPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
-  const [previewWidth, setPreviewWidth] = useState(500); // 預覽區域寬度（px）
   
   // Designer 區域寬度狀態
   const [designerWidth, setDesignerWidth] = useState<number | null>(null); // null 表示使用 flex-1（自動調整）
@@ -464,9 +470,8 @@ export default function PDFTemplateDesignPage() {
     }
   };
   
-  // 關閉預覽
+  // 關閉預覽時清理 PDF URL
   const handleClosePreview = () => {
-    setPreviewOpen(false);
     if (previewPdfUrl) {
       URL.revokeObjectURL(previewPdfUrl);
       setPreviewPdfUrl(null);
@@ -544,6 +549,32 @@ export default function PDFTemplateDesignPage() {
               placeholder="例如：標準樣式"
               className="h-8"
             />
+          </div>
+          
+          {/* 選擇 Invoice */}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="invoiceSelect" className="text-sm text-muted-foreground whitespace-nowrap">
+              選擇 Invoice：
+            </Label>
+            <Select
+              value={selectedInvoiceId}
+              onValueChange={setSelectedInvoiceId}
+              disabled={isLoadingInvoices || isLoadingInvoiceData}
+            >
+              <SelectTrigger className="w-[300px] h-8">
+                <SelectValue placeholder={isLoadingInvoices ? '載入中...' : '選擇 Invoice'} />
+              </SelectTrigger>
+              <SelectContent>
+                {invoices.map((invoice) => (
+                  <SelectItem key={invoice.id} value={invoice.id}>
+                    {invoice.tranid} - {invoice.entity}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {isLoadingInvoiceData && (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            )}
           </div>
         </div>
         
@@ -832,34 +863,6 @@ export default function PDFTemplateDesignPage() {
           >
           {fieldListOpen && (
             <>
-              {/* Invoice 選擇器 */}
-              <div className="px-3 py-2 border-b border-border">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="invoiceSelect" className="text-xs text-muted-foreground whitespace-nowrap">
-                    選擇 Invoice：
-                  </Label>
-                  <Select
-                    value={selectedInvoiceId}
-                    onValueChange={setSelectedInvoiceId}
-                    disabled={isLoadingInvoices || isLoadingInvoiceData}
-                  >
-                    <SelectTrigger className="h-7 text-xs flex-1">
-                      <SelectValue placeholder={isLoadingInvoices ? '載入中...' : '選擇 Invoice'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {invoices.map((invoice) => (
-                        <SelectItem key={invoice.id} value={invoice.id}>
-                          {invoice.tranid} - {invoice.entity}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {isLoadingInvoiceData && (
-                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-              
               {/* Field List 標題 */}
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                 <h3 className="font-semibold text-xs">NetSuite Field List</h3>
@@ -1058,83 +1061,6 @@ export default function PDFTemplateDesignPage() {
             </>
           )}
           </div>
-          
-          {/* 預覽區域（在 Field List 右側，可調整寬度） */}
-          {previewOpen && (
-            <div 
-              className="bg-card flex flex-col relative"
-              style={{ width: `${previewWidth}px` }}
-            >
-              {/* 拖拽調整寬度的把手（在左側邊緣，更寬更容易抓取） */}
-              <div
-                className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors z-20 group"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  
-                  // 添加拖拽中的樣式
-                  document.body.style.cursor = 'ew-resize';
-                  document.body.style.userSelect = 'none';
-                  
-                  const startX = e.clientX;
-                  const startWidth = previewWidth;
-                  
-                  const handleMouseMove = (moveEvent: MouseEvent) => {
-                    moveEvent.preventDefault();
-                    const deltaX = moveEvent.clientX - startX; // 向右拖拽增加寬度，向左減少
-                    const newWidth = Math.max(300, Math.min(1200, startWidth + deltaX));
-                    setPreviewWidth(newWidth);
-                  };
-                  
-                  const handleMouseUp = () => {
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
-                    document.body.style.cursor = '';
-                    document.body.style.userSelect = '';
-                  };
-                  
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
-                }}
-                title="拖拽調整預覽區域寬度"
-              >
-                {/* 視覺指示器 */}
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 bg-border opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-              
-              {/* 預覽標題列 */}
-              <div className="flex items-center justify-between px-4 py-2">
-                <h3 className="font-semibold text-sm">PDF 預覽</h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">拖拽左側邊緣調整寬度</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    onClick={handleClosePreview}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-              
-              {/* PDF 預覽內容 */}
-              <div className="flex-1 overflow-hidden bg-gray-100 p-4">
-                {previewPdfUrl ? (
-                  <iframe
-                    src={previewPdfUrl}
-                    className="w-full h-full border border-border rounded"
-                    title="PDF 預覽"
-                  />
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    <span className="ml-2 text-sm text-muted-foreground">生成 PDF 中...</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
         
         {/* Field List 切換按鈕（當側邊欄關閉時顯示） */}
@@ -1151,6 +1077,41 @@ export default function PDFTemplateDesignPage() {
           </div>
         )}
       </div>
+      
+      {/* PDF 預覽 Dialog */}
+      <Dialog open={previewOpen} onOpenChange={(open) => {
+        setPreviewOpen(open);
+        if (!open) {
+          handleClosePreview();
+        }
+      }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>PDF 預覽</DialogTitle>
+            <DialogDescription>
+              預覽使用當前 Invoice 資料生成的 PDF
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden bg-gray-100 rounded-lg p-4 min-h-[500px]">
+            {isGeneratingPreview ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">生成 PDF 中...</span>
+              </div>
+            ) : previewPdfUrl ? (
+              <iframe
+                src={previewPdfUrl}
+                className="w-full h-full border border-border rounded"
+                title="PDF 預覽"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-sm text-muted-foreground">沒有可預覽的 PDF</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
