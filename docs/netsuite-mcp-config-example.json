@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "ns-mcp-tools-direct": {
+      "url": "https://<你的帳戶ID>.suitetalk.api.netsuite.com/services/mcp/v1/all",
+      "headers": {
+        "Authorization": "Bearer <你的_BEARER_TOKEN>"
+      }
+    },
+    "ns-mcp-tools-remote": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://<你的帳戶ID>.suitetalk.api.netsuite.com/services/mcp/v1/all",
+        "--header",
+        "Authorization: Bearer <你的_BEARER_TOKEN>"
+      ]
+    }
+  }
+}
+
+
+
+

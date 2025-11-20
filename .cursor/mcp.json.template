@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ns-mcp-tools": {
+      "url": "https://<你的帳戶ID>.suitetalk.api.netsuite.com/services/mcp/v1/all",
+      "headers": {
+        "Authorization": "Bearer <你的_BEARER_TOKEN>"
+      }
+    }
+  }
+}
+
+
+
+

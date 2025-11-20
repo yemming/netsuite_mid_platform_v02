@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,11 +28,9 @@ import {
   Plus,
   Edit,
   Trash2,
-  Save,
   X,
   Eye,
   ArrowLeft,
-  Loader2,
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -136,41 +134,18 @@ export default function PDFTemplateEditorPage() {
   const router = useRouter();
   const [templates, setTemplates] = useState<PDFTemplate[]>(mockTemplates);
   const [selectedTemplate, setSelectedTemplate] = useState<PDFTemplate | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  // 表單狀態
-  const [formData, setFormData] = useState({
-    name: '',
-    key: '',
-    description: '',
-    htmlTemplate: '',
-  });
 
-  // 開啟新增對話框
+  // 開啟新增頁面
   const handleAdd = () => {
-    setSelectedTemplate(null);
-    setFormData({
-      name: '',
-      key: '',
-      description: '',
-      htmlTemplate: '',
-    });
-    setIsDialogOpen(true);
+    router.push('/dashboard/nextjs-toolbox/pdf-template-editor/design/new');
   };
 
-  // 開啟編輯對話框
+  // 開啟編輯頁面
   const handleEdit = (template: PDFTemplate) => {
-    setSelectedTemplate(template);
-    setFormData({
-      name: template.name,
-      key: template.key,
-      description: template.description || '',
-      htmlTemplate: template.htmlTemplate,
-    });
-    setIsDialogOpen(true);
+    router.push(`/dashboard/nextjs-toolbox/pdf-template-editor/design/${template.id}`);
   };
 
   // 刪除樣式
@@ -178,50 +153,6 @@ export default function PDFTemplateEditorPage() {
     if (confirm('確定要刪除此樣式嗎？')) {
       setTemplates(templates.filter((t) => t.id !== id));
     }
-  };
-
-  // 儲存樣式
-  const handleSave = () => {
-    if (!formData.name || !formData.key || !formData.htmlTemplate) {
-      alert('請填寫所有必填欄位');
-      return;
-    }
-
-    setIsSaving(true);
-    setTimeout(() => {
-      if (selectedTemplate) {
-        // 更新現有樣式
-        setTemplates(
-          templates.map((t) =>
-            t.id === selectedTemplate.id
-              ? {
-                  ...t,
-                  name: formData.name,
-                  key: formData.key,
-                  description: formData.description,
-                  htmlTemplate: formData.htmlTemplate,
-                  updatedAt: new Date().toISOString(),
-                }
-              : t
-          )
-        );
-      } else {
-        // 新增樣式
-        const newTemplate: PDFTemplate = {
-          id: Date.now().toString(),
-          name: formData.name,
-          key: formData.key,
-          description: formData.description,
-          htmlTemplate: formData.htmlTemplate,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        setTemplates([...templates, newTemplate]);
-      }
-      setIsSaving(false);
-      setIsDialogOpen(false);
-      setSelectedTemplate(null);
-    }, 500);
   };
 
   // 預覽樣式
@@ -408,109 +339,6 @@ export default function PDFTemplateEditorPage() {
         </CardContent>
       </Card>
 
-      {/* 新增/編輯對話框 */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedTemplate ? '編輯樣式' : '新增樣式'}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedTemplate
-                ? '修改樣式模板的內容'
-                : '建立一個新的 PDF 樣式模板'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">樣式名稱 *</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
-                placeholder="例如：標準樣式"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="key">樣式 Key *</Label>
-              <Input
-                id="key"
-                value={formData.key}
-                onChange={(e) =>
-                  setFormData({ ...formData, key: e.target.value })
-                }
-                placeholder="例如：standard（英文小寫，用於程式識別）"
-                disabled={!!selectedTemplate}
-              />
-              <p className="text-sm text-gray-500">
-                樣式 Key 一旦建立後無法修改
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">描述</Label>
-              <Input
-                id="description"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                placeholder="簡短描述此樣式的特色"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="htmlTemplate">HTML 模板 *</Label>
-              <Textarea
-                id="htmlTemplate"
-                value={formData.htmlTemplate}
-                onChange={(e) =>
-                  setFormData({ ...formData, htmlTemplate: e.target.value })
-                }
-                placeholder="輸入 HTML 模板內容，可使用 {{變數名}} 作為佔位符"
-                className="font-mono text-sm"
-                rows={20}
-              />
-              <div className="text-sm text-gray-500 space-y-1">
-                <p>可用的變數：</p>
-                <ul className="list-disc list-inside ml-2 space-y-1">
-                  <li><code>{'{{tranid}}'}</code> - 發票編號</li>
-                  <li><code>{'{{entity}}'}</code> - 客戶名稱</li>
-                  <li><code>{'{{trandate}}'}</code> - 交易日期</li>
-                  <li><code>{'{{duedate}}'}</code> - 到期日</li>
-                  <li><code>{'{{status}}'}</code> - 狀態</li>
-                  <li><code>{'{{statusColor}}'}</code> - 狀態顏色</li>
-                  <li><code>{'{{amount}}'}</code> - 總金額</li>
-                  <li><code>{'{{generatedAt}}'}</code> - 生成時間</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsDialogOpen(false)}
-              disabled={isSaving}
-            >
-              <X className="h-4 w-4 mr-2" />
-              取消
-            </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  儲存中...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  儲存
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* 預覽對話框 */}
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>

@@ -123,6 +123,43 @@
   display: none;  /* Chrome, Safari and Opera */
 }
 
+/* Overlay scrollbar (不佔據空間) */
+.scrollbar-overlay {
+  overflow: overlay; /* 讓 scrollbar 浮在內容上方，不佔據空間 */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* macOS 系統原生 overlay scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;  /* Firefox */
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.3);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.5);
+}
+
 /* Colorful Header Bar Animation */
 @keyframes headerShimmer {
   0%, 100% {
@@ -191,4 +228,34 @@ input[type="password"]:-webkit-autofill:active {
   display: block;
   touch-action: none;
 }
+
+/* PDFME Designer 自訂樣式已移除，使用預設值 */
+/* [class*="pdfme"] [class*="sidebar"],
+[class*="pdfme"] aside,
+div[class*="sidebar"] {
+  width: 176px !important;
+  min-width: 176px !important;
+  max-width: 176px !important;
+}
+
+[class*="pdfme"] [class*="sidebar"] *,
+[class*="pdfme"] aside * {
+  font-size: 0.75rem !important;
+}
+
+[class*="pdfme"] [class*="sidebar"] button,
+[class*="pdfme"] [class*="sidebar"] span,
+[class*="pdfme"] [class*="sidebar"] div,
+[class*="pdfme"] aside button,
+[class*="pdfme"] aside span,
+[class*="pdfme"] aside div {
+  font-size: 0.75rem !important;
+  padding: 0.375rem !important;
+}
+
+[class*="pdfme"] [class*="sidebar"] svg,
+[class*="pdfme"] aside svg {
+  width: 0.75rem !important;
+  height: 0.75rem !important;
+} */
 

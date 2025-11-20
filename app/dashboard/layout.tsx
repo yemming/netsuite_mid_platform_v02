@@ -175,7 +175,7 @@ export default function DashboardLayout({
         </nav>
 
         {/* Page Content - Scrollable with transparent overlay effect */}
-        <main className="flex-1 overflow-y-auto bg-white dark:bg-background relative">
+        <main className="flex-1 overflow-y-auto bg-white dark:bg-background relative scrollbar-thin">
           <div className="relative z-10">
             {children}
           </div>

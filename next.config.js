@@ -20,6 +20,16 @@ const nextConfig = {
   }),
   // 確保靜態資源路徑正確
   distDir: '.next',
+  // PDFME 支援配置
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+      path: false,
+      os: false,
+    };
+    return config;
+  },
 }
 
 module.exports = nextConfig
