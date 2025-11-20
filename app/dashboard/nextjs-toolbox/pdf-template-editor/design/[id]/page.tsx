@@ -447,7 +447,7 @@ export default function PDFTemplateDesignPage() {
       console.log('📊 準備的 sampleData:', sampleData);
 
       // 使用 generate 函數生成 PDF
-      const pdf = await generate({ template, inputs: sampleData, plugins });
+      const pdf = await generate({ template, inputs: sampleData, plugins: plugins as any });
 
       // 創建 PDF URL
       const blob = new Blob([pdf.buffer], { type: 'application/pdf' });
